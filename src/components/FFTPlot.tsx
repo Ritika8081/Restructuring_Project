@@ -145,48 +145,40 @@ const FFTPlotRealtime: React.FC<FFTPlotRealtimeProps> = ({
   }, [bufferSize, enableSimulation]);
 
   return (
-    <div 
-      style={{ 
-        width, 
-        height, 
-        borderRadius: '8px', 
+    <div
+      style={{
+        width,
+        height,
+        borderRadius: '8px',
         overflow: 'hidden',
         backgroundColor: backgroundColor,
-        position: 'relative'
+        position: 'relative',
+        display: 'flex',
+        flexDirection: 'column',
       }}
     >
-      {/* Card Header */}
-      <div className="absolute top-2 left-2 right-2 z-20 pointer-events-none">
-        <h3 className="text-white font-semibold text-sm">FFT Spectrum</h3>
-      </div>
-      
-      <canvas 
-        ref={canvasRef} 
-        style={{ 
+      <canvas
+        ref={canvasRef}
+        style={{
           display: 'block',
           backgroundColor: 'transparent',
-          marginTop: '24px' // Add space for header
-        }} 
+          flex: 1,
+          position: 'relative',
+          zIndex: 1
+        }}
       />
-      
-      {/* Frequency axis labels */}
-      <div className="absolute bottom-2 left-4 right-4 flex justify-between text-xs text-white/60 pointer-events-none">
-        <span>0 Hz</span>
-        <span>Fs/4</span>
-        <span>Fs/2</span>
-      </div>
-      
-      {/* Grid overlay */}
+
+      {/* Any overlay elements should have lower z-index than header */}
       {showGrid && (
-        <div 
+        <div
           className="absolute inset-0 pointer-events-none"
           style={{
             backgroundImage: `
-              linear-gradient(rgba(255, 255, 255, 0.1) 1px, transparent 1px),
-              linear-gradient(90deg, rgba(255, 255, 255, 0.1) 1px, transparent 1px)
+                linear-gradient(rgba(255, 255, 255, 0.1) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255, 255, 255, 0.1) 1px, transparent 1px)
             `,
-            backgroundSize: `${width/8}px ${height/6}px`,
-            marginTop: '24px' // Add space for header
+            backgroundSize: '50px 40px',
+            zIndex: 5 // Lower than header controls
           }}
         />
       )}

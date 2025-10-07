@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useMemo } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { WebglPlot, WebglLine, ColorRGBA } from 'webgl-plot';
 
 interface SpiderPlotData {
     label: string;
@@ -22,6 +23,9 @@ interface SpiderPlotProps {
     showLabels?: boolean;
     showValues?: boolean;
     className?: string;
+    backgroundColor?: string;
+    webLevels?: number;
+    animated?: boolean;
 }
 
 const SpiderPlot: React.FC<SpiderPlotProps> = ({
@@ -29,37 +33,85 @@ const SpiderPlot: React.FC<SpiderPlotProps> = ({
     width = 300,
     height = 300,
     colors = {
-        web: 'rgba(148, 163, 184, 0.7)', // Increased opacity from 0.3 to 0.7
-        fill: 'rgba(16, 185, 129, 0.2)',
-        stroke: 'rgba(16, 185, 129, 0.8)',
-        points: 'rgba(16, 185, 129, 1)',
-        labels: 'rgba(255, 255, 255, 0.9)'
+        web: '#94A3B8',
+        fill: '#10B981',
+        stroke: '#10B981',
+        points: '#10B981',
+        labels: '#374151'
     },
     showLabels = true,
     showValues = true,
-    className = ''
+    className = '',
+    backgroundColor = 'rgba(0, 0, 0, 0.02)',
+    webLevels = 5,
+    animated = true
 }) => {
-    // Use fixed sample data if no data is provided
-    const defaultData: SpiderPlotData[] = [
-        { label: 'Speed', value: 85, maxValue: 100 },
-        { label: 'Power', value: 92, maxValue: 100 },
-        { label: 'Skill', value: 78, maxValue: 100 },
-        { label: 'Defense', value: 65, maxValue: 100 },
-        { label: 'Health', value: 88, maxValue: 100 },
-        { label: 'Magic', value: 45, maxValue: 100 },
-    ];
+    const canvasRef = useRef<HTMLCanvasElement>(null);
+    const plotRef = useRef<WebglPlot | null>(null);
+    const animationRef = useRef<number | null>(null);
+    const dataUpdateRef = useRef<NodeJS.Timeout | null>(null);
+    const [isInitialized, setIsInitialized] = useState(false);
+    const [animatedData, setAnimatedData] = useState<SpiderPlotData[]>([]);
 
-    const plotData = useMemo(() => {
-        const actualData = data && data.length > 0 ? data : defaultData;
-        
-        if (!actualData || actualData.length === 0) return null;
+    // Generate random animated data
+    const generateRandomData = (): SpiderPlotData[] => {
+        const labels = ['Speed', 'Power', 'Accuracy', 'Defense', 'Agility', 'Intelligence'];
+        return labels.map((label, index) => ({
+            label,
+            value: Math.round(30 + Math.random() * 70), // Random values between 30-100
+            maxValue: 100
+        }));
+    };
 
-        const center = { x: width / 2, y: height / 2 };
-        const radius = Math.min(width, height) / 2 - (showLabels ? 40 : 20); // Adjust for labels
-        const angleStep = (2 * Math.PI) / actualData.length;
+    // Initialize data
+    useEffect(() => {
+        if (data && data.length > 0) {
+            setAnimatedData(data);
+        } else {
+            setAnimatedData(generateRandomData());
+        }
+    }, [data]);
 
-        // Calculate points for the data polygon
-        const dataPoints = actualData.map((item, index) => {
+    // Update data periodically for animation
+    useEffect(() => {
+        if (!animated) return;
+
+        const updateData = () => {
+            setAnimatedData(prev => prev.map(item => ({
+                ...item,
+                value: Math.max(10, Math.min(100, 
+                    item.value + (Math.random() - 0.5) * 10 // Smooth random changes
+                ))
+            })));
+        };
+
+        dataUpdateRef.current = setInterval(updateData, 2000); // Update every 2 seconds
+
+        return () => {
+            if (dataUpdateRef.current) {
+                clearInterval(dataUpdateRef.current);
+            }
+        };
+    }, [animated]);
+
+    const plotData = animatedData.length > 0 ? animatedData : generateRandomData();
+
+    // Convert hex color to ColorRGBA
+    const hexToColorRGBA = (hex: string, alpha: number = 1.0): ColorRGBA => {
+        const cleanHex = hex.replace('#', '');
+        const r = parseInt(cleanHex.substring(0, 2), 16) / 255;
+        const g = parseInt(cleanHex.substring(2, 4), 16) / 255;
+        const b = parseInt(cleanHex.substring(4, 6), 16) / 255;
+        return new ColorRGBA(r, g, b, alpha);
+    };
+
+    // Calculate spider plot coordinates
+    const calculateSpiderPoints = () => {
+        const center = { x: 0, y: 0 }; // WebGL coordinates (-1 to 1)
+        const radius = 0.6; // 60% of the canvas for better fit
+        const angleStep = (2 * Math.PI) / plotData.length;
+
+        return plotData.map((item, index) => {
             const angle = index * angleStep - Math.PI / 2; // Start from top
             const maxVal = item.maxValue || 100;
             const normalizedValue = Math.min(item.value / maxVal, 1);
@@ -68,187 +120,279 @@ const SpiderPlot: React.FC<SpiderPlotProps> = ({
             return {
                 x: center.x + pointRadius * Math.cos(angle),
                 y: center.y + pointRadius * Math.sin(angle),
-                labelX: center.x + (radius + 25) * Math.cos(angle),
-                labelY: center.y + (radius + 25) * Math.sin(angle),
+                labelX: center.x + (radius + 0.25) * Math.cos(angle),
+                labelY: center.y + (radius + 0.25) * Math.sin(angle),
                 angle,
-                value: item.value,
+                value: Math.round(item.value),
                 label: item.label,
-                normalizedValue
+                normalizedValue,
+                axisEndX: center.x + radius * Math.cos(angle),
+                axisEndY: center.y + radius * Math.sin(angle)
             };
         });
+    };
 
-        // Create web grid points (concentric polygons) - Increased to 5 levels for better visibility
-        const webLevels = 5;
-        const webPolygons = Array.from({ length: webLevels }, (_, level) => {
-            const levelRadius = radius * ((level + 1) / webLevels);
-            return actualData.map((_, index) => {
-                const angle = index * angleStep - Math.PI / 2;
-                return {
-                    x: center.x + levelRadius * Math.cos(angle),
-                    y: center.y + levelRadius * Math.sin(angle)
-                };
+    useEffect(() => {
+        if (!canvasRef.current || plotData.length === 0) return;
+
+        const canvas = canvasRef.current;
+        const devicePixelRatio = window.devicePixelRatio || 1;
+
+        // Set canvas size
+        canvas.width = width * devicePixelRatio;
+        canvas.height = height * devicePixelRatio;
+        canvas.style.width = `${width}px`;
+        canvas.style.height = `${height}px`;
+
+        try {
+            const plot = new WebglPlot(canvas);
+            plotRef.current = plot;
+
+            const spiderPoints = calculateSpiderPoints();
+            const webColor = hexToColorRGBA(colors.web, 0.4);
+            const dataColor = hexToColorRGBA(colors.stroke, 1.0);
+            const fillColor = hexToColorRGBA(colors.fill, 0.25);
+
+            // Clear any existing lines
+            plot.removeAllLines();
+
+            // 1. Draw web grid (concentric polygons)
+            for (let level = 1; level <= webLevels; level++) {
+                const levelRadius = 0.6 * (level / webLevels);
+                const webLine = new WebglLine(webColor, plotData.length + 1);
+                
+                plotData.forEach((_, index) => {
+                    const angle = index * (2 * Math.PI / plotData.length) - Math.PI / 2;
+                    const x = levelRadius * Math.cos(angle);
+                    const y = levelRadius * Math.sin(angle);
+                    webLine.setY(index, y);
+                    webLine.setX(index, x);
+                });
+                
+                // Close the polygon
+                const firstAngle = -Math.PI / 2;
+                webLine.setY(plotData.length, levelRadius * Math.sin(firstAngle));
+                webLine.setX(plotData.length, levelRadius * Math.cos(firstAngle));
+                
+                plot.addLine(webLine);
+            }
+
+            // 2. Draw axis lines
+            spiderPoints.forEach((point) => {
+                const axisLine = new WebglLine(webColor, 2);
+                axisLine.setY(0, 0); // Center
+                axisLine.setX(0, 0);
+                axisLine.setY(1, point.axisEndY);
+                axisLine.setX(1, point.axisEndX);
+                plot.addLine(axisLine);
             });
-        });
 
-        // Create axis lines
-        const axisLines = actualData.map((_, index) => {
+            // 3. Draw filled area using triangles from center
+            const centerColor = hexToColorRGBA(colors.fill, 0.15);
+            for (let i = 0; i < spiderPoints.length; i++) {
+                const nextIndex = (i + 1) % spiderPoints.length;
+                const triangleFill = new WebglLine(centerColor, 3);
+                
+                // Triangle: center -> current point -> next point
+                triangleFill.setY(0, 0); // Center
+                triangleFill.setX(0, 0);
+                triangleFill.setY(1, spiderPoints[i].y);
+                triangleFill.setX(1, spiderPoints[i].x);
+                triangleFill.setY(2, spiderPoints[nextIndex].y);
+                triangleFill.setX(2, spiderPoints[nextIndex].x);
+                
+                plot.addLine(triangleFill);
+            }
+
+            // 4. Draw data polygon outline
+            const dataOutline = new WebglLine(dataColor, spiderPoints.length + 1);
+            dataOutline.lineSpaceX(-1, 2 / spiderPoints.length);
+            
+            spiderPoints.forEach((point, index) => {
+                dataOutline.setY(index, point.y);
+                dataOutline.setX(index, point.x);
+            });
+            // Close the polygon
+            dataOutline.setY(spiderPoints.length, spiderPoints[0].y);
+            dataOutline.setX(spiderPoints.length, spiderPoints[0].x);
+            plot.addLine(dataOutline);
+
+            // 5. Draw data points
+            const pointColor = hexToColorRGBA(colors.points, 1.0);
+            spiderPoints.forEach((point) => {
+                // Create a square point (simpler than circle)
+                const pointLine = new WebglLine(pointColor, 5);
+                const pointSize = 0.025;
+                
+                // Square points
+                pointLine.setY(0, point.y - pointSize);
+                pointLine.setX(0, point.x - pointSize);
+                pointLine.setY(1, point.y + pointSize);
+                pointLine.setX(1, point.x - pointSize);
+                pointLine.setY(2, point.y + pointSize);
+                pointLine.setX(2, point.x + pointSize);
+                pointLine.setY(3, point.y - pointSize);
+                pointLine.setX(3, point.x + pointSize);
+                pointLine.setY(4, point.y - pointSize);
+                pointLine.setX(4, point.x - pointSize);
+                
+                plot.addLine(pointLine);
+            });
+
+            setIsInitialized(true);
+
+            // Animation loop
+            const render = () => {
+                if (plotRef.current) {
+                    plotRef.current.clear();
+                    plotRef.current.update();
+                    plotRef.current.draw();
+                }
+                animationRef.current = requestAnimationFrame(render);
+            };
+
+            render();
+
+        } catch (error) {
+            console.error('WebGL Spider Plot initialization failed:', error);
+        }
+
+        return () => {
+            if (animationRef.current) {
+                cancelAnimationFrame(animationRef.current);
+            }
+            if (plotRef.current) {
+                plotRef.current.removeAllLines();
+            }
+        };
+    }, [width, height, plotData, colors, webLevels]);
+
+    // Calculate label positions for HTML overlay
+    const getLabelPositions = () => {
+        if (!isInitialized) return [];
+        
+        const centerX = width / 2;
+        const centerY = height / 2;
+        const radius = Math.min(width, height) * 0.32; // Adjusted for better positioning
+        const angleStep = (2 * Math.PI) / plotData.length;
+
+        return plotData.map((item, index) => {
             const angle = index * angleStep - Math.PI / 2;
+            const labelRadius = radius + 25;
+            
             return {
-                x1: center.x,
-                y1: center.y,
-                x2: center.x + radius * Math.cos(angle),
-                y2: center.y + radius * Math.sin(angle)
+                x: centerX + labelRadius * Math.cos(angle),
+                y: centerY + labelRadius * Math.sin(angle),
+                value: Math.round(item.value),
+                label: item.label
             };
         });
+    };
 
-        return {
-            center,
-            radius,
-            dataPoints,
-            webPolygons,
-            axisLines,
-            data: actualData
-        };
-    }, [data, width, height, showLabels]);
-
-    if (!plotData) {
-        return (
-            <div className={`flex items-center justify-center ${className}`} style={{ width, height }}>
-                <div className="text-white/50 text-sm">No data available</div>
-            </div>
-        );
-    }
-
-    const { dataPoints, webPolygons, axisLines } = plotData;
-
-    // Create SVG path for the data polygon
-    const dataPolygonPath = dataPoints.reduce((path, point, index) => {
-        const command = index === 0 ? 'M' : 'L';
-        return `${path} ${command} ${point.x} ${point.y}`;
-    }, '') + ' Z';
-
-    // Determine font sizes based on plot size
-    const labelFontSize = Math.max(8, Math.min(12, width / 25));
-    const valueFontSize = Math.max(6, Math.min(10, width / 30));
+    const labelPositions = getLabelPositions();
 
     return (
-        <div className={`relative ${className}`}>
-            <svg width={width} height={height} className="overflow-visible">
-                <defs>
-                    {/* Gradient for the data area */}
-                    <radialGradient id={`spiderGradient-${width}-${height}`} cx="50%" cy="50%" r="50%">
-                        <stop offset="0%" stopColor={colors.fill} stopOpacity="0.6" />
-                        <stop offset="100%" stopColor={colors.fill} stopOpacity="0.1" />
-                    </radialGradient>
-                    
-                    {/* Glow effect for data points */}
-                    <filter id={`pointGlow-${width}-${height}`}>
-                        <feGaussianBlur stdDeviation="2" result="coloredBlur"/>
-                        <feMerge> 
-                            <feMergeNode in="coloredBlur"/>
-                            <feMergeNode in="SourceGraphic"/>
-                        </feMerge>
-                    </filter>
-                </defs>
-
-                {/* Draw web grid - Enhanced visibility */}
-                {webPolygons.map((polygon, level) => (
-                    <polygon
-                        key={`web-${level}`}
-                        points={polygon.map(p => `${p.x},${p.y}`).join(' ')}
-                        fill="none"
-                        stroke={colors.web}
-                        strokeWidth="1.5" // Increased from 1 to 1.5
-                        opacity={1.0 - (level * 0.12)} // Adjusted opacity range for better visibility
-                        strokeDasharray={level === 0 ? "none" : level % 2 === 0 ? "4,2" : "none"} // Add dashed lines for variety
-                    />
-                ))}
-
-                {/* Draw axis lines - Enhanced visibility */}
-                {axisLines.map((line, index) => (
-                    <line
-                        key={`axis-${index}`}
-                        x1={line.x1}
-                        y1={line.y1}
-                        x2={line.x2}
-                        y2={line.y2}
-                        stroke={colors.web}
-                        strokeWidth="1.5" // Increased from 1 to 1.5
-                        opacity="0.8" // Increased from 0.6 to 0.8
-                    />
-                ))}
-
-                {/* Draw data polygon */}
-                <path
-                    d={dataPolygonPath}
-                    fill={`url(#spiderGradient-${width}-${height})`}
-                    stroke={colors.stroke}
-                    strokeWidth="2.5" // Slightly increased for better visibility
-                    strokeLinejoin="round"
-                />
-
-                {/* Draw data points */}
-                {dataPoints.map((point, index) => (
-                    <circle
-                        key={`point-${index}`}
-                        cx={point.x}
-                        cy={point.y}
-                        r={Math.max(3, Math.min(5, width / 50))} // Slightly larger points
-                        fill={colors.points}
-                        stroke="white"
-                        strokeWidth="2" // Increased stroke width
-                        filter={`url(#pointGlow-${width}-${height})`}
-                        className="drop-shadow-md" // Enhanced shadow
-                    />
-                ))}
-
-                {/* Draw labels */}
-                {showLabels && dataPoints.map((point, index) => (
-                    <g key={`label-${index}`}>
-                        <text
-                            x={point.labelX}
-                            y={point.labelY}
-                            textAnchor="middle"
-                            dominantBaseline="middle"
-                            fill={colors.labels}
-                            fontSize={labelFontSize}
-                            fontWeight="600" // Increased from 500 for better readability
-                            className="select-none"
+        <div 
+            className={`relative ${className}`} 
+            style={{ width, height, backgroundColor, borderRadius: '8px', overflow: 'hidden' }}
+        >
+            <canvas
+                ref={canvasRef}
+                style={{
+                    display: 'block',
+                    width: '100%',
+                    height: '100%',
+                    backgroundColor: 'transparent'
+                }}
+            />
+            
+            {/* HTML Labels Overlay */}
+            {showLabels && isInitialized && (
+                <div className="absolute inset-0 pointer-events-none">
+                    {labelPositions.map((pos, index) => (
+                        <div
+                            key={`label-${index}`}
+                            className="absolute transform -translate-x-1/2 -translate-y-1/2 text-center"
+                            style={{ 
+                                left: pos.x, 
+                                top: pos.y,
+                                color: colors.labels,
+                                fontSize: Math.max(10, Math.min(14, width / 20)),
+                                fontWeight: '600'
+                            }}
                         >
-                            {point.label}
-                        </text>
-                        {showValues && (
-                            <text
-                                x={point.labelX}
-                                y={point.labelY + labelFontSize + 2}
-                                textAnchor="middle"
-                                dominantBaseline="middle"
-                                fill={colors.labels}
-                                fontSize={valueFontSize}
-                                opacity="0.9" // Increased from 0.8
-                                className="select-none"
-                            >
-                                {point.value}
-                            </text>
-                        )}
-                    </g>
-                ))}
-            </svg>
+                            <div>{pos.label}</div>
+                            {showValues && (
+                                <div 
+                                    className="text-xs opacity-80 font-bold"
+                                    style={{ 
+                                        fontSize: Math.max(8, Math.min(12, width / 25)),
+                                        color: colors.points
+                                    }}
+                                >
+                                    {pos.value}
+                                </div>
+                            )}
+                        </div>
+                    ))}
+                </div>
+            )}
+
+            {/* Animation indicator */}
+            {animated && (
+                <div className="absolute top-2 right-2 w-2 h-2 bg-green-400 rounded-full animate-pulse opacity-70" />
+            )}
         </div>
     );
 };
 
-// Updated example with better demonstration
+// Example component for testing
 export const SpiderPlotExample: React.FC = () => {
     return (
-        <div className="p-4 bg-slate-800 rounded-lg">
-            <h3 className="text-white font-semibold mb-4">Performance Metrics</h3>
-            <SpiderPlot 
-                width={300}
-                height={300}
-                showLabels={true}
-                showValues={true}
-            />
+        <div className="p-8 bg-slate-100 rounded-lg">
+            <h3 className="text-gray-800 font-semibold mb-4">Animated WebGL Spider Plot</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* Static version */}
+                <div>
+                    <h4 className="text-sm text-gray-600 mb-2">Static Version</h4>
+                    <SpiderPlot 
+                        width={300}
+                        height={300}
+                        showLabels={true}
+                        showValues={true}
+                        backgroundColor="rgba(255, 255, 255, 0.8)"
+                        animated={false}
+                        data={[
+                            { label: 'Speed', value: 85, maxValue: 100 },
+                            { label: 'Power', value: 92, maxValue: 100 },
+                            { label: 'Accuracy', value: 78, maxValue: 100 },
+                            { label: 'Defense', value: 65, maxValue: 100 },
+                            { label: 'Agility', value: 88, maxValue: 100 },
+                            { label: 'Intelligence', value: 73, maxValue: 100 },
+                        ]}
+                    />
+                </div>
+
+                {/* Animated version */}
+                <div>
+                    <h4 className="text-sm text-gray-600 mb-2">Animated Version (Random Values)</h4>
+                    <SpiderPlot 
+                        width={300}
+                        height={300}
+                        showLabels={true}
+                        showValues={true}
+                        backgroundColor="rgba(59, 130, 246, 0.05)"
+                        animated={true}
+                        colors={{
+                            web: '#E5E7EB',
+                            fill: '#3B82F6',
+                            stroke: '#1D4ED8',
+                            points: '#1E40AF',
+                            labels: '#374151'
+                        }}
+                    />
+                </div>
+            </div>
         </div>
     );
 };
