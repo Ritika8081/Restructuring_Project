@@ -34,11 +34,11 @@ const DEFAULT_COLORS = [
 
 const BasicGraphRealtime: React.FC<BasicGraphRealtimeProps> = ({
   channels: initialChannels = [
-    { id: 'ch1', name: 'CH 1', color: '#10B981', visible: true }, // Changed from 'Channel 1' to 'CH 1'
+    { id: 'ch1', name: 'CH 1', color: '#10B981', visible: true },
   ],
   bufferSize = 512,
   width = 400,
-  height = 200, // Total available height
+  height = 200,
   showGrid = true,
   backgroundColor = 'rgba(0, 0, 0, 0.1)',
   showLegend = false,
@@ -60,34 +60,27 @@ const BasicGraphRealtime: React.FC<BasicGraphRealtimeProps> = ({
     setChannels(initialChannels);
   }, [initialChannels]);
 
-  // Calculate dynamic channel height based on available space (accounting for borders)
+  // Calculate dynamic channel height
   const visibleChannels = channels.filter(ch => ch.visible);
   const channelCount = Math.max(1, visibleChannels.length);
-  const borderSpace = Math.max(0, channelCount - 1); // 1px border between channels
+  const borderSpace = Math.max(0, channelCount - 1);
   const availableHeightForChannels = Math.max(0, height - borderSpace);
   const dynamicChannelHeight = Math.floor(availableHeightForChannels / channelCount);
 
-  // Calculate exact minimum required dimensions based on channel count (reduced padding)
-  const minChannelHeight = 60; // Reduced minimum height per channel for tighter fit
-  const minTotalWidth = 180; // Reduced minimum width for tighter fit
+  // Calculate minimum required dimensions
+  const minChannelHeight = 60;
+  const minTotalWidth = 180;
   const requiredCanvasHeight = (channelCount * minChannelHeight) + borderSpace;
   const requiredCanvasWidth = minTotalWidth;
   
-  // These are the actual pixel requirements for the canvas (including all containment margins)
-  const requiredHeight = requiredCanvasHeight;
-  const requiredWidth = requiredCanvasWidth;
-
-  // Check if current size is adequate
-  const isTooSmall = width < requiredWidth || height < requiredHeight;
-  
-  // Request resize if current dimensions are too small (immediate and silent)
+  // Request resize if current dimensions are too small
   useEffect(() => {
-    if (onSizeRequest && isTooSmall) {
-      onSizeRequest(requiredWidth, requiredHeight);
+    if (onSizeRequest && (width < requiredCanvasWidth || height < requiredCanvasHeight)) {
+      onSizeRequest(requiredCanvasWidth, requiredCanvasHeight);
     }
-  }, [width, height, requiredWidth, requiredHeight, onSizeRequest, isTooSmall]);
+  }, [width, height, requiredCanvasWidth, requiredCanvasHeight, onSizeRequest]);
 
-  // Update parent when channels change - only call when channels actually change
+  // Update parent when channels change
   const channelsStringRef = useRef<string>('');
   useEffect(() => {
     const channelsString = JSON.stringify(channels.map(ch => ({ id: ch.id, visible: ch.visible })));
@@ -141,9 +134,9 @@ const BasicGraphRealtime: React.FC<BasicGraphRealtimeProps> = ({
 
       const devicePixelRatio = window.devicePixelRatio || 1;
       
-      // Update canvas size with dynamic height (no borders)
-      const canvasWidth = Math.max(0, (width || 400)); // Use full width
-      const canvasHeight = Math.max(0, dynamicChannelHeight); // Use full height
+      // Update canvas size with dynamic height
+      const canvasWidth = Math.max(0, (width || 400));
+      const canvasHeight = Math.max(0, dynamicChannelHeight);
       canvas.width = canvasWidth * devicePixelRatio;
       canvas.height = canvasHeight * devicePixelRatio;
       canvas.style.width = `100%`;
@@ -162,10 +155,10 @@ const BasicGraphRealtime: React.FC<BasicGraphRealtimeProps> = ({
         const colorObj = hexToColorRGBA(channel.color);
         const line = new WebglLine(colorObj, bufferSize);
 
-        // Set line properties for individual canvas (extremely conservative scaling)
+        // Set line properties for individual canvas
         line.lineSpaceX(-1, 2 / bufferSize);
-        line.scaleY = 0.4; // Use only 40% of canvas height for absolute safety
-        line.offsetY = 0;  // Center in this canvas
+        line.scaleY = 0.4;
+        line.offsetY = 0;
 
         // Initialize with zeros or restore existing data
         const existingBuffer = dataBuffers.current.get(channel.id);
@@ -239,7 +232,7 @@ const BasicGraphRealtime: React.FC<BasicGraphRealtimeProps> = ({
       channels.forEach((channel, index) => {
         if (!channel.visible) return;
 
-        // Generate different signals for each channel (clamped to safe range)
+        // Generate different signals for each channel
         let signal = 0;
         switch (index % 6) {
           case 0:
@@ -262,7 +255,6 @@ const BasicGraphRealtime: React.FC<BasicGraphRealtimeProps> = ({
             break;
         }
         
-        // Clamp signal to safe range to prevent overflow
         signal = Math.max(-0.9, Math.min(0.9, signal));
 
         pushData(channel.id, signal);
@@ -277,18 +269,12 @@ const BasicGraphRealtime: React.FC<BasicGraphRealtimeProps> = ({
       style={{
         width: width || 400,
         height: height,
-        maxWidth: width || 400,
-        maxHeight: height,
         borderRadius: '4px',
         overflow: 'hidden',
         backgroundColor: backgroundColor,
         position: 'relative',
         display: 'flex',
-        flexDirection: 'column',
-        boxSizing: 'border-box',
-        contain: 'layout style paint',
-        isolation: 'isolate',
-        margin: '0 auto'
+        flexDirection: 'column'
       }}
       className="overflow-hidden"
     >
@@ -297,12 +283,7 @@ const BasicGraphRealtime: React.FC<BasicGraphRealtimeProps> = ({
         {visibleChannels.map((channel, index) => (
           <div key={channel.id} className="relative overflow-hidden flex items-center justify-center" style={{ 
             height: dynamicChannelHeight,
-            maxHeight: dynamicChannelHeight,
-            minHeight: dynamicChannelHeight,
-            flex: 'none',
-            boxSizing: 'border-box',
-            contain: 'layout style paint',
-            isolation: 'isolate'
+            flex: 'none'
           }}>
             {/* Channel Label */}
             <div className="absolute top-1 left-2 z-10 text-xs font-medium px-2 py-1 bg-white bg-opacity-90 rounded shadow-sm"
@@ -310,7 +291,7 @@ const BasicGraphRealtime: React.FC<BasicGraphRealtimeProps> = ({
               {channel.name}
             </div>
             
-            {/* Channel Canvas with bottom border only */}
+            {/* Channel Canvas */}
             <canvas
               ref={(el) => {
                 if (el) {
@@ -324,11 +305,7 @@ const BasicGraphRealtime: React.FC<BasicGraphRealtimeProps> = ({
                 backgroundColor: 'transparent',
                 width: '100%',
                 height: '100%',
-                maxWidth: '100%',
-                maxHeight: '100%',
-                borderBottom: index < visibleChannels.length - 1 ? '1px solid rgba(0,0,0,0.1)' : 'none',
-                overflow: 'hidden',
-                boxSizing: 'border-box'
+                borderBottom: index < visibleChannels.length - 1 ? '1px solid rgba(0,0,0,0.1)' : 'none'
               }}
             />
 

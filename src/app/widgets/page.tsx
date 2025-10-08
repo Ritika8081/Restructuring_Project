@@ -55,19 +55,9 @@ const Widgets: React.FC = () => {
         show: false, message: '', onConfirm: () => { }, onCancel: () => { }
     });
     
-    // Screen dimensions state for client-side rendering
-    const [screenDimensions, setScreenDimensions] = useState<{ width: number; height: number } | null>(null);
-
     // Refs for performance
     const widgetsRef = useRef<Widget[]>(widgets);
     const gridSettingsRef = useRef<GridSettings>(gridSettings);
-
-    // Track client-side mount to prevent hydration mismatch
-    const [isMounted, setIsMounted] = useState(false);
-
-    useEffect(() => {
-        setIsMounted(true);
-    }, []);
 
     // Keep refs synchronized with state
     useEffect(() => {
@@ -89,21 +79,13 @@ const Widgets: React.FC = () => {
             const screenWidth = window.innerWidth;
             const screenHeight = window.innerHeight;
             
-            // Update screen dimensions state for UI display
-            setScreenDimensions({ width: screenWidth, height: screenHeight });
             
-            // Use full viewport for grid - overlays can float on top
             const usableWidth = screenWidth;
             const usableHeight = screenHeight;
+            const cellSize = 50;
             
-            // Use fixed cell size for consistent widget sizing
-            const cellSize = 50; // Fixed 50px cells for good usability
-            
-            // Calculate grid size to fill entire viewport
             const targetCols = Math.floor(usableWidth / cellSize);
             const targetRows = Math.floor(usableHeight / cellSize);
-            
-            // Update grid settings to use full viewport
             setGridSettings(prev => ({
                 ...prev,
                 cols: targetCols,
@@ -146,21 +128,18 @@ const Widgets: React.FC = () => {
         let x = 0, y = 0;
         let found = false;
         
-        // Set default dimensions based on widget type
         let defaultWidth = 2;
         let defaultHeight = 2;
         let minWidth = 1;
         let minHeight = 1;
         
-        // Special sizing for basic signal widgets (larger minimum for absolute containment)
         if (type === 'basic') {
-            defaultWidth = 5;  // Larger width for absolute signal containment (250px)
-            defaultHeight = 4; // Larger height for 1 channel with containment (200px)
-            minWidth = 5;      // Enforce larger minimum width
-            minHeight = 4;     // Enforce larger minimum height
+            defaultWidth = 5;
+            defaultHeight = 4;
+            minWidth = 5;
+            minHeight = 4;
         }
 
-        // Find first available space within the grid (grid is sized to fit screen exactly)
         for (let row = 0; row < gridSettings.rows - defaultHeight + 1 && !found; row++) {
             for (let col = 0; col < gridSettings.cols - defaultWidth + 1 && !found; col++) {
                 if (!checkCollisionAtPosition(widgets, 'temp', col, row, defaultWidth, defaultHeight, gridSettings)) {
@@ -245,13 +224,10 @@ const Widgets: React.FC = () => {
                 newHeight = Math.max(activeWidget.minHeight, newHeight);
             }
 
-            // Constrain to grid boundaries (grid now fits screen exactly, so no additional screen checks needed)
             if (dragState.dragType === 'move') {
-                // Ensure widget stays within grid bounds
                 newX = Math.max(0, Math.min(newX, gridSettings.cols - newWidth));
                 newY = Math.max(0, Math.min(newY, gridSettings.rows - newHeight));
             } else if (dragState.dragType === 'resize') {
-                // For resize, ensure the widget doesn't grow beyond grid bounds
                 const maxAllowedWidth = gridSettings.cols - newX;
                 const maxAllowedHeight = gridSettings.rows - newY;
                 
@@ -317,7 +293,6 @@ const Widgets: React.FC = () => {
                     </pattern>
                 </defs>
                 
-                {/* Grid pattern fills entire viewport */}
                 <rect width="100%" height="100%" fill="url(#grid)" />
             </svg>
         );
@@ -325,19 +300,8 @@ const Widgets: React.FC = () => {
 
     return (
         <div className="h-screen w-screen bg-gray-100 relative overflow-hidden">
-
-            {/* Main Grid Container - Fits exactly to screen */}
-            <div
-                className="absolute inset-0"
-                style={{ 
-                    width: '100vw', 
-                    height: '100vh'
-                }}
-            >
-                {/* Grid Lines */}
+            <div className="absolute inset-0" style={{ width: '100vw', height: '100vh' }}>
                 {GridLines}
-
-                {/* Widget Collection */}
                 {widgets.map((widget) => (
                     <DraggableWidget
                         key={widget.id}
@@ -352,7 +316,6 @@ const Widgets: React.FC = () => {
                 ))}
             </div>
 
-            {/* Widget Management Palette */}
             <WidgetPalette 
                 onAddWidget={handleAddWidget}
                 widgets={widgets}
@@ -362,7 +325,6 @@ const Widgets: React.FC = () => {
                 showConfirm={showConfirm}
             />
 
-            {/* User Feedback Components */}
             <Toast toast={toast} onClose={hideToast} />
             <ConfirmModal confirm={confirm} />
         </div>

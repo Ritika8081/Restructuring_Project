@@ -59,26 +59,21 @@ const DraggableWidget = React.memo<{
      */
     const handleSizeRequest = useCallback((minWidth: number, minHeight: number) => {
         if (widget.type === 'basic' && onUpdateWidget) {
-            // Calculate exact grid units needed based on canvas requirements
-            const totalWidthNeeded = minWidth + 12; // Canvas + all margins/borders/padding
-            const totalHeightNeeded = minHeight + 60; // Canvas + header + margins/borders/padding
+            const totalWidthNeeded = minWidth + 12;
+            const totalHeightNeeded = minHeight + 60;
             
             const requiredGridWidth = Math.ceil(totalWidthNeeded / gridSettings.cellWidth);
             const requiredGridHeight = Math.ceil(totalHeightNeeded / gridSettings.cellHeight);
             
-            // Ensure minimum requirements (5×4 for 1 channel with containment, more for multiple channels)
             const minGridWidth = 5;
             const minGridHeight = 4;
             
             const newWidth = Math.max(widget.width, requiredGridWidth, minGridWidth);
             const newHeight = Math.max(widget.height, requiredGridHeight, minGridHeight);
             
-            // Only resize if current size is actually smaller than required
             if (widget.width < newWidth || widget.height < newHeight) {
-                // Check if new size would cause collision
-                const currentWidgets = widgets.filter(w => w.id !== widget.id);
                 const wouldCollide = checkCollisionAtPosition(
-                    currentWidgets, 
+                    widgets.filter(w => w.id !== widget.id), 
                     widget.id, 
                     widget.x, 
                     widget.y, 
@@ -102,21 +97,14 @@ const DraggableWidget = React.memo<{
 
     /**
      * Handle channel configuration changes (for signal widgets)
-     * Triggers size recalculation when channel count changes
      */
     const handleChannelsChange = useCallback((channels: any[]) => {
-        // Only update if channels actually changed to prevent infinite loops
         const currentChannelIds = widgetChannels.map(ch => ch.id).sort().join(',');
         const newChannelIds = channels.map(ch => ch.id).sort().join(',');
         
-        if (currentChannelIds === newChannelIds) {
-            return; // No actual change, prevent unnecessary updates
+        if (currentChannelIds !== newChannelIds) {
+            setWidgetChannels(channels);
         }
-        
-        setWidgetChannels(channels);
-        
-        // Force size recalculation when channel count changes
-        // The BasicGraph component will automatically request resize if needed
     }, [widgetChannels]);
 
     /**
@@ -190,9 +178,9 @@ const DraggableWidget = React.memo<{
         return '';
     }, [widget.type, widgetChannels]);
 
-    // Calculate available space for widget content (reduced padding for tighter fit)
-    const availableWidth = widget.width * gridSettings.cellWidth - 4; // Minimal padding for tighter containment
-    const availableHeight = widget.height * gridSettings.cellHeight - 52; // Header + minimal padding
+    // Calculate available space for widget content
+    const availableWidth = widget.width * gridSettings.cellWidth - 4;
+    const availableHeight = widget.height * gridSettings.cellHeight - 52;
 
     return (
         <div
@@ -313,12 +301,7 @@ const DraggableWidget = React.memo<{
                             />
                         </div>
                     ) : widget.type === 'basic' ? (
-                        <div className="w-full h-full overflow-hidden flex items-center justify-center" style={{ 
-                            boxSizing: 'border-box',
-                            contain: 'strict',
-                            isolation: 'isolate',
-                            padding: '2px'
-                        }}>
+                        <div className="w-full h-full overflow-hidden flex items-center justify-center p-0.5">
                             <BasicGraphRealtime
                                 channels={widgetChannels}
                                 width={availableWidth - 4}

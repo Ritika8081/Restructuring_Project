@@ -151,7 +151,7 @@ const FFTPlotRealtime: React.FC<FFTPlotRealtimeProps> = ({
         height,
         borderRadius: '8px',
         overflow: 'hidden',
-        backgroundColor: backgroundColor,
+       
         position: 'relative',
         display: 'flex',
         flexDirection: 'column',
@@ -161,7 +161,6 @@ const FFTPlotRealtime: React.FC<FFTPlotRealtimeProps> = ({
         ref={canvasRef}
         style={{
           display: 'block',
-          backgroundColor: 'transparent',
           flex: 1,
           position: 'relative',
           zIndex: 1

@@ -157,47 +157,13 @@ const WidgetPalette: React.FC<WidgetPaletteProps> = ({
         );
     }, [widgets.length, onLoadLayout, showToast, showConfirm]);
 
-    // Check for widgets outside visible area and provide scroll functionality
-    const checkVisibleWidgets = useCallback(() => {
-        if (typeof window === 'undefined') return;
-        
-        const screenWidth = window.innerWidth;
-        const screenHeight = window.innerHeight;
-        const usableScreenWidth = screenWidth;
-        const usableScreenHeight = screenHeight;
-        const maxVisibleCols = Math.floor(usableScreenWidth / gridSettings.cellWidth);
-        const maxVisibleRows = Math.floor(usableScreenHeight / gridSettings.cellHeight);
-
-        const outsideWidgets = widgets.filter(widget => 
-            widget.x + widget.width > maxVisibleCols || 
-            widget.y + widget.height > maxVisibleRows ||
-            widget.x < 0 || widget.y < 0
-        );
-
-        if (outsideWidgets.length > 0) {
-            showToast(`${outsideWidgets.length} widgets are outside visible area`, 'info');
-            
-            // Scroll to the first outside widget
-            const firstWidget = outsideWidgets[0];
-            const scrollX = Math.max(0, (firstWidget.x * gridSettings.cellWidth) - screenWidth / 2);
-            const scrollY = Math.max(0, (firstWidget.y * gridSettings.cellHeight) - screenHeight / 2);
-            
-            window.scrollTo({
-                left: scrollX,
-                top: scrollY,
-                behavior: 'smooth'
-            });
-        } else {
-            showToast('All widgets are visible on screen', 'success');
-        }
-    }, [widgets, gridSettings, showToast]);
 
     return (
-        <div className="absolute top-4 right-4 z-50">
-            {/* Toggle Button */}
+        <div className="fixed top-4 right-4 z-50 flex flex-col items-end">
+            {/* Toggle Button - Always visible in top-right corner */}
             <button
                 onClick={() => setIsCollapsed(!isCollapsed)}
-                className="w-12 h-12 bg-white rounded-lg shadow-md border border-gray-200 mb-3 flex items-center justify-center text-gray-600 hover:text-gray-800 hover:shadow-lg transition-all duration-200"
+                className="w-12 h-12 bg-white rounded-lg shadow-md border border-gray-200 mb-3 flex items-center justify-center text-gray-600 hover:text-gray-800 hover:shadow-lg transition-all duration-200 z-60"
                 title={isCollapsed ? "Open Widget Library" : "Close Widget Library"}
             >
                 {isCollapsed ? (
@@ -214,7 +180,6 @@ const WidgetPalette: React.FC<WidgetPaletteProps> = ({
             {/* Main Panel */}
             <div className={`w-72 bg-white rounded-lg shadow-lg border border-gray-200 p-4 transition-all duration-300 transform
                            ${isCollapsed ? 'opacity-0 scale-95 pointer-events-none' : 'opacity-100 scale-100'}`}>
-
                 {/* Header */}
                 <div className="flex items-center justify-between mb-4">
                     <h3 className="text-lg font-semibold text-gray-800">Widgets</h3>
