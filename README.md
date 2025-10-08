@@ -1,22 +1,72 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 📊 Widget Dashboard - Modular System
 
-## Getting Started
+A modular, drag-and-drop widget dashboard built with **Next.js**, **TypeScript**, and **Tailwind CSS**. Originally a 1000+ line monolithic component, now restructured into 8 clean, maintainable modules.
 
-First, run the development server:
+## 🚀 Quick Start
 
 ```bash
+# Install dependencies
+npm install
+
+# Run development server
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+
+# Open in browser
+# http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## 📁 Project Structure
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```
+src/
+├── app/
+│   ├── docs/           # 📚 Complete project documentation
+│   ├── widgets/        # 🎛️ Main dashboard (300 lines)
+│   └── page.tsx        # 🏠 Homepage
+├── components/
+│   ├── ui/             # 🎨 Reusable UI components
+│   ├── DraggableWidget.tsx    # 🖱️ Individual widget (330 lines)
+│   ├── WidgetPalette.tsx      # 🎛️ System controls (260 lines)
+│   └── [charts].tsx    # 📊 Chart components
+├── types/
+│   └── widget.types.ts # 📝 TypeScript definitions (50 lines)
+└── utils/
+    └── widget.utils.ts # 🔧 Utilities (116 lines)
+```
+
+## ✨ Key Features
+
+- **🖱️ Drag & Drop**: Intuitive widget positioning with collision detection
+- **📈 Real-time Charts**: WebGL-powered Signal, FFT, Radar, and Bar charts  
+- **🔧 Modular Design**: Clean architecture with single-responsibility components
+- **💾 Import/Export**: Save and load dashboard layouts as JSON files
+- **🎯 Channel Management**: Up to 6 channels per signal widget
+- **📱 Responsive**: Adaptive UI that works on different screen sizes
+
+## 📚 Quick Reference
+
+Key files and their purposes:
+- `src/app/widgets/page.tsx` - Main dashboard component (~300 lines)
+- `src/components/DraggableWidget.tsx` - Individual widget logic (~330 lines)
+- `src/components/WidgetPalette.tsx` - System controls (~260 lines)
+- `src/types/widget.types.ts` - TypeScript definitions (~50 lines)
+- `src/utils/widget.utils.ts` - Utility functions (~116 lines)
+
+## 🛠️ Tech Stack
+
+- **Framework**: Next.js 14+ with App Router
+- **Language**: TypeScript with strict typing
+- **Styling**: Tailwind CSS
+- **Charts**: WebGL Plot for high-performance visualization
+- **State Management**: React Hooks (useState, useCallback, useMemo)
+
+## 🎯 Architecture Benefits
+
+✅ **Maintainable**: 8 focused files instead of 1 monolithic component  
+✅ **Testable**: Isolated components with clear interfaces  
+✅ **Performant**: Memoized components and efficient re-rendering  
+✅ **Extensible**: Easy to add new widget types and features  
+✅ **Type-Safe**: Full TypeScript coverage prevents runtime errors
 
 ## Learn More
 

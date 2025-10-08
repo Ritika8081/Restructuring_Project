@@ -63,9 +63,12 @@ const BasicGraphRealtime: React.FC<BasicGraphRealtimeProps> = ({
   const channelCount = Math.max(1, visibleChannels.length);
   const dynamicChannelHeight = Math.floor(height / channelCount);
 
-  // Update parent when channels change
+  // Update parent when channels change - only call when channels actually change
+  const channelsStringRef = useRef<string>('');
   useEffect(() => {
-    if (onChannelsChange) {
+    const channelsString = JSON.stringify(channels.map(ch => ({ id: ch.id, visible: ch.visible })));
+    if (onChannelsChange && channelsString !== channelsStringRef.current) {
+      channelsStringRef.current = channelsString;
       onChannelsChange(channels);
     }
   }, [channels, onChannelsChange]);

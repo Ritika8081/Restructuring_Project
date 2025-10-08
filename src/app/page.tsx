@@ -1,38 +1,21 @@
-'use client'
-
-import BleConnection from '@/connections/BleConnection'
-import SerialConnection from '@/connections/SerialConnection'
-import WifiConnection from '@/connections/WifiConnection'
+'use client';
+import { useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 
 export default function Home() {
+  const router = useRouter();
+
+  useEffect(() => {
+    router.push('/widgets');
+  }, [router]);
 
   return (
-    <main className="flex flex-col items-center justify-center min-h-screen p-8">
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold">Device Connection Hub</h1>
-        <p className="text-gray-600 mt-2">Choose your connection type</p>
+    <div className="flex items-center justify-center min-h-screen">
+      <div className="text-center">
+        <div className="text-4xl mb-4">📊</div>
+        <h1 className="text-2xl font-semibold text-gray-900 mb-2">Widget Dashboard</h1>
+        <p className="text-gray-600">Redirecting to dashboard...</p>
       </div>
-
-      <div className="flex gap-8">
-        <div className="flex flex-col items-center gap-4 p-6 border rounded-lg">
-          <h2 className="text-xl font-semibold">BLE</h2>
-          <BleConnection />
-
-        </div>
-
-        <div className="flex flex-col items-center gap-4 p-6 border rounded-lg">
-          <h2 className="text-xl font-semibold">Serial Port</h2>
-          <SerialConnection />
-
-        </div>
-
-         <div className="flex flex-col items-center gap-4 p-6 border rounded-lg">
-          <h2 className="text-xl font-semibold">Wifi</h2>
-          <WifiConnection />
-
-        </div>
-
-      </div>
-    </main>
-  )
+    </div>
+  );
 }
