@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { WebglPlot, WebglLine, ColorRGBA } from 'webgl-plot';
 
 interface SpiderPlotData {
@@ -33,7 +33,7 @@ const SpiderPlot: React.FC<SpiderPlotProps> = ({
     width = 300,
     height = 300,
     colors = {
-        web: '#94A3B8',
+        web: '#475569',
         fill: '#10B981',
         stroke: '#10B981',
         points: '#10B981',
@@ -53,24 +53,44 @@ const SpiderPlot: React.FC<SpiderPlotProps> = ({
     const [isInitialized, setIsInitialized] = useState(false);
     const [animatedData, setAnimatedData] = useState<SpiderPlotData[]>([]);
 
-    // Generate random animated data
-    const generateRandomData = (): SpiderPlotData[] => {
-        const labels = ['Speed', 'Power', 'Accuracy', 'Defense', 'Agility', 'Intelligence'];
-        return labels.map((label, index) => ({
+    // Constants
+    const BRAINWAVE_LABELS = ['Alpha', 'Beta', 'Gamma', 'Theta', 'Delta'];
+    const WEB_RADIUS = 0.7;
+    const LABEL_OFFSET = 0.15;
+
+    // Generate default pentagon data with brainwave labels
+    const generateDefaultData = useCallback((): SpiderPlotData[] => {
+        return BRAINWAVE_LABELS.map((label) => ({
             label,
-            value: Math.round(30 + Math.random() * 70), // Random values between 30-100
+            value: Math.round(30 + Math.random() * 70),
             maxValue: 100
         }));
-    };
+    }, []);
 
-    // Initialize data
+    // Initialize data with brainwave labels (always override any incoming labels)
     useEffect(() => {
         if (data && data.length > 0) {
-            setAnimatedData(data);
+            // Use incoming data values but override labels with brainwave names
+            const brainwaveData = data.slice(0, 5).map((item, index) => ({
+                ...item,
+                label: BRAINWAVE_LABELS[index] || `Brainwave ${index + 1}`,
+                maxValue: item.maxValue || 100
+            }));
+            
+            // Fill any missing data points
+            while (brainwaveData.length < 5) {
+                brainwaveData.push({
+                    label: BRAINWAVE_LABELS[brainwaveData.length],
+                    value: Math.round(30 + Math.random() * 70),
+                    maxValue: 100
+                });
+            }
+            
+            setAnimatedData(brainwaveData);
         } else {
-            setAnimatedData(generateRandomData());
+            setAnimatedData(generateDefaultData());
         }
-    }, [data]);
+    }, [data, generateDefaultData]);
 
     // Update data periodically for animation
     useEffect(() => {
@@ -94,7 +114,7 @@ const SpiderPlot: React.FC<SpiderPlotProps> = ({
         };
     }, [animated]);
 
-    const plotData = animatedData.length > 0 ? animatedData : generateRandomData();
+    const plotData = animatedData.length > 0 ? animatedData : generateDefaultData();
 
     // Convert hex color to ColorRGBA
     const hexToColorRGBA = (hex: string, alpha: number = 1.0): ColorRGBA => {
@@ -105,32 +125,89 @@ const SpiderPlot: React.FC<SpiderPlotProps> = ({
         return new ColorRGBA(r, g, b, alpha);
     };
 
-    // Calculate spider plot coordinates
-    const calculateSpiderPoints = () => {
-        const center = { x: 0, y: 0 }; // WebGL coordinates (-1 to 1)
-        const radius = 0.6; // 60% of the canvas for better fit
-        const angleStep = (2 * Math.PI) / plotData.length;
+    // Helper function to create dotted lines
+    const createDottedLine = (
+        plot: WebglPlot, 
+        startX: number, 
+        startY: number, 
+        endX: number, 
+        endY: number, 
+        color: ColorRGBA, 
+        density: number = 25
+    ) => {
+        const length = Math.sqrt(Math.pow(endX - startX, 2) + Math.pow(endY - startY, 2));
+        const dotCount = Math.floor(length * density);
+        
+        for (let dot = 0; dot < dotCount; dot++) {
+            const t1 = dot / dotCount;
+            const t2 = Math.min(t1 + 0.7 / dotCount, (dot + 1) / dotCount);
+            
+            if ((dot % 3) !== 2) {
+                const dotLine = new WebglLine(color, 2);
+                dotLine.lineSpaceX(-1, 2 / 2);
+                
+                const x1 = startX + t1 * (endX - startX);
+                const y1 = startY + t1 * (endY - startY);
+                const x2 = startX + t2 * (endX - startX);
+                const y2 = startY + t2 * (endY - startY);
+                
+                dotLine.setX(0, x1);
+                dotLine.setY(0, y1);
+                dotLine.setX(1, x2);
+                dotLine.setY(1, y2);
+                
+                plot.addLine(dotLine);
+            }
+        }
+    };
 
+    // Helper function to get colorful brainwave colors
+    const getBrainwaveColor = (label: string): string => {
+        const brainwaveColors = {
+            'Alpha': '#10B981',    // Emerald - associated with relaxed awareness
+            'Beta': '#3B82F6',     // Blue - associated with active concentration
+            'Gamma': '#8B5CF6',    // Violet - associated with high-level cognitive processing
+            'Theta': '#F59E0B',    // Amber - associated with creativity and deep meditation
+            'Delta': '#EF4444'     // Red - associated with deep sleep and healing
+        };
+        return brainwaveColors[label as keyof typeof brainwaveColors] || colors.labels;
+    };
+
+    // Calculate pentagon vertices for the web (inverted 180 degrees)
+    const calculatePentagonVertices = useCallback((radius: number) => {
+        const vertices = [];
+        const angleStep = (2 * Math.PI) / 5; // Pentagon has 5 sides
+        
+        for (let i = 0; i < 5; i++) {
+            const angle = i * angleStep + Math.PI / 2; // Start from bottom (inverted)
+            vertices.push({
+                x: radius * Math.cos(angle),
+                y: radius * Math.sin(angle),
+                angle
+            });
+        }
+        return vertices;
+    }, []);
+
+    // Calculate data points positioned on the web (inverted 180 degrees)
+    const calculateDataPoints = useCallback(() => {
+        
         return plotData.map((item, index) => {
-            const angle = index * angleStep - Math.PI / 2; // Start from top
+            const angle = index * (2 * Math.PI / 5) + Math.PI / 2; // Pentagon angles (inverted)
             const maxVal = item.maxValue || 100;
             const normalizedValue = Math.min(item.value / maxVal, 1);
-            const pointRadius = radius * normalizedValue;
+            const pointRadius = WEB_RADIUS * normalizedValue;
             
             return {
-                x: center.x + pointRadius * Math.cos(angle),
-                y: center.y + pointRadius * Math.sin(angle),
-                labelX: center.x + (radius + 0.25) * Math.cos(angle),
-                labelY: center.y + (radius + 0.25) * Math.sin(angle),
-                angle,
+                x: pointRadius * Math.cos(angle),
+                y: pointRadius * Math.sin(angle),
                 value: Math.round(item.value),
                 label: item.label,
-                normalizedValue,
-                axisEndX: center.x + radius * Math.cos(angle),
-                axisEndY: center.y + radius * Math.sin(angle)
+                angle,
+                normalizedValue
             };
         });
-    };
+    }, [plotData]);
 
     useEffect(() => {
         if (!canvasRef.current || plotData.length === 0) return;
@@ -148,96 +225,139 @@ const SpiderPlot: React.FC<SpiderPlotProps> = ({
             const plot = new WebglPlot(canvas);
             plotRef.current = plot;
 
-            const spiderPoints = calculateSpiderPoints();
-            const webColor = hexToColorRGBA(colors.web, 0.4);
+            const dataPoints = calculateDataPoints();
+            const webColor = hexToColorRGBA(colors.web, 0.9);
             const dataColor = hexToColorRGBA(colors.stroke, 1.0);
-            const fillColor = hexToColorRGBA(colors.fill, 0.25);
 
             // Clear any existing lines
             plot.removeAllLines();
 
-            // 1. Draw web grid (concentric polygons)
-            for (let level = 1; level <= webLevels; level++) {
-                const levelRadius = 0.6 * (level / webLevels);
-                const webLine = new WebglLine(webColor, plotData.length + 1);
-                
-                plotData.forEach((_, index) => {
-                    const angle = index * (2 * Math.PI / plotData.length) - Math.PI / 2;
-                    const x = levelRadius * Math.cos(angle);
-                    const y = levelRadius * Math.sin(angle);
-                    webLine.setY(index, y);
-                    webLine.setX(index, x);
-                });
-                
-                // Close the polygon
-                const firstAngle = -Math.PI / 2;
-                webLine.setY(plotData.length, levelRadius * Math.sin(firstAngle));
-                webLine.setX(plotData.length, levelRadius * Math.cos(firstAngle));
-                
-                plot.addLine(webLine);
-            }
-
-            // 2. Draw axis lines
-            spiderPoints.forEach((point) => {
-                const axisLine = new WebglLine(webColor, 2);
-                axisLine.setY(0, 0); // Center
-                axisLine.setX(0, 0);
-                axisLine.setY(1, point.axisEndY);
-                axisLine.setX(1, point.axisEndX);
-                plot.addLine(axisLine);
-            });
-
-            // 3. Draw filled area using triangles from center
-            const centerColor = hexToColorRGBA(colors.fill, 0.15);
-            for (let i = 0; i < spiderPoints.length; i++) {
-                const nextIndex = (i + 1) % spiderPoints.length;
-                const triangleFill = new WebglLine(centerColor, 3);
-                
-                // Triangle: center -> current point -> next point
-                triangleFill.setY(0, 0); // Center
-                triangleFill.setX(0, 0);
-                triangleFill.setY(1, spiderPoints[i].y);
-                triangleFill.setX(1, spiderPoints[i].x);
-                triangleFill.setY(2, spiderPoints[nextIndex].y);
-                triangleFill.setX(2, spiderPoints[nextIndex].x);
-                
-                plot.addLine(triangleFill);
-            }
-
-            // 4. Draw data polygon outline
-            const dataOutline = new WebglLine(dataColor, spiderPoints.length + 1);
-            dataOutline.lineSpaceX(-1, 2 / spiderPoints.length);
+            // 1. Draw concentric pentagon web rings
+            const webColorStrong = hexToColorRGBA(colors.web, 1.0);
+            const webColorLight = hexToColorRGBA(colors.web, 0.8);
             
-            spiderPoints.forEach((point, index) => {
-                dataOutline.setY(index, point.y);
-                dataOutline.setX(index, point.x);
-            });
-            // Close the polygon
-            dataOutline.setY(spiderPoints.length, spiderPoints[0].y);
-            dataOutline.setX(spiderPoints.length, spiderPoints[0].x);
-            plot.addLine(dataOutline);
+            for (let level = 1; level <= webLevels; level++) {
+                const levelRadius = WEB_RADIUS * (level / webLevels);
+                const vertices = calculatePentagonVertices(levelRadius);
+                const ringColor = level === webLevels ? webColorStrong : webColorLight;
+                
+                // Create dotted pentagon by drawing multiple small segments
+                for (let side = 0; side < 5; side++) {
+                    const startVertex = vertices[side];
+                    const endVertex = vertices[(side + 1) % 5];
+                    
+                    // Create dotted pentagon ring segments
+                    createDottedLine(
+                        plot, 
+                        startVertex.x, 
+                        startVertex.y, 
+                        endVertex.x, 
+                        endVertex.y, 
+                        ringColor, 
+                        30
+                    );
+                }
+            }
 
-            // 5. Draw data points
+            // 2. Draw dotted radial spokes from center to pentagon vertices
+            for (let i = 0; i < 5; i++) {
+                const angle = i * (2 * Math.PI / 5) + Math.PI / 2;
+                const outerX = WEB_RADIUS * Math.cos(angle);
+                const outerY = WEB_RADIUS * Math.sin(angle);
+                
+                // Create dotted radial spokes from center to vertices
+                createDottedLine(plot, 0, 0, outerX, outerY, webColorStrong, 25);
+            }
+
+            // 3. Add dotted web connecting lines between rings
+            const webStrandColor = hexToColorRGBA(colors.web, 0.3);
+            
+            // 3. Draw dotted connecting lines between pentagon rings
+            for (let level = 1; level < webLevels; level += 2) {
+                const innerRadius = WEB_RADIUS * (level / webLevels);
+                const outerRadius = WEB_RADIUS * ((level + 1) / webLevels);
+                
+                for (let i = 0; i < 5; i++) {
+                    const angle = i * (2 * Math.PI / 5) + Math.PI / 2;
+                    
+                    const innerX = innerRadius * Math.cos(angle);
+                    const innerY = innerRadius * Math.sin(angle);
+                    const outerX = outerRadius * Math.cos(angle);
+                    const outerY = outerRadius * Math.sin(angle);
+                    
+                    // Create dotted web connecting strands
+                    createDottedLine(plot, innerX, innerY, outerX, outerY, webStrandColor, 20);
+                }
+            }
+
+            // 4. Draw filled data area (pentagon shape based on values)
+            const fillColor = hexToColorRGBA(colors.fill, 0.3);
+            if (dataPoints.length >= 5) {
+                const fillLine = new WebglLine(fillColor, 6);
+                fillLine.lineSpaceX(-1, 2 / 6);
+                
+                for (let i = 0; i < 5; i++) {
+                    fillLine.setX(i, dataPoints[i].x);
+                    fillLine.setY(i, dataPoints[i].y);
+                }
+                // Close the data pentagon
+                fillLine.setX(5, dataPoints[0].x);
+                fillLine.setY(5, dataPoints[0].y);
+                
+                plot.addLine(fillLine);
+            }
+
+            // 5. Draw data outline (pentagon border)
+            if (dataPoints.length >= 5) {
+                const outlineLine = new WebglLine(dataColor, 6);
+                outlineLine.lineSpaceX(-1, 2 / 6);
+                
+                for (let i = 0; i < 5; i++) {
+                    outlineLine.setX(i, dataPoints[i].x);
+                    outlineLine.setY(i, dataPoints[i].y);
+                }
+                // Close the data pentagon
+                outlineLine.setX(5, dataPoints[0].x);
+                outlineLine.setY(5, dataPoints[0].y);
+                
+                plot.addLine(outlineLine);
+            }
+
+            // 6. Draw data points (circles at pentagon vertices)
             const pointColor = hexToColorRGBA(colors.points, 1.0);
-            spiderPoints.forEach((point) => {
-                // Create a square point (simpler than circle)
-                const pointLine = new WebglLine(pointColor, 5);
-                const pointSize = 0.025;
-                
-                // Square points
-                pointLine.setY(0, point.y - pointSize);
-                pointLine.setX(0, point.x - pointSize);
-                pointLine.setY(1, point.y + pointSize);
-                pointLine.setX(1, point.x - pointSize);
-                pointLine.setY(2, point.y + pointSize);
-                pointLine.setX(2, point.x + pointSize);
-                pointLine.setY(3, point.y - pointSize);
-                pointLine.setX(3, point.x + pointSize);
-                pointLine.setY(4, point.y - pointSize);
-                pointLine.setX(4, point.x - pointSize);
-                
-                plot.addLine(pointLine);
+            dataPoints.forEach((point, index) => {
+                if (index < 5) { // Only draw first 5 points for pentagon
+                    const pointLine = new WebglLine(pointColor, 8);
+                    const pointSize = 0.03;
+                    pointLine.lineSpaceX(-1, 2 / 8);
+                    
+                    // Draw circle approximation using octagon
+                    for (let i = 0; i < 8; i++) {
+                        const circleAngle = (i * 2 * Math.PI) / 8;
+                        const px = point.x + pointSize * Math.cos(circleAngle);
+                        const py = point.y + pointSize * Math.sin(circleAngle);
+                        pointLine.setX(i, px);
+                        pointLine.setY(i, py);
+                    }
+                    
+                    plot.addLine(pointLine);
+                }
             });
+
+            // 7. Add center point
+            const centerLine = new WebglLine(webColor, 8);
+            const centerSize = 0.02;
+            centerLine.lineSpaceX(-1, 2 / 8);
+            
+            for (let i = 0; i < 8; i++) {
+                const angle = (i * 2 * Math.PI) / 8;
+                const cx = centerSize * Math.cos(angle);
+                const cy = centerSize * Math.sin(angle);
+                centerLine.setX(i, cx);
+                centerLine.setY(i, cy);
+            }
+            
+            plot.addLine(centerLine);
 
             setIsInitialized(true);
 
@@ -273,16 +393,26 @@ const SpiderPlot: React.FC<SpiderPlotProps> = ({
         
         const centerX = width / 2;
         const centerY = height / 2;
-        const radius = Math.min(width, height) * 0.32; // Adjusted for better positioning
-        const angleStep = (2 * Math.PI) / plotData.length;
-
+        
         return plotData.map((item, index) => {
-            const angle = index * angleStep - Math.PI / 2;
-            const labelRadius = radius + 25;
+            // Pentagon vertex angles rotated 37 degrees clockwise for optimal label placement
+            const baseAngle = index * (2 * Math.PI / 5) + Math.PI / 2;
+            const angle = baseAngle + (Math.PI / 4) - (Math.PI / 18) + (Math.PI / 90);
+            
+            // Convert from WebGL coordinates (-1 to 1) to screen coordinates
+            const totalWebGLRadius = WEB_RADIUS + LABEL_OFFSET;
+            
+            // Convert WebGL coordinates to screen coordinates
+            const webGLX = totalWebGLRadius * Math.cos(angle);
+            const webGLY = totalWebGLRadius * Math.sin(angle);
+            
+            // Transform from WebGL space (-1 to 1) to screen space
+            const screenX = centerX + (webGLX * centerX);
+            const screenY = centerY + (webGLY * centerY);
             
             return {
-                x: centerX + labelRadius * Math.cos(angle),
-                y: centerY + labelRadius * Math.sin(angle),
+                x: screenX,
+                y: screenY,
                 value: Math.round(item.value),
                 label: item.label
             };
@@ -316,12 +446,20 @@ const SpiderPlot: React.FC<SpiderPlotProps> = ({
                             style={{ 
                                 left: pos.x, 
                                 top: pos.y,
-                                color: colors.labels,
-                                fontSize: Math.max(10, Math.min(14, width / 20)),
-                                fontWeight: '600'
+                                fontSize: Math.max(12, Math.min(16, width / 18)),
+                                fontWeight: '500',
+                                textShadow: '1px 1px 2px rgba(0,0,0,0.2)',
+                                letterSpacing: '0.3px'
                             }}
                         >
-                            <div>{pos.label}</div>
+                            <div 
+                                className="px-2 py-1 rounded-md bg-white/10 backdrop-blur-sm border border-white/20"
+                                style={{
+                                    color: getBrainwaveColor(pos.label),
+                                }}
+                            >
+                                {pos.label}
+                            </div>
                             {showValues && (
                                 <div 
                                     className="text-xs opacity-80 font-bold"

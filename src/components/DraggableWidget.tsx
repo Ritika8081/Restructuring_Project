@@ -160,7 +160,7 @@ const DraggableWidget = React.memo<{
     const getWidgetTitle = useCallback((type: string, width: number) => {
         const titles = {
             basic: width >= 3 ? 'Real-time Signal' : 'Signal',
-            spiderplot: width >= 4 ? 'Performance Radar' : 'Radar',
+            spiderplot: width >= 4 ? 'Spider Plot' : 'Radar',
             FFTGraph: width >= 3 ? 'FFT Spectrum' : 'FFT',
             bargraph: width >= 3 ? 'Statistics' : 'Stats',
         };
