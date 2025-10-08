@@ -75,10 +75,11 @@ const Widgets: React.FC = () => {
 
     // Monitor screen size and adjust grid to use full viewport
     useEffect(() => {
+        let resizeTimeout: NodeJS.Timeout;
+        
         const adjustGridToScreen = () => {
             const screenWidth = window.innerWidth;
             const screenHeight = window.innerHeight;
-            
             
             const usableWidth = screenWidth;
             const usableHeight = screenHeight;
@@ -86,6 +87,7 @@ const Widgets: React.FC = () => {
             
             const targetCols = Math.floor(usableWidth / cellSize);
             const targetRows = Math.floor(usableHeight / cellSize);
+            
             setGridSettings(prev => ({
                 ...prev,
                 cols: targetCols,
@@ -93,13 +95,52 @@ const Widgets: React.FC = () => {
                 cellWidth: cellSize,
                 cellHeight: cellSize
             }));
+
+            // Constrain existing widgets to new grid boundaries
+            setWidgets(prevWidgets => 
+                prevWidgets.map(widget => {
+                    // Clamp widget position and size to fit within new grid
+                    const maxX = Math.max(0, targetCols - widget.width);
+                    const maxY = Math.max(0, targetRows - widget.height);
+                    
+                    const constrainedX = Math.max(0, Math.min(widget.x, maxX));
+                    const constrainedY = Math.max(0, Math.min(widget.y, maxY));
+                    
+                    // If widget is too large for new grid, resize it
+                    const constrainedWidth = Math.min(widget.width, targetCols);
+                    const constrainedHeight = Math.min(widget.height, targetRows);
+                    
+                    // Only update if values actually changed to avoid unnecessary re-renders
+                    if (constrainedX !== widget.x || constrainedY !== widget.y || 
+                        constrainedWidth !== widget.width || constrainedHeight !== widget.height) {
+                        return {
+                            ...widget,
+                            x: constrainedX,
+                            y: constrainedY,
+                            width: Math.max(widget.minWidth, constrainedWidth),
+                            height: Math.max(widget.minHeight, constrainedHeight)
+                        };
+                    }
+                    
+                    return widget;
+                })
+            );
+        };
+
+        // Debounced resize handler to improve performance
+        const handleResize = () => {
+            clearTimeout(resizeTimeout);
+            resizeTimeout = setTimeout(adjustGridToScreen, 100);
         };
 
         // Adjust on mount and window resize
         adjustGridToScreen();
-        window.addEventListener('resize', adjustGridToScreen);
+        window.addEventListener('resize', handleResize);
         
-        return () => window.removeEventListener('resize', adjustGridToScreen);
+        return () => {
+            window.removeEventListener('resize', handleResize);
+            clearTimeout(resizeTimeout);
+        };
     }, []);
 
     const hideToast = useCallback(() => {
@@ -224,15 +265,27 @@ const Widgets: React.FC = () => {
                 newHeight = Math.max(activeWidget.minHeight, newHeight);
             }
 
+            // Enhanced boundary constraints with better error handling
             if (dragState.dragType === 'move') {
-                newX = Math.max(0, Math.min(newX, gridSettings.cols - newWidth));
-                newY = Math.max(0, Math.min(newY, gridSettings.rows - newHeight));
+                // Ensure widget stays within grid bounds during movement
+                const maxX = Math.max(0, gridSettings.cols - newWidth);
+                const maxY = Math.max(0, gridSettings.rows - newHeight);
+                
+                newX = Math.max(0, Math.min(newX, maxX));
+                newY = Math.max(0, Math.min(newY, maxY));
             } else if (dragState.dragType === 'resize') {
-                const maxAllowedWidth = gridSettings.cols - newX;
-                const maxAllowedHeight = gridSettings.rows - newY;
+                // Ensure widget doesn't exceed grid boundaries during resize
+                const maxAllowedWidth = Math.max(1, gridSettings.cols - newX);
+                const maxAllowedHeight = Math.max(1, gridSettings.rows - newY);
                 
                 newWidth = Math.min(newWidth, maxAllowedWidth);
                 newHeight = Math.min(newHeight, maxAllowedHeight);
+                
+                // Also ensure minimum sizes are respected
+                if (activeWidget) {
+                    newWidth = Math.max(activeWidget.minWidth, newWidth);
+                    newHeight = Math.max(activeWidget.minHeight, newHeight);
+                }
             }
 
             // Check collision before updating
