@@ -13,27 +13,27 @@ import { checkCollisionAtPosition } from '@/utils/widget.utils';
  * Manages widget state, grid settings, drag operations, and user interactions
  */
 const Widgets: React.FC = () => {
-    // Widget collection state with default basic widget (4x4 minimum)
+    // Widget collection state with default basic widget (positioned for testing movement)
     const [widgets, setWidgets] = useState<Widget[]>([
         {
             id: 'default-basic',
-            x: 1,
-            y: 1,
-            width: 4,
-            height: 4,
-            minWidth: 4,
-            minHeight: 4,
+            x: 2,
+            y: 2,
+            width: 5,  // Larger width for absolute signal containment
+            height: 4, // Larger height for 1 channel with containment
+            minWidth: 5,  // Enforce larger minimum for basic widgets
+            minHeight: 4, // Enforce larger minimum for basic widgets
             type: 'basic',
         },
     ]);
 
-    // Grid configuration state
+    // Grid configuration state - initialize with SSR-safe defaults, adjust in useEffect
     const [gridSettings, setGridSettings] = useState<GridSettings>({
-        cols: 20,
-        rows: 15,
+        cols: 24,  // SSR-safe default
+        rows: 16,  // SSR-safe default
         showGridlines: true,
-        cellWidth: 60,
-        cellHeight: 60,
+        cellWidth: 50,
+        cellHeight: 50,
     });
 
     // Active drag operation state
@@ -54,10 +54,20 @@ const Widgets: React.FC = () => {
     const [confirm, setConfirm] = useState<ConfirmState>({
         show: false, message: '', onConfirm: () => { }, onCancel: () => { }
     });
+    
+    // Screen dimensions state for client-side rendering
+    const [screenDimensions, setScreenDimensions] = useState<{ width: number; height: number } | null>(null);
 
     // Refs for performance
     const widgetsRef = useRef<Widget[]>(widgets);
     const gridSettingsRef = useRef<GridSettings>(gridSettings);
+
+    // Track client-side mount to prevent hydration mismatch
+    const [isMounted, setIsMounted] = useState(false);
+
+    useEffect(() => {
+        setIsMounted(true);
+    }, []);
 
     // Keep refs synchronized with state
     useEffect(() => {
@@ -71,6 +81,43 @@ const Widgets: React.FC = () => {
     // Toast utility functions
     const showToast = useCallback((message: string, type: 'success' | 'error' | 'info' = 'info') => {
         setToast({ show: true, message, type });
+    }, []);
+
+    // Monitor screen size and adjust grid to use full viewport
+    useEffect(() => {
+        const adjustGridToScreen = () => {
+            const screenWidth = window.innerWidth;
+            const screenHeight = window.innerHeight;
+            
+            // Update screen dimensions state for UI display
+            setScreenDimensions({ width: screenWidth, height: screenHeight });
+            
+            // Use full viewport for grid - overlays can float on top
+            const usableWidth = screenWidth;
+            const usableHeight = screenHeight;
+            
+            // Use fixed cell size for consistent widget sizing
+            const cellSize = 50; // Fixed 50px cells for good usability
+            
+            // Calculate grid size to fill entire viewport
+            const targetCols = Math.floor(usableWidth / cellSize);
+            const targetRows = Math.floor(usableHeight / cellSize);
+            
+            // Update grid settings to use full viewport
+            setGridSettings(prev => ({
+                ...prev,
+                cols: targetCols,
+                rows: targetRows,
+                cellWidth: cellSize,
+                cellHeight: cellSize
+            }));
+        };
+
+        // Adjust on mount and window resize
+        adjustGridToScreen();
+        window.addEventListener('resize', adjustGridToScreen);
+        
+        return () => window.removeEventListener('resize', adjustGridToScreen);
     }, []);
 
     const hideToast = useCallback(() => {
@@ -93,7 +140,7 @@ const Widgets: React.FC = () => {
     }, []);
 
     /**
-     * Add widget to the grid with collision detection
+     * Add widget to the grid with collision detection and screen boundary awareness
      */
     const handleAddWidget = useCallback((type: string) => {
         let x = 0, y = 0;
@@ -105,15 +152,15 @@ const Widgets: React.FC = () => {
         let minWidth = 1;
         let minHeight = 1;
         
-        // Special sizing for basic signal widgets (4x4 minimum)
+        // Special sizing for basic signal widgets (larger minimum for absolute containment)
         if (type === 'basic') {
-            defaultWidth = 4;
-            defaultHeight = 4;
-            minWidth = 4;
-            minHeight = 4;
+            defaultWidth = 5;  // Larger width for absolute signal containment (250px)
+            defaultHeight = 4; // Larger height for 1 channel with containment (200px)
+            minWidth = 5;      // Enforce larger minimum width
+            minHeight = 4;     // Enforce larger minimum height
         }
 
-        // Find first available space
+        // Find first available space within the grid (grid is sized to fit screen exactly)
         for (let row = 0; row < gridSettings.rows - defaultHeight + 1 && !found; row++) {
             for (let col = 0; col < gridSettings.cols - defaultWidth + 1 && !found; col++) {
                 if (!checkCollisionAtPosition(widgets, 'temp', col, row, defaultWidth, defaultHeight, gridSettings)) {
@@ -198,6 +245,20 @@ const Widgets: React.FC = () => {
                 newHeight = Math.max(activeWidget.minHeight, newHeight);
             }
 
+            // Constrain to grid boundaries (grid now fits screen exactly, so no additional screen checks needed)
+            if (dragState.dragType === 'move') {
+                // Ensure widget stays within grid bounds
+                newX = Math.max(0, Math.min(newX, gridSettings.cols - newWidth));
+                newY = Math.max(0, Math.min(newY, gridSettings.rows - newHeight));
+            } else if (dragState.dragType === 'resize') {
+                // For resize, ensure the widget doesn't grow beyond grid bounds
+                const maxAllowedWidth = gridSettings.cols - newX;
+                const maxAllowedHeight = gridSettings.rows - newY;
+                
+                newWidth = Math.min(newWidth, maxAllowedWidth);
+                newHeight = Math.min(newHeight, maxAllowedHeight);
+            }
+
             // Check collision before updating
             if (!checkCollisionAtPosition(widgets, dragState.activeWidgetId, newX, newY, newWidth, newHeight, gridSettings)) {
                 handleUpdateWidget(dragState.activeWidgetId, {
@@ -255,30 +316,23 @@ const Widgets: React.FC = () => {
                         />
                     </pattern>
                 </defs>
+                
+                {/* Grid pattern fills entire viewport */}
                 <rect width="100%" height="100%" fill="url(#grid)" />
             </svg>
         );
     }, [gridSettings.showGridlines, gridSettings.cellWidth, gridSettings.cellHeight]);
 
     return (
-        <div className="h-screen bg-gray-100 overflow-hidden relative">
-            {/* System Status Panel */}
-            <div className="absolute bottom-4 left-4 bg-white p-3 rounded-lg shadow-sm border border-gray-200 z-50">
-                <div className="flex items-center gap-2 mb-2">
-                    <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-                    <span className="text-sm font-medium text-gray-700">System Status</span>
-                </div>
-                <div className="space-y-1 text-xs text-gray-500">
-                    <div>Grid: {gridSettings.cols} × {gridSettings.rows}</div>
-                    <div>Widgets: {widgets.length}</div>
-                    <div>Cell: {gridSettings.cellWidth}×{gridSettings.cellHeight}px</div>
-                </div>
-            </div>
+        <div className="h-screen w-screen bg-gray-100 relative overflow-hidden">
 
-            {/* Main Grid Container */}
+            {/* Main Grid Container - Fits exactly to screen */}
             <div
-                className="absolute inset-0 overflow-hidden"
-                style={{ width: '100vw', height: '100vh' }}
+                className="absolute inset-0"
+                style={{ 
+                    width: '100vw', 
+                    height: '100vh'
+                }}
             >
                 {/* Grid Lines */}
                 {GridLines}

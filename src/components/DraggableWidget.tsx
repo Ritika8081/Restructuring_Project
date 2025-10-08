@@ -55,8 +55,54 @@ const DraggableWidget = React.memo<{
     }, [widget.id, onRemove]);
 
     /**
+     * Handle size request from BasicGraph component - resize to exact needed size
+     */
+    const handleSizeRequest = useCallback((minWidth: number, minHeight: number) => {
+        if (widget.type === 'basic' && onUpdateWidget) {
+            // Calculate exact grid units needed based on canvas requirements
+            const totalWidthNeeded = minWidth + 12; // Canvas + all margins/borders/padding
+            const totalHeightNeeded = minHeight + 60; // Canvas + header + margins/borders/padding
+            
+            const requiredGridWidth = Math.ceil(totalWidthNeeded / gridSettings.cellWidth);
+            const requiredGridHeight = Math.ceil(totalHeightNeeded / gridSettings.cellHeight);
+            
+            // Ensure minimum requirements (5×4 for 1 channel with containment, more for multiple channels)
+            const minGridWidth = 5;
+            const minGridHeight = 4;
+            
+            const newWidth = Math.max(widget.width, requiredGridWidth, minGridWidth);
+            const newHeight = Math.max(widget.height, requiredGridHeight, minGridHeight);
+            
+            // Only resize if current size is actually smaller than required
+            if (widget.width < newWidth || widget.height < newHeight) {
+                // Check if new size would cause collision
+                const currentWidgets = widgets.filter(w => w.id !== widget.id);
+                const wouldCollide = checkCollisionAtPosition(
+                    currentWidgets, 
+                    widget.id, 
+                    widget.x, 
+                    widget.y, 
+                    newWidth, 
+                    newHeight, 
+                    gridSettings
+                );
+                
+                if (!wouldCollide) {
+                    onUpdateWidget(widget.id, { 
+                        width: newWidth,
+                        height: newHeight,
+                        minWidth: Math.max(widget.minWidth || 1, minGridWidth),
+                        minHeight: Math.max(widget.minHeight || 1, minGridHeight),
+                        zIndex: Date.now() 
+                    });
+                }
+            }
+        }
+    }, [widget, widgets, onUpdateWidget, gridSettings]);
+
+    /**
      * Handle channel configuration changes (for signal widgets)
-     * Auto-resize widget height based on channel count for basic widgets
+     * Triggers size recalculation when channel count changes
      */
     const handleChannelsChange = useCallback((channels: any[]) => {
         // Only update if channels actually changed to prevent infinite loops
@@ -69,34 +115,9 @@ const DraggableWidget = React.memo<{
         
         setWidgetChannels(channels);
         
-        // Auto-resize widget height based on channel count for basic widgets
-        if (widget.type === 'basic' && onUpdateWidget) {
-            const visibleChannels = channels.filter(ch => ch.visible);
-            const requiredHeight = Math.max(4, Math.ceil(visibleChannels.length * 1.5) + 2);
-            
-            // Only update if height actually needs to change
-            if (requiredHeight !== widget.height) {
-                // Check if new height would cause collision
-                const currentWidgets = widgets.filter(w => w.id !== widget.id);
-                const wouldCollide = checkCollisionAtPosition(
-                    currentWidgets, 
-                    widget.id, 
-                    widget.x, 
-                    widget.y, 
-                    widget.width, 
-                    requiredHeight, 
-                    gridSettings
-                );
-                
-                if (!wouldCollide) {
-                    onUpdateWidget(widget.id, { 
-                        height: requiredHeight,
-                        zIndex: Date.now() 
-                    });
-                }
-            }
-        }
-    }, [widget, widgets, onUpdateWidget, gridSettings, widgetChannels]);
+        // Force size recalculation when channel count changes
+        // The BasicGraph component will automatically request resize if needed
+    }, [widgetChannels]);
 
     /**
      * Add new channel to signal widget (max 6 channels)
@@ -169,9 +190,9 @@ const DraggableWidget = React.memo<{
         return '';
     }, [widget.type, widgetChannels]);
 
-    // Calculate available space for widget content (excluding header)
-    const availableWidth = widget.width * gridSettings.cellWidth;
-    const availableHeight = widget.height * gridSettings.cellHeight - 48;
+    // Calculate available space for widget content (reduced padding for tighter fit)
+    const availableWidth = widget.width * gridSettings.cellWidth - 4; // Minimal padding for tighter containment
+    const availableHeight = widget.height * gridSettings.cellHeight - 52; // Header + minimal padding
 
     return (
         <div
@@ -292,19 +313,27 @@ const DraggableWidget = React.memo<{
                             />
                         </div>
                     ) : widget.type === 'basic' ? (
-                        <BasicGraphRealtime
-                            channels={widgetChannels}
-                            width={availableWidth}
-                            height={availableHeight}
-                            bufferSize={512}
-                            showGrid={widget.width >= 3}
-                            backgroundColor="rgba(16, 185, 129, 0.02)"
-                            sampleRate={60}
-                            timeWindow={8}
-                            onChannelsChange={handleChannelsChange}
-                            showChannelControls={false}
-                            showLegend={false}
-                        />
+                        <div className="w-full h-full overflow-hidden flex items-center justify-center" style={{ 
+                            boxSizing: 'border-box',
+                            contain: 'strict',
+                            isolation: 'isolate',
+                            padding: '2px'
+                        }}>
+                            <BasicGraphRealtime
+                                channels={widgetChannels}
+                                width={availableWidth - 4}
+                                height={availableHeight - 4}
+                                bufferSize={512}
+                                showGrid={widget.width >= 3}
+                                backgroundColor="rgba(16, 185, 129, 0.02)"
+                                sampleRate={60}
+                                timeWindow={8}
+                                onChannelsChange={handleChannelsChange}
+                                onSizeRequest={handleSizeRequest}
+                                showChannelControls={false}
+                                showLegend={false}
+                            />
+                        </div>
                     ) : (
                         <div className="text-gray-500 text-center flex items-center justify-center h-full">
                             <div>

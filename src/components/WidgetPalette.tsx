@@ -157,6 +157,41 @@ const WidgetPalette: React.FC<WidgetPaletteProps> = ({
         );
     }, [widgets.length, onLoadLayout, showToast, showConfirm]);
 
+    // Check for widgets outside visible area and provide scroll functionality
+    const checkVisibleWidgets = useCallback(() => {
+        if (typeof window === 'undefined') return;
+        
+        const screenWidth = window.innerWidth;
+        const screenHeight = window.innerHeight;
+        const usableScreenWidth = screenWidth;
+        const usableScreenHeight = screenHeight;
+        const maxVisibleCols = Math.floor(usableScreenWidth / gridSettings.cellWidth);
+        const maxVisibleRows = Math.floor(usableScreenHeight / gridSettings.cellHeight);
+
+        const outsideWidgets = widgets.filter(widget => 
+            widget.x + widget.width > maxVisibleCols || 
+            widget.y + widget.height > maxVisibleRows ||
+            widget.x < 0 || widget.y < 0
+        );
+
+        if (outsideWidgets.length > 0) {
+            showToast(`${outsideWidgets.length} widgets are outside visible area`, 'info');
+            
+            // Scroll to the first outside widget
+            const firstWidget = outsideWidgets[0];
+            const scrollX = Math.max(0, (firstWidget.x * gridSettings.cellWidth) - screenWidth / 2);
+            const scrollY = Math.max(0, (firstWidget.y * gridSettings.cellHeight) - screenHeight / 2);
+            
+            window.scrollTo({
+                left: scrollX,
+                top: scrollY,
+                behavior: 'smooth'
+            });
+        } else {
+            showToast('All widgets are visible on screen', 'success');
+        }
+    }, [widgets, gridSettings, showToast]);
+
     return (
         <div className="absolute top-4 right-4 z-50">
             {/* Toggle Button */}
@@ -199,6 +234,7 @@ const WidgetPalette: React.FC<WidgetPaletteProps> = ({
                         >
                             📁 Load
                         </button>
+
                         <button
                             onClick={() => setIsCollapsed(true)}
                             className="w-6 h-6 text-gray-400 hover:text-gray-600 flex items-center justify-center"
