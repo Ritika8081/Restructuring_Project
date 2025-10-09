@@ -78,48 +78,46 @@ const Widgets: React.FC = () => {
         let resizeTimeout: NodeJS.Timeout;
         
         const adjustGridToScreen = () => {
+            // UI Offsets
+            const SIDEBAR_WIDTH_COLLAPSED = 64; // w-16 (px)
+            const SIDEBAR_WIDTH_EXPANDED = 224; // w-56 (px)
+            const HEADER_HEIGHT = 64; // h-16 (px)
+            // Use collapsed sidebar for grid calculation (always visible)
+            const sidebarWidth = SIDEBAR_WIDTH_COLLAPSED;
+            const headerHeight = HEADER_HEIGHT;
             const screenWidth = window.innerWidth;
             const screenHeight = window.innerHeight;
-            
-            // Calculate optimal grid for maximum widget movement freedom
-            const usableWidth = screenWidth;
-            const usableHeight = screenHeight;
-            
+            // Calculate usable area for widgets
+            const usableWidth = screenWidth - sidebarWidth;
+            const usableHeight = screenHeight - headerHeight;
             // Use adaptive cell size for better positioning granularity
             const adaptiveCellSize = screenWidth < 1200 ? 35 : screenWidth < 1600 ? 40 : 45;
-            
             // Create more grid positions for smoother movement
-            const targetCols = Math.max(24, Math.floor(usableWidth / adaptiveCellSize));
-            const targetRows = Math.max(16, Math.floor(usableHeight / adaptiveCellSize));
-            
+            const targetCols = Math.max(24, Math.round(usableWidth / adaptiveCellSize));
+            const targetRows = Math.max(16, Math.round(usableHeight / adaptiveCellSize));
             setGridSettings(prev => ({
                 ...prev,
                 cols: targetCols,
                 rows: targetRows,
                 cellWidth: adaptiveCellSize,
-                cellHeight: adaptiveCellSize
+                cellHeight: adaptiveCellSize,
+                offsetX: sidebarWidth,
+                offsetY: headerHeight
             }));
 
             // Constrain existing widgets to new grid boundaries
             setWidgets(prevWidgets => 
                 prevWidgets.map(widget => {
-                    // Allow symmetric positioning with buffer on all edges during screen resize
-                    const edgeBuffer = 2; // More permissive buffer for screen resize
-                    
-                    // Symmetric boundaries for screen resize
-                    const minX = -edgeBuffer; // Allow extending to the left
-                    const maxX = targetCols - widget.width + edgeBuffer; // Allow extending to the right
-                    const minY = -edgeBuffer; // Allow extending to the top  
-                    const maxY = targetRows - widget.height + edgeBuffer; // Allow extending to the bottom
-                    
+                    // Prevent widgets from overlapping header/sidebar
+                    const minX = 0;
+                    const maxX = targetCols - widget.width;
+                    const minY = 0;
+                    const maxY = targetRows - widget.height;
                     const constrainedX = Math.max(minX, Math.min(widget.x, maxX));
                     const constrainedY = Math.max(minY, Math.min(widget.y, maxY));
-                    
                     // If widget is too large for new grid, resize it
                     const constrainedWidth = Math.min(widget.width, targetCols);
                     const constrainedHeight = Math.min(widget.height, targetRows);
-                    
-                    // Only update if values actually changed to avoid unnecessary re-renders
                     if (constrainedX !== widget.x || constrainedY !== widget.y || 
                         constrainedWidth !== widget.width || constrainedHeight !== widget.height) {
                         return {
@@ -130,7 +128,6 @@ const Widgets: React.FC = () => {
                             height: Math.max(widget.minHeight, constrainedHeight)
                         };
                     }
-                    
                     return widget;
                 })
             );
@@ -260,6 +257,7 @@ const Widgets: React.FC = () => {
             let newHeight = dragState.startHeight;
 
             if (dragState.dragType === 'move') {
+                // Prevent widgets from moving over header/sidebar
                 newX = Math.max(0, dragState.startX + deltaX);
                 newY = Math.max(0, dragState.startY + deltaY);
             } else if (dragState.dragType === 'resize') {
@@ -276,25 +274,19 @@ const Widgets: React.FC = () => {
 
             // Enhanced boundary constraints - allow symmetric edge positioning
             if (dragState.dragType === 'move') {
-                // Allow widgets to extend beyond grid edges on all sides
-                const edgeBuffer = 1; // Allow 1 grid cell overlap on each edge
-                
-                // Symmetric boundaries: left can go negative, right can extend beyond grid
-                const minX = -edgeBuffer; // Allow extending to the left
-                const maxX = gridSettings.cols - newWidth + edgeBuffer; // Allow extending to the right
-                const minY = -edgeBuffer; // Allow extending to the top
-                const maxY = gridSettings.rows - newHeight + edgeBuffer; // Allow extending to the bottom
-                
+                // Prevent widgets from moving over header/sidebar
+                const minX = 0;
+                const maxX = gridSettings.cols - newWidth;
+                const minY = 0;
+                const maxY = gridSettings.rows - newHeight;
                 newX = Math.max(minX, Math.min(newX, maxX));
                 newY = Math.max(minY, Math.min(newY, maxY));
             } else if (dragState.dragType === 'resize') {
                 // Ensure widget doesn't exceed grid boundaries during resize
                 const maxAllowedWidth = Math.max(1, gridSettings.cols - newX);
                 const maxAllowedHeight = Math.max(1, gridSettings.rows - newY);
-                
                 newWidth = Math.min(newWidth, maxAllowedWidth);
                 newHeight = Math.min(newHeight, maxAllowedHeight);
-                
                 // Also ensure minimum sizes are respected
                 if (activeWidget) {
                     newWidth = Math.max(activeWidget.minWidth, newWidth);
@@ -366,8 +358,16 @@ const Widgets: React.FC = () => {
     }, [gridSettings.showGridlines, gridSettings.cellWidth, gridSettings.cellHeight]);
 
     return (
-        <div className="h-screen w-screen bg-gray-100 relative overflow-hidden">
-            <div className="absolute inset-0" style={{ width: '100vw', height: '100vh' }}>
+        <div className="min-h-screen w-screen bg-gray-100 relative overflow-hidden">
+            {/* Grid container starts just below header */}
+            <div
+                className="absolute"
+                style={{
+                    left: gridSettings.offsetX || 64,
+                    width: `calc(100vw - ${(gridSettings.offsetX || 64)}px)`,
+                    height: '100%'
+                }}
+            >
                 {GridLines}
                 {widgets.map((widget) => (
                     <DraggableWidget

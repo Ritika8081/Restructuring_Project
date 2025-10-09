@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useRef, useCallback, useState } from 'react';
 import { Widget, GridSettings } from '@/types/widget.types';
 import { validateWidget } from '@/utils/widget.utils';
 
@@ -11,19 +11,18 @@ interface WidgetPaletteProps {
     showConfirm: (message: string, onConfirm: () => void) => void;
 }
 
-const WidgetPalette: React.FC<WidgetPaletteProps> = ({ 
-    onAddWidget, widgets, gridSettings, onLoadLayout, showToast, showConfirm 
-}) => {
-    const [isCollapsed, setIsCollapsed] = useState(false);
-    const fileInputRef = useRef<HTMLInputElement>(null);
+const widgetTypes = [
+    { type: 'basic', icon: '📈', name: 'Signal', description: 'Real-time data' },
+    { type: 'spiderplot', icon: '🎯', name: 'Radar', description: 'Multi-axis view' },
+    { type: 'FFTGraph', icon: '〰️', name: 'FFT', description: 'Frequency analysis' },
+    { type: 'bargraph', icon: '📊', name: 'Chart', description: 'Statistics' },
+];
 
-    // Available widget types with metadata
-    const widgetTypes = [
-        { type: 'basic', icon: '📈', name: 'Signal', description: 'Real-time data' },
-        { type: 'spiderplot', icon: '🎯', name: 'Radar', description: 'Multi-axis view' },
-        { type: 'FFTGraph', icon: '〰️', name: 'FFT', description: 'Frequency analysis' },
-        { type: 'bargraph', icon: '📊', name: 'Chart', description: 'Statistics' },
-    ];
+const WidgetPalette: React.FC<WidgetPaletteProps> = ({
+    onAddWidget, widgets, gridSettings, onLoadLayout, showToast, showConfirm
+}) => {
+    const fileInputRef = useRef<HTMLInputElement>(null);
+    const [isHovered, setIsHovered] = useState(false);
 
     const exportLayout = useCallback(() => {
         try {
@@ -157,106 +156,108 @@ const WidgetPalette: React.FC<WidgetPaletteProps> = ({
         );
     }, [widgets.length, onLoadLayout, showToast, showConfirm]);
 
-
     return (
-        <div className="fixed top-4 right-4 z-50 flex flex-col items-end">
-            {/* Toggle Button - Always visible in top-right corner */}
-            <button
-                onClick={() => setIsCollapsed(!isCollapsed)}
-                className="w-12 h-12 bg-white rounded-lg shadow-md border border-gray-200 mb-3 flex items-center justify-center text-gray-600 hover:text-gray-800 hover:shadow-lg transition-all duration-200 z-60"
-                title={isCollapsed ? "Open Widget Library" : "Close Widget Library"}
+        <>
+            {/* Off-canvas Sidebar - Always visible as icons, expands on hover */}
+            <aside
+                className={`fixed top-16 left-0 h-[calc(100vh-4rem)] z-40 bg-white shadow-xl border-r border-gray-200 transition-all duration-300
+                    ${isHovered ? 'w-56' : 'w-16'}`}
+                onMouseEnter={() => setIsHovered(true)}
+                onMouseLeave={() => setIsHovered(false)}
             >
-                {isCollapsed ? (
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                    </svg>
-                ) : (
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                )}
-            </button>
-
-            {/* Main Panel */}
-            <div className={`w-72 bg-white rounded-lg shadow-lg border border-gray-200 p-4 transition-all duration-300 transform
-                           ${isCollapsed ? 'opacity-0 scale-95 pointer-events-none' : 'opacity-100 scale-100'}`}>
-                {/* Header */}
-                <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-lg font-semibold text-gray-800">Widgets</h3>
-                    <div className="flex items-center gap-1">
-                        <button
-                            onClick={exportLayout}
-                            className="px-2 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors disabled:bg-gray-400"
-                            title="Export layout to JSON file"
-                            disabled={widgets.length === 0}
-                        >
-                            💾 Save
-                        </button>
-                        <button
-                            onClick={() => fileInputRef.current?.click()}
-                            className="px-2 py-1 text-xs bg-green-500 text-white rounded hover:bg-green-600 transition-colors"
-                            title="Import layout from JSON file"
-                        >
-                            📁 Load
-                        </button>
-
-                        <button
-                            onClick={() => setIsCollapsed(true)}
-                            className="w-6 h-6 text-gray-400 hover:text-gray-600 flex items-center justify-center"
-                        >
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                            </svg>
-                        </button>
-                    </div>
-                </div>
-
-                {/* Widget Grid */}
-                <div className="grid grid-cols-2 gap-3 mb-4">
+                <div className="flex flex-col items-center pt-6 space-y-2 h-full">
+                    {/* Widget Types */}
                     {widgetTypes.map((type) => (
                         <button
                             key={type.type}
                             onClick={() => onAddWidget(type.type)}
-                            className="group p-4 bg-gray-50 hover:bg-blue-50 rounded-lg border border-gray-200 hover:border-blue-200 transition-all duration-200 text-left"
+                            className="group flex items-center w-full px-2 py-3 rounded-lg hover:bg-blue-50 transition-all"
                         >
-                            <div className="text-2xl mb-2">{type.icon}</div>
-                            <div className="text-sm font-medium text-gray-800 mb-1">{type.name}</div>
-                            <div className="text-xs text-gray-500">{type.description}</div>
+                            <span className="text-2xl">{type.icon}</span>
+                            <span
+                                className={`ml-4 text-sm font-medium text-gray-800 transition-opacity duration-200
+                                    ${isHovered ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+                            >
+                                {type.name}
+                            </span>
                         </button>
                     ))}
-                </div>
 
-                {/* Clear All Button */}
-                <div className="border-t pt-3 mb-4">
+                    {/* Divider */}
+                    <div className="w-10 h-px bg-gray-200 my-2" />
+
+                    {/* Save */}
                     <button
-                        onClick={clearAllWidgets}
-                        className="w-full px-3 py-2 text-xs bg-red-50 text-red-600 rounded hover:bg-red-100 border border-red-200 disabled:bg-gray-100 disabled:text-gray-400"
+                        onClick={exportLayout}
+                        className="group flex items-center w-full px-2 py-3 rounded-lg hover:bg-blue-50 transition-all"
                         disabled={widgets.length === 0}
                     >
-                        🗑️ Clear All ({widgets.length})
+                        <span className="text-xl">💾</span>
+                        <span
+                            className={`ml-4 text-sm font-medium text-gray-800 transition-opacity duration-200
+                                ${isHovered ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+                        >
+                            Save Layout
+                        </span>
+                    </button>
+
+                    {/* Load */}
+                    <button
+                        onClick={() => fileInputRef.current?.click()}
+                        className="group flex items-center w-full px-2 py-3 rounded-lg hover:bg-green-50 transition-all"
+                    >
+                        <span className="text-xl">📁</span>
+                        <span
+                            className={`ml-4 text-sm font-medium text-gray-800 transition-opacity duration-200
+                                ${isHovered ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+                        >
+                            Load Layout
+                        </span>
+                    </button>
+
+                    {/* Clear All */}
+                    <button
+                        onClick={clearAllWidgets}
+                        className="group flex items-center w-full px-2 py-3 rounded-lg hover:bg-red-50 transition-all"
+                        disabled={widgets.length === 0}
+                    >
+                        <span className="text-xl">🗑️</span>
+                        <span
+                            className={`ml-4 text-sm font-medium text-gray-800 transition-opacity duration-200
+                                ${isHovered ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+                        >
+                            Clear All
+                        </span>
+                    </button>
+
+                    {/* Hidden file input */}
+                    <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept=".json"
+                        onChange={importLayout}
+                        className="hidden"
+                    />
+
+                    {/* Spacer */}
+                    <div className="flex-1" />
+
+                    {/* Help Icon */}
+                    <button
+                        className="group flex items-center w-full px-2 py-3 rounded-lg hover:bg-gray-100 transition-all mb-6"
+                        tabIndex={-1}
+                    >
+                        <span className="text-xl">❔</span>
+                        <span
+                            className={`ml-4 text-sm font-medium text-gray-800 transition-opacity duration-200
+                                ${isHovered ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+                        >
+                            Help & Tips
+                        </span>
                     </button>
                 </div>
-
-                {/* Help Section */}
-                <div className="p-3 bg-gray-50 rounded-lg">
-                    <p className="text-xs text-gray-600 leading-relaxed">
-                        <strong>Pro Tips:</strong><br />
-                        • Drag widgets to move them around<br />
-                        • Use bottom-right corner to resize<br />
-                        • Save layouts to preserve your work<br />
-                    </p>
-                </div>
-
-                {/* Hidden file input */}
-                <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept=".json"
-                    onChange={importLayout}
-                    className="hidden"
-                />
-            </div>
-        </div>
+            </aside>
+        </>
     );
 };
 

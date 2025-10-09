@@ -26,6 +26,8 @@ export interface GridSettings {
     showGridlines: boolean;     // Whether to display grid lines
     cellWidth: number;          // Width of each grid cell in pixels
     cellHeight: number;         // Height of each grid cell in pixels
+    offsetX?: number;           // Sidebar offset in px
+    offsetY?: number;           // Header offset in px
 }
 
 /**
