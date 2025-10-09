@@ -251,8 +251,8 @@ const DraggableWidget = React.memo<{
 
     return (
         <div
-            className={`absolute bg-white rounded-lg shadow-sm border border-gray-200 group select-none transition-all duration-200
-                ${isDragging ? 'shadow-lg ring-2 ring-blue-300' : 'hover:shadow-md'}`}
+            className={`absolute bg-white rounded-lg border border-gray-200 group select-none transition-all duration-200
+                ${isDragging ? ' ring-2 ring-blue-300' : ''}`}
             style={style}
         >
             {/* Widget Header */}

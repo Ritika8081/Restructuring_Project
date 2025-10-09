@@ -286,7 +286,7 @@ const BasicGraphRealtime: React.FC<BasicGraphRealtimeProps> = ({
             flex: 'none'
           }}>
             {/* Channel Label */}
-            <div className="absolute top-1 left-2 z-10 text-xs font-medium px-2 py-1 bg-white bg-opacity-90 rounded shadow-sm"
+            <div className="absolute top-1 left-2 z-10 text-xs font-medium px-2 py-1 bg-white bg-opacity-90 rounded "
                  style={{ color: channel.color }}>
               {channel.name}
             </div>

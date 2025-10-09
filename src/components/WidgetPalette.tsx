@@ -160,7 +160,7 @@ const WidgetPalette: React.FC<WidgetPaletteProps> = ({
         <>
             {/* Off-canvas Sidebar - Always visible as icons, expands on hover */}
             <aside
-                className={`fixed top-16 left-0 h-[calc(100vh-4rem)] z-40 bg-white shadow-xl border-r border-gray-200 transition-all duration-300
+                className={`fixed top-16 left-0 h-[calc(100vh-4rem)] z-40 bg-white border-r border-gray-200 transition-all duration-300
                     ${isHovered ? 'w-56' : 'w-16'}`}
                 onMouseEnter={() => setIsHovered(true)}
                 onMouseLeave={() => setIsHovered(false)}
