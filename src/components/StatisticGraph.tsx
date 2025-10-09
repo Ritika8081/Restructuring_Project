@@ -1,441 +1,292 @@
 'use client';
 
-import React, { useMemo } from 'react';
+import React, { useEffect, useRef } from 'react';
 
-interface DataPoint {
-    label: string;
-    value: number;
-    color?: string;
+interface StatisticData {
+  label: string;
+  value: number;
 }
 
 interface StatisticGraphProps {
-    data?: DataPoint[];
-    type?: 'bar' | 'line' | 'area' | 'pie' | 'donut';
-    width?: number;
-    height?: number;
-    colors?: string[];
-    showLabels?: boolean;
-    showValues?: boolean;
-    showGrid?: boolean;
-    animate?: boolean;
-    className?: string;
+  data: StatisticData[];
+  type: 'bar' | 'line';
+  width?: number;
+  height?: number;
+  colors?: string[];
+  showLabels?: boolean;
+  showValues?: boolean;
+  showGrid?: boolean;
+  backgroundColor?: string;
 }
 
 const StatisticGraph: React.FC<StatisticGraphProps> = ({
-    data,
-    type = 'bar',
-    width = 300,
-    height = 200,
-    colors = [
-        '#8B5CF6', '#A78BFA', '#C4B5FD', '#DDD6FE', 
-        '#EDE9FE', '#F3F0FF', '#7C3AED', '#6D28D9'
-    ],
-    showLabels = true,
-    showValues = true,
-    showGrid = true,
-    animate = true,
-    className = ''
+  data = [],
+  type = 'bar',
+  width = 400,
+  height = 300,
+  colors = ['#3b82f6', '#ef4444', '#10b981', '#f97316', '#8b5cf6', '#ec4899'],
+  showLabels = true,
+  showValues = true,
+  showGrid = true,
+  backgroundColor = '#ffffff'
 }) => {
-    // Default sample data with better values for visual appeal
-    const defaultData: DataPoint[] = [
-        { label: 'Q1', value: 85 },
-        { label: 'Q2', value: 72 },
-        { label: 'Q3', value: 95 },
-        { label: 'Q4', value: 68 },
-        { label: 'Q5', value: 89 },
-        { label: 'Q6', value: 76 },
-    ];
+  const canvasRef = useRef<HTMLCanvasElement>(null);
 
-    const chartData = useMemo(() => {
-        const actualData = data && data.length > 0 ? data : defaultData;
-        const maxValue = Math.max(...actualData.map(d => d.value));
-        const minValue = Math.min(...actualData.map(d => d.value));
-        
-        return {
-            data: actualData.map((item, index) => ({
-                ...item,
-                color: item.color || colors[index % colors.length],
-                normalizedValue: maxValue > 0 ? item.value / maxValue : 0
-            })),
-            maxValue,
-            minValue,
-            range: maxValue - minValue
-        };
-    }, [data, colors, defaultData]);
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || data.length === 0) return;
 
-    // Bar Chart Component with improved gradients
-    const BarChart = () => {
-        const padding = { top: 20, right: 20, bottom: 40, left: 40 };
-        const chartWidth = width - padding.left - padding.right;
-        const chartHeight = height - padding.top - padding.bottom;
-        const barWidth = chartWidth / chartData.data.length * 0.7;
-        const barSpacing = chartWidth / chartData.data.length;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
 
-        return (
-            <svg width={width} height={height} className="overflow-visible">
-                <defs>
-                    {chartData.data.map((item, index) => (
-                        <linearGradient key={index} id={`barGradient-${index}-${width}`} x1="0%" y1="0%" x2="0%" y2="100%">
-                            <stop offset="0%" stopColor={item.color} stopOpacity="0.9" />
-                            <stop offset="50%" stopColor={item.color} stopOpacity="0.7" />
-                            <stop offset="100%" stopColor={item.color} stopOpacity="0.5" />
-                        </linearGradient>
-                    ))}
-                    
-                    {/* Glow effect for bars */}
-                    <filter id={`barGlow-${width}`}>
-                        <feGaussianBlur stdDeviation="2" result="coloredBlur"/>
-                        <feMerge> 
-                            <feMergeNode in="coloredBlur"/>
-                            <feMergeNode in="SourceGraphic"/>
-                        </feMerge>
-                    </filter>
-                </defs>
+    // Set canvas size with device pixel ratio for sharp rendering
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = width * dpr;
+    canvas.height = height * dpr;
+    canvas.style.width = `${width}px`;
+    canvas.style.height = `${height}px`;
+    ctx.scale(dpr, dpr);
 
-                {/* Enhanced grid lines */}
-                {showGrid && (
-                    <g opacity="0.4">
-                        {[0, 0.25, 0.5, 0.75, 1].map((ratio, index) => (
-                            <line
-                                key={index}
-                                x1={padding.left}
-                                y1={padding.top + chartHeight * ratio}
-                                x2={padding.left + chartWidth}
-                                y2={padding.top + chartHeight * ratio}
-                                stroke="rgba(255, 255, 255, 0.3)"
-                                strokeWidth="1"
-                                strokeDasharray="3,3"
-                            />
-                        ))}
-                    </g>
-                )}
+    // Clear canvas
+    ctx.fillStyle = backgroundColor;
+    ctx.fillRect(0, 0, width, height);
 
-                {/* Bars with improved styling */}
-                {chartData.data.map((item, index) => {
-                    const barHeight = chartHeight * item.normalizedValue;
-                    const x = padding.left + index * barSpacing + (barSpacing - barWidth) / 2;
-                    const y = padding.top + chartHeight - barHeight;
+    // Calculate dimensions
+    const padding = 60;
+    const chartWidth = width - padding * 2;
+    const chartHeight = height - padding * 2;
+    const maxValue = Math.max(...data.map(d => d.value));
+    const minValue = Math.min(...data.map(d => d.value));
+    const valueRange = maxValue - minValue || 1;
 
-                    return (
-                        <g key={index}>
-                            {/* Bar shadow */}
-                            <rect
-                                x={x + 2}
-                                y={y + 2}
-                                width={barWidth}
-                                height={barHeight}
-                                fill="rgba(0, 0, 0, 0.2)"
-                                rx="6"
-                                className="opacity-50"
-                            />
-                            
-                            {/* Main bar */}
-                            <rect
-                                x={x}
-                                y={y}
-                                width={barWidth}
-                                height={barHeight}
-                                fill={`url(#barGradient-${index}-${width})`}
-                                stroke="rgba(255, 255, 255, 0.2)"
-                                strokeWidth="1"
-                                rx="6"
-                                filter={`url(#barGlow-${width})`}
-                                className={animate ? "transition-all duration-1000 ease-out" : ""}
-                            />
-                            
-                            {/* Values on top of bars */}
-                            {showValues && (
-                                <text
-                                    x={x + barWidth / 2}
-                                    y={y - 8}
-                                    textAnchor="middle"
-                                    fill="rgba(255, 255, 255, 0.9)"
-                                    fontSize={Math.max(8, Math.min(12, width / 25))}
-                                    fontWeight="600"
-                                    className="drop-shadow-sm"
-                                >
-                                    {item.value}
-                                </text>
-                            )}
-
-                            {/* Labels */}
-                            {showLabels && (
-                                <text
-                                    x={x + barWidth / 2}
-                                    y={height - 12}
-                                    textAnchor="middle"
-                                    fill="rgba(255, 255, 255, 0.8)"
-                                    fontSize={Math.max(8, Math.min(11, width / 30))}
-                                    fontWeight="500"
-                                >
-                                    {item.label}
-                                </text>
-                            )}
-                        </g>
-                    );
-                })}
-            </svg>
-        );
-    };
-
-    // Line Chart Component
-    const LineChart = () => {
-        const padding = { top: 20, right: 20, bottom: 40, left: 40 };
-        const chartWidth = width - padding.left - padding.right;
-        const chartHeight = height - padding.top - padding.bottom;
-
-        const points = chartData.data.map((item, index) => ({
-            x: padding.left + (index * chartWidth) / (chartData.data.length - 1),
-            y: padding.top + chartHeight - (chartHeight * item.normalizedValue),
-            ...item
-        }));
-
-        const pathData = points.reduce((path, point, index) => {
-            const command = index === 0 ? 'M' : 'L';
-            return `${path} ${command} ${point.x} ${point.y}`;
-        }, '');
-
-        return (
-            <svg width={width} height={height} className="overflow-visible">
-                <defs>
-                    <linearGradient id="lineGradient" x1="0%" y1="0%" x2="0%" y2="100%">
-                        <stop offset="0%" stopColor={colors[0]} stopOpacity="0.3" />
-                        <stop offset="100%" stopColor={colors[0]} stopOpacity="0.1" />
-                    </linearGradient>
-                </defs>
-
-                {/* Grid lines */}
-                {showGrid && (
-                    <g opacity="0.3">
-                        {[0, 0.25, 0.5, 0.75, 1].map((ratio, index) => (
-                            <line
-                                key={index}
-                                x1={padding.left}
-                                y1={padding.top + chartHeight * ratio}
-                                x2={padding.left + chartWidth}
-                                y2={padding.top + chartHeight * ratio}
-                                stroke="rgba(148, 163, 184, 0.5)"
-                                strokeWidth="1"
-                                strokeDasharray="2,2"
-                            />
-                        ))}
-                    </g>
-                )}
-
-                {/* Area fill */}
-                {type === 'area' && (
-                    <path
-                        d={`${pathData} L ${points[points.length - 1].x} ${padding.top + chartHeight} L ${padding.left} ${padding.top + chartHeight} Z`}
-                        fill="url(#lineGradient)"
-                    />
-                )}
-
-                {/* Line */}
-                <path
-                    d={pathData}
-                    fill="none"
-                    stroke={colors[0]}
-                    strokeWidth="2"
-                    strokeLinejoin="round"
-                    strokeLinecap="round"
-                />
-
-                {/* Points */}
-                {points.map((point, index) => (
-                    <g key={index}>
-                        <circle
-                            cx={point.x}
-                            cy={point.y}
-                            r="4"
-                            fill={colors[0]}
-                            stroke="white"
-                            strokeWidth="2"
-                        />
-                        
-                        {/* Values */}
-                        {showValues && (
-                            <text
-                                x={point.x}
-                                y={point.y - 10}
-                                textAnchor="middle"
-                                fill="rgba(255, 255, 255, 0.9)"
-                                fontSize="10"
-                                fontWeight="500"
-                            >
-                                {point.value}
-                            </text>
-                        )}
-
-                        {/* Labels */}
-                        {showLabels && (
-                            <text
-                                x={point.x}
-                                y={height - 10}
-                                textAnchor="middle"
-                                fill="rgba(255, 255, 255, 0.7)"
-                                fontSize="10"
-                            >
-                                {point.label}
-                            </text>
-                        )}
-                    </g>
-                ))}
-            </svg>
-        );
-    };
-
-    // Pie/Donut Chart Component
-    const PieChart = () => {
-        const centerX = width / 2;
-        const centerY = height / 2;
-        const radius = Math.min(width, height) / 2 - 30;
-        const innerRadius = type === 'donut' ? radius * 0.5 : 0;
-        
-        const total = chartData.data.reduce((sum, item) => sum + item.value, 0);
-        let currentAngle = -Math.PI / 2; // Start from top
-
-        const segments = chartData.data.map((item, index) => {
-            const angle = (item.value / total) * 2 * Math.PI;
-            const startAngle = currentAngle;
-            const endAngle = currentAngle + angle;
-            
-            const x1 = centerX + radius * Math.cos(startAngle);
-            const y1 = centerY + radius * Math.sin(startAngle);
-            const x2 = centerX + radius * Math.cos(endAngle);
-            const y2 = centerY + radius * Math.sin(endAngle);
-            
-            const largeArcFlag = angle > Math.PI ? 1 : 0;
-            
-            let pathData;
-            if (innerRadius > 0) {
-                // Donut chart
-                const ix1 = centerX + innerRadius * Math.cos(startAngle);
-                const iy1 = centerY + innerRadius * Math.sin(startAngle);
-                const ix2 = centerX + innerRadius * Math.cos(endAngle);
-                const iy2 = centerY + innerRadius * Math.sin(endAngle);
-                
-                pathData = `M ${x1} ${y1} A ${radius} ${radius} 0 ${largeArcFlag} 1 ${x2} ${y2} L ${ix2} ${iy2} A ${innerRadius} ${innerRadius} 0 ${largeArcFlag} 0 ${ix1} ${iy1} Z`;
-            } else {
-                // Pie chart
-                pathData = `M ${centerX} ${centerY} L ${x1} ${y1} A ${radius} ${radius} 0 ${largeArcFlag} 1 ${x2} ${y2} Z`;
-            }
-
-            // Label position
-            const labelAngle = startAngle + angle / 2;
-            const labelRadius = radius + 15;
-            const labelX = centerX + labelRadius * Math.cos(labelAngle);
-            const labelY = centerY + labelRadius * Math.sin(labelAngle);
-
-            currentAngle = endAngle;
-
-            return {
-                pathData,
-                color: item.color,
-                value: item.value,
-                label: item.label,
-                percentage: ((item.value / total) * 100).toFixed(1),
-                labelX,
-                labelY
-            };
-        });
-
-        return (
-            <svg width={width} height={height} className="overflow-visible">
-                {segments.map((segment, index) => (
-                    <g key={index}>
-                        <path
-                            d={segment.pathData}
-                            fill={segment.color}
-                            stroke="white"
-                            strokeWidth="2"
-                            className={animate ? "transition-all duration-1000 ease-out" : ""}
-                        />
-                        
-                        {/* Labels */}
-                        {showLabels && (
-                            <text
-                                x={segment.labelX}
-                                y={segment.labelY}
-                                textAnchor="middle"
-                                fill="rgba(255, 255, 255, 0.9)"
-                                fontSize="10"
-                                fontWeight="500"
-                            >
-                                {segment.label}
-                            </text>
-                        )}
-                        
-                        {/* Values/Percentages */}
-                        {showValues && (
-                            <text
-                                x={segment.labelX}
-                                y={segment.labelY + 12}
-                                textAnchor="middle"
-                                fill="rgba(255, 255, 255, 0.7)"
-                                fontSize="9"
-                            >
-                                {segment.percentage}%
-                            </text>
-                        )}
-                    </g>
-                ))}
-                
-                {/* Center text for donut */}
-                {type === 'donut' && (
-                    <g>
-                        <text
-                            x={centerX}
-                            y={centerY - 5}
-                            textAnchor="middle"
-                            fill="rgba(255, 255, 255, 0.9)"
-                            fontSize="14"
-                            fontWeight="600"
-                        >
-                            Total
-                        </text>
-                        <text
-                            x={centerX}
-                            y={centerY + 10}
-                            textAnchor="middle"
-                            fill="rgba(255, 255, 255, 0.7)"
-                            fontSize="12"
-                        >
-                            {total}
-                        </text>
-                    </g>
-                )}
-            </svg>
-        );
-    };
-
-    if (chartData.data.length === 0) {
-        return (
-            <div className={`flex items-center justify-center ${className}`} style={{ width, height }}>
-                <div className="text-white/50 text-sm">No data available</div>
-            </div>
-        );
+    // Draw grid if enabled
+    if (showGrid) {
+      ctx.strokeStyle = '#e5e7eb';
+      ctx.lineWidth = 0.5;
+      
+      // Horizontal grid lines
+      for (let i = 0; i <= 5; i++) {
+        const y = padding + (chartHeight * i) / 5;
+        ctx.beginPath();
+        ctx.moveTo(padding, y);
+        ctx.lineTo(padding + chartWidth, y);
+        ctx.stroke();
+      }
+      
+      // Vertical grid lines for bar chart
+      if (type === 'bar') {
+        for (let i = 0; i <= data.length; i++) {
+          const x = padding + (chartWidth * i) / data.length;
+          ctx.beginPath();
+          ctx.moveTo(x, padding);
+          ctx.lineTo(x, padding + chartHeight);
+          ctx.stroke();
+        }
+      }
     }
 
-    return (
-        <div className={`relative ${className}`}>
-          {/* Card Header */}
-          <div className="absolute top-2 left-2 right-2 z-20 pointer-events-none">
-            <h3 className="text-white font-semibold text-sm">
-              {type === 'bar' ? 'Bar Chart' : 
-               type === 'line' ? 'Line Chart' : 
-               type === 'area' ? 'Area Chart' : 
-               type === 'pie' ? 'Pie Chart' : 
-               type === 'donut' ? 'Donut Chart' : 'Statistics'}
-            </h3>
-          </div>
+    if (type === 'bar') {
+      // Draw bars
+      const barWidth = (chartWidth / data.length) * 0.7;
+      const barSpacing = (chartWidth / data.length) * 0.3;
+
+      data.forEach((item, index) => {
+        const normalizedValue = Math.max(0, (item.value - minValue) / valueRange);
+        const barHeight = normalizedValue * chartHeight;
+        const x = padding + (index * chartWidth) / data.length + barSpacing / 2;
+        const y = padding + chartHeight - barHeight;
+
+        // Draw bar with gradient
+        const gradient = ctx.createLinearGradient(0, y, 0, y + barHeight);
+        const color = colors[index % colors.length];
+        gradient.addColorStop(0, color);
+        gradient.addColorStop(1, color + '80');
+        
+        ctx.fillStyle = gradient;
+        ctx.fillRect(x, y, barWidth, barHeight);
+
+        // Draw border
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        ctx.strokeRect(x, y, barWidth, barHeight);
+
+        // Draw value label if enabled
+        if (showValues) {
+          ctx.fillStyle = '#374151';
+          ctx.font = '12px -apple-system, BlinkMacSystemFont, sans-serif';
+          ctx.textAlign = 'center';
+          const valueText = typeof item.value === 'number' 
+            ? item.value.toFixed(1) 
+            : String(item.value);
+          ctx.fillText(valueText, x + barWidth / 2, y - 8);
+        }
+
+        // Draw label if enabled
+        if (showLabels) {
+          ctx.fillStyle = '#6b7280';
+          ctx.font = '11px -apple-system, BlinkMacSystemFont, sans-serif';
+          ctx.textAlign = 'center';
           
-          <div style={{ marginTop: '24px' }}>
-            {type === 'bar' && <BarChart />}
-            {(type === 'line' || type === 'area') && <LineChart />}
-            {(type === 'pie' || type === 'donut') && <PieChart />}
-          </div>
-        </div>
+          const labelY = padding + chartHeight + 20;
+          const labelX = x + barWidth / 2;
+          
+          // Rotate labels if they're long
+          if (item.label.length > 8) {
+            ctx.save();
+            ctx.translate(labelX, labelY);
+            ctx.rotate(-Math.PI / 6);
+            ctx.fillText(item.label, 0, 0);
+            ctx.restore();
+          } else {
+            ctx.fillText(item.label, labelX, labelY);
+          }
+        }
+      });
+    } else if (type === 'line') {
+      // Draw line chart
+      if (data.length > 1) {
+        // Use the first color for the main line
+        ctx.strokeStyle = colors[0];
+        ctx.lineWidth = 3;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.beginPath();
+
+        // Create smooth curve
+        data.forEach((item, index) => {
+          const x = padding + (index * chartWidth) / (data.length - 1);
+          const normalizedValue = (item.value - minValue) / valueRange;
+          const y = padding + chartHeight - (normalizedValue * chartHeight);
+
+          if (index === 0) {
+            ctx.moveTo(x, y);
+          } else {
+            ctx.lineTo(x, y);
+          }
+        });
+
+        ctx.stroke();
+
+        // Draw data points with individual colors
+        data.forEach((item, index) => {
+          const x = padding + (index * chartWidth) / (data.length - 1);
+          const normalizedValue = (item.value - minValue) / valueRange;
+          const y = padding + chartHeight - (normalizedValue * chartHeight);
+
+          // Get color for this data point
+          const pointColor = colors[index % colors.length];
+
+          // Draw outer ring with border for better visibility
+          ctx.strokeStyle = pointColor;
+          ctx.lineWidth = 2;
+          ctx.fillStyle = pointColor;
+          ctx.beginPath();
+          ctx.arc(x, y, 7, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+
+          // Inner dot (white center)
+          ctx.fillStyle = '#ffffff';
+          ctx.beginPath();
+          ctx.arc(x, y, 3, 0, Math.PI * 2);
+          ctx.fill();
+
+          // Draw value label if enabled
+          if (showValues) {
+            ctx.fillStyle = '#374151';
+            ctx.font = '11px -apple-system, BlinkMacSystemFont, sans-serif';
+            ctx.textAlign = 'center';
+            const valueText = typeof item.value === 'number' 
+              ? item.value.toFixed(1) 
+              : String(item.value);
+            ctx.fillText(valueText, x, y - 12);
+          }
+        });
+
+        // Draw labels if enabled
+        if (showLabels) {
+          data.forEach((item, index) => {
+            const x = padding + (index * chartWidth) / (data.length - 1);
+            ctx.fillStyle = '#6b7280';
+            ctx.font = '11px -apple-system, BlinkMacSystemFont, sans-serif';
+            ctx.textAlign = 'center';
+            
+            const labelY = padding + chartHeight + 20;
+            
+            if (item.label.length > 8) {
+              ctx.save();
+              ctx.translate(x, labelY);
+              ctx.rotate(-Math.PI / 6);
+              ctx.fillText(item.label, 0, 0);
+              ctx.restore();
+            } else {
+              ctx.fillText(item.label, x, labelY);
+            }
+          });
+        }
+      }
+    }
+
+    // Draw axes
+    ctx.strokeStyle = '#374151';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    // Y-axis
+    ctx.moveTo(padding, padding);
+    ctx.lineTo(padding, padding + chartHeight);
+    // X-axis
+    ctx.lineTo(padding + chartWidth, padding + chartHeight);
+    ctx.stroke();
+
+    // Draw Y-axis labels
+    if (showGrid) {
+      ctx.fillStyle = '#6b7280';
+      ctx.font = '10px -apple-system, BlinkMacSystemFont, sans-serif';
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'middle';
+      
+      for (let i = 0; i <= 5; i++) {
+        const value = minValue + (valueRange * (5 - i)) / 5;
+        const y = padding + (chartHeight * i) / 5;
+        const valueText = typeof value === 'number' 
+          ? value.toFixed(1) 
+          : String(value);
+        ctx.fillText(valueText, padding - 8, y);
+      }
+    }
+
+  }, [data, type, width, height, colors, showLabels, showValues, showGrid, backgroundColor]);
+
+  if (data.length === 0) {
+    return (
+      <div 
+        style={{ 
+          width: `${width}px`, 
+          height: `${height}px`,
+          backgroundColor: backgroundColor
+        }}
+        className="flex items-center justify-center border border-gray-200 rounded-lg"
+      >
+        <p className="text-gray-500 text-sm">No data available</p>
+      </div>
     );
+  }
+
+  return (
+    <div 
+      style={{ 
+        width: `${width}px`, 
+        height: `${height}px`,
+        backgroundColor: backgroundColor
+      }}
+      className="border border-gray-200 rounded-lg overflow-hidden"
+    >
+      <canvas
+        ref={canvasRef}
+        className="block"
+      />
+    </div>
+  );
 };
 
 export default StatisticGraph;

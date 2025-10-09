@@ -81,30 +81,39 @@ const Widgets: React.FC = () => {
             const screenWidth = window.innerWidth;
             const screenHeight = window.innerHeight;
             
+            // Calculate optimal grid for maximum widget movement freedom
             const usableWidth = screenWidth;
             const usableHeight = screenHeight;
-            const cellSize = 50;
             
-            const targetCols = Math.floor(usableWidth / cellSize);
-            const targetRows = Math.floor(usableHeight / cellSize);
+            // Use adaptive cell size for better positioning granularity
+            const adaptiveCellSize = screenWidth < 1200 ? 35 : screenWidth < 1600 ? 40 : 45;
+            
+            // Create more grid positions for smoother movement
+            const targetCols = Math.max(24, Math.floor(usableWidth / adaptiveCellSize));
+            const targetRows = Math.max(16, Math.floor(usableHeight / adaptiveCellSize));
             
             setGridSettings(prev => ({
                 ...prev,
                 cols: targetCols,
                 rows: targetRows,
-                cellWidth: cellSize,
-                cellHeight: cellSize
+                cellWidth: adaptiveCellSize,
+                cellHeight: adaptiveCellSize
             }));
 
             // Constrain existing widgets to new grid boundaries
             setWidgets(prevWidgets => 
                 prevWidgets.map(widget => {
-                    // Clamp widget position and size to fit within new grid
-                    const maxX = Math.max(0, targetCols - widget.width);
-                    const maxY = Math.max(0, targetRows - widget.height);
+                    // Allow symmetric positioning with buffer on all edges during screen resize
+                    const edgeBuffer = 2; // More permissive buffer for screen resize
                     
-                    const constrainedX = Math.max(0, Math.min(widget.x, maxX));
-                    const constrainedY = Math.max(0, Math.min(widget.y, maxY));
+                    // Symmetric boundaries for screen resize
+                    const minX = -edgeBuffer; // Allow extending to the left
+                    const maxX = targetCols - widget.width + edgeBuffer; // Allow extending to the right
+                    const minY = -edgeBuffer; // Allow extending to the top  
+                    const maxY = targetRows - widget.height + edgeBuffer; // Allow extending to the bottom
+                    
+                    const constrainedX = Math.max(minX, Math.min(widget.x, maxX));
+                    const constrainedY = Math.max(minY, Math.min(widget.y, maxY));
                     
                     // If widget is too large for new grid, resize it
                     const constrainedWidth = Math.min(widget.width, targetCols);
@@ -265,14 +274,19 @@ const Widgets: React.FC = () => {
                 newHeight = Math.max(activeWidget.minHeight, newHeight);
             }
 
-            // Enhanced boundary constraints with better error handling
+            // Enhanced boundary constraints - allow symmetric edge positioning
             if (dragState.dragType === 'move') {
-                // Ensure widget stays within grid bounds during movement
-                const maxX = Math.max(0, gridSettings.cols - newWidth);
-                const maxY = Math.max(0, gridSettings.rows - newHeight);
+                // Allow widgets to extend beyond grid edges on all sides
+                const edgeBuffer = 1; // Allow 1 grid cell overlap on each edge
                 
-                newX = Math.max(0, Math.min(newX, maxX));
-                newY = Math.max(0, Math.min(newY, maxY));
+                // Symmetric boundaries: left can go negative, right can extend beyond grid
+                const minX = -edgeBuffer; // Allow extending to the left
+                const maxX = gridSettings.cols - newWidth + edgeBuffer; // Allow extending to the right
+                const minY = -edgeBuffer; // Allow extending to the top
+                const maxY = gridSettings.rows - newHeight + edgeBuffer; // Allow extending to the bottom
+                
+                newX = Math.max(minX, Math.min(newX, maxX));
+                newY = Math.max(minY, Math.min(newY, maxY));
             } else if (dragState.dragType === 'resize') {
                 // Ensure widget doesn't exceed grid boundaries during resize
                 const maxAllowedWidth = Math.max(1, gridSettings.cols - newX);
