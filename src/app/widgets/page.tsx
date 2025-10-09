@@ -80,9 +80,7 @@ const Widgets: React.FC = () => {
         const adjustGridToScreen = () => {
             // UI Offsets
             const SIDEBAR_WIDTH_COLLAPSED = 64; // w-16 (px)
-            const SIDEBAR_WIDTH_EXPANDED = 224; // w-56 (px)
             const HEADER_HEIGHT = 64; // h-16 (px)
-            // Use collapsed sidebar for grid calculation (always visible)
             const sidebarWidth = SIDEBAR_WIDTH_COLLAPSED;
             const headerHeight = HEADER_HEIGHT;
             const screenWidth = window.innerWidth;
@@ -90,17 +88,21 @@ const Widgets: React.FC = () => {
             // Calculate usable area for widgets
             const usableWidth = screenWidth - sidebarWidth;
             const usableHeight = screenHeight - headerHeight;
-            // Use adaptive cell size for better positioning granularity
-            const adaptiveCellSize = screenWidth < 1200 ? 35 : screenWidth < 1600 ? 40 : 45;
-            // Create more grid positions for smoother movement
-            const targetCols = Math.max(24, Math.round(usableWidth / adaptiveCellSize));
-            const targetRows = Math.max(16, Math.round(usableHeight / adaptiveCellSize));
+
+            // Choose desired number of columns and rows (can be made configurable)
+            const targetCols = 24;
+            const targetRows = 16;
+
+            // Dynamically calculate cell size to fill available area exactly
+            const cellWidth = usableWidth / targetCols;
+            const cellHeight = usableHeight / targetRows;
+
             setGridSettings(prev => ({
                 ...prev,
                 cols: targetCols,
                 rows: targetRows,
-                cellWidth: adaptiveCellSize,
-                cellHeight: adaptiveCellSize,
+                cellWidth,
+                cellHeight,
                 offsetX: sidebarWidth,
                 offsetY: headerHeight
             }));
@@ -365,7 +367,7 @@ const Widgets: React.FC = () => {
                 style={{
                     left: gridSettings.offsetX || 64,
                     width: `calc(100vw - ${(gridSettings.offsetX || 64)}px)`,
-                    height: '100%'
+                    height: `calc(100vh - ${(gridSettings.offsetY || 64)}px)`
                 }}
             >
                 {GridLines}

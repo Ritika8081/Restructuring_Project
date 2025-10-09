@@ -127,7 +127,41 @@ const DraggableWidget = React.memo<{
         const newChannels = [...widgetChannels, newChannel];
         setWidgetChannels(newChannels);
         handleChannelsChange(newChannels);
-    }, [widgetChannels, handleChannelsChange]);
+        // Request resize to fit all channels
+        if (widget.type === 'basic' && onUpdateWidget) {
+            // Minimum height per channel (should match BasicGraph.tsx logic)
+            const minChannelHeight = 60;
+            const minTotalWidth = 180;
+            const requiredCanvasHeight = (newChannels.length * minChannelHeight) + Math.max(0, newChannels.length - 1);
+            const requiredCanvasWidth = minTotalWidth;
+            const requiredGridWidth = Math.ceil(requiredCanvasWidth / gridSettings.cellWidth);
+            const requiredGridHeight = Math.ceil(requiredCanvasHeight / gridSettings.cellHeight);
+            const minGridWidth = 5;
+            const minGridHeight = 4;
+            const newWidth = Math.max(widget.width, requiredGridWidth, minGridWidth);
+            const newHeight = Math.max(widget.height, requiredGridHeight, minGridHeight);
+            if (widget.width < newWidth || widget.height < newHeight) {
+                const wouldCollide = checkCollisionAtPosition(
+                    widgets.filter(w => w.id !== widget.id),
+                    widget.id,
+                    widget.x,
+                    widget.y,
+                    newWidth,
+                    newHeight,
+                    gridSettings
+                );
+                if (!wouldCollide) {
+                    onUpdateWidget(widget.id, {
+                        width: newWidth,
+                        height: newHeight,
+                        minWidth: Math.max(widget.minWidth || 1, minGridWidth),
+                        minHeight: Math.max(widget.minHeight || 1, minGridHeight),
+                        zIndex: Date.now()
+                    });
+                }
+            }
+        }
+    }, [widgetChannels, handleChannelsChange, widget, onUpdateWidget, gridSettings, widgets]);
 
     /**
      * Remove channel from signal widget (minimum 1 channel required)
@@ -139,7 +173,40 @@ const DraggableWidget = React.memo<{
         const newChannels = widgetChannels.slice(0, -1);
         setWidgetChannels(newChannels);
         handleChannelsChange(newChannels);
-    }, [widgetChannels, handleChannelsChange]);
+        // Request resize to fit all channels
+        if (widget.type === 'basic' && onUpdateWidget) {
+            const minChannelHeight = 60;
+            const minTotalWidth = 180;
+            const requiredCanvasHeight = (newChannels.length * minChannelHeight) + Math.max(0, newChannels.length - 1);
+            const requiredCanvasWidth = minTotalWidth;
+            const requiredGridWidth = Math.ceil(requiredCanvasWidth / gridSettings.cellWidth);
+            const requiredGridHeight = Math.ceil(requiredCanvasHeight / gridSettings.cellHeight);
+            const minGridWidth = 5;
+            const minGridHeight = 4;
+            const newWidth = Math.max(widget.width, requiredGridWidth, minGridWidth);
+            const newHeight = Math.max(widget.height, requiredGridHeight, minGridHeight);
+            if (widget.width < newWidth || widget.height < newHeight) {
+                const wouldCollide = checkCollisionAtPosition(
+                    widgets.filter(w => w.id !== widget.id),
+                    widget.id,
+                    widget.x,
+                    widget.y,
+                    newWidth,
+                    newHeight,
+                    gridSettings
+                );
+                if (!wouldCollide) {
+                    onUpdateWidget(widget.id, {
+                        width: newWidth,
+                        height: newHeight,
+                        minWidth: Math.max(widget.minWidth || 1, minGridWidth),
+                        minHeight: Math.max(widget.minHeight || 1, minGridHeight),
+                        zIndex: Date.now()
+                    });
+                }
+            }
+        }
+    }, [widgetChannels, handleChannelsChange, widget, onUpdateWidget, gridSettings, widgets]);
 
     /**
      * Memoized style calculation for widget positioning and sizing
@@ -238,7 +305,7 @@ const DraggableWidget = React.memo<{
 
             {/* Widget Content Area */}
             <div
-                className="cursor-move overflow-hidden relative"
+                className="cursor-move overflow-hidden relative pb-5"
                 onMouseDown={(e) => handleMouseDown(e, 'move')}
                 style={{
                     height: 'calc(100% - 48px)',
