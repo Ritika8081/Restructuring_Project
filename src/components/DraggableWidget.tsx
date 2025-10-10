@@ -11,7 +11,7 @@ import { checkCollisionAtPosition } from '@/utils/widget.utils';
  * Memoized DraggableWidget component for optimal performance
  * Handles widget rendering, drag/resize interactions, and content display
  */
-const DraggableWidget = React.memo<{
+type DraggableWidgetProps = {
     widget: Widget;
     widgets: Widget[];
     onRemove: (id: string) => void;
@@ -19,7 +19,10 @@ const DraggableWidget = React.memo<{
     dragState: DragState;
     setDragState: React.Dispatch<React.SetStateAction<DragState>>;
     onUpdateWidget?: (id: string, updates: Partial<Widget>) => void;
-}>(({ widget, widgets, onRemove, gridSettings, dragState, setDragState, onUpdateWidget }) => {
+    children?: React.ReactNode;
+};
+
+const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onRemove, gridSettings, dragState, setDragState, onUpdateWidget, children }) => {
     // Widget-specific channel state (for basic signal widgets)
     const [widgetChannels, setWidgetChannels] = useState<any[]>([
         { id: 'ch1', name: 'CH 1', color: '#10B981', visible: true },
@@ -356,15 +359,39 @@ const DraggableWidget = React.memo<{
                             showValues={widget.width >= 3 && widget.height >= 3}
                             showGrid={widget.width >= 4}
                         />
+                    ) : widget.type === 'spiderplot' ? (
+                        <div className="w-full h-full">
+                            <SpiderPlot width={availableWidth} height={availableHeight} />
+                        </div>
                     ) : widget.type === 'FFTGraph' ? (
                         <div className="relative w-full h-full">
-                            <FFTPlotRealtime
-                                color="#3B82F6"
+                            {availableWidth > 100 && availableHeight > 80 ? (
+                                <FFTPlotRealtime
+                                    color="#3B82F6"
+                                    width={availableWidth}
+                                    height={availableHeight}
+                                    bufferSize={256}
+                                    showGrid={widget.width >= 3}
+                                    backgroundColor="rgba(59, 130, 246, 0.05)"
+                                />
+                            ) : (
+                                <div className="flex items-center justify-center h-full text-gray-400 text-xs">
+                                    FFT widget too small to display graph
+                                </div>
+                            )}
+                        </div>
+                    ) : widget.type === 'bargraph' || widget.type === 'statistic' ? (
+                        <div className="w-full h-full">
+                            <StatisticGraph
                                 width={availableWidth}
                                 height={availableHeight}
-                                bufferSize={256}
-                                showGrid={widget.width >= 3}
-                                backgroundColor="rgba(59, 130, 246, 0.05)"
+                                data={[
+                                    { label: 'A', value: 10 },
+                                    { label: 'B', value: 20 },
+                                    { label: 'C', value: 15 },
+                                    { label: 'D', value: 30 }
+                                ]}
+                                type="bar"
                             />
                         </div>
                     ) : widget.type === 'basic' ? (
@@ -383,6 +410,10 @@ const DraggableWidget = React.memo<{
                                 showChannelControls={false}
                                 showLegend={false}
                             />
+                        </div>
+                    ) : children ? (
+                        <div className="w-full h-full flex items-center justify-center p-2">
+                            {children}
                         </div>
                     ) : (
                         <div className="text-gray-500 text-center flex items-center justify-center h-full">

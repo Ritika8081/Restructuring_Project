@@ -12,8 +12,9 @@ export interface Widget {
     minHeight: number;          // Minimum allowed height
     maxWidth?: number;          // Optional maximum width constraint
     maxHeight?: number;         // Optional maximum height constraint
-    type: string;               // Widget type (basic, spiderplot, FFTGraph, bargraph)
+    type: string;               // Widget type (basic, spiderplot, FFTGraph, bargraph, connection-data)
     zIndex?: number;            // Stacking order for overlays
+    connectionType?: string;    // For connection-data widgets: 'ble', 'serial', 'wifi'
 }
 
 /**

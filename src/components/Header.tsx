@@ -32,13 +32,6 @@ const Header: React.FC = () => {
                             <span className="text-lg mr-2">🏠</span>
                             <span className="hidden sm:inline">Home</span>
                         </button>
-                        <button
-                            onClick={handleNavigateToWidgets}
-                            className="flex items-center justify-center px-3 py-2 rounded-md border border-gray-300 bg-gray-50 text-gray-700 hover:bg-blue-50 hover:border-blue-400 transition-colors duration-150 font-medium"
-                        >
-                            <span className="text-lg mr-2">📊</span>
-                            <span className="hidden sm:inline">Widgets</span>
-                        </button>
                     </div>
                 </div>
             </div>

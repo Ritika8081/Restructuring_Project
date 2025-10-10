@@ -7,6 +7,9 @@ import Toast from '@/components/ui/Toast';
 import ConfirmModal from '@/components/ui/ConfirmModal';
 import { Widget, GridSettings, DragState, ToastState, ConfirmState } from '@/types/widget.types';
 import { checkCollisionAtPosition } from '@/utils/widget.utils';
+import ConnectionSelectorWidget from '@/components/ConnectionSelectorWidget';
+import ConnectionDataWidget from '@/components/ConnectionDataWidget';
+import { v4 as uuidv4 } from 'uuid';
 
 /**
  * Main Widgets component - Orchestrates the entire widget dashboard
@@ -16,13 +19,23 @@ const Widgets: React.FC = () => {
     // Widget collection state with default basic widget (positioned for testing movement)
     const [widgets, setWidgets] = useState<Widget[]>([
         {
-            id: 'default-basic',
+            id: 'connection-selector',
             x: 2,
-            y: 2,
-            width: 5,  // Larger width for absolute signal containment
-            height: 4, // Larger height for 1 channel with containment
-            minWidth: 5,  // Enforce larger minimum for basic widgets
-            minHeight: 4, // Enforce larger minimum for basic widgets
+            y: 6,
+            width: 6,
+            height: 5,
+            minWidth: 4,
+            minHeight: 3,
+            type: 'connection-selector',
+        },
+        {
+            id: 'basic-channel',
+            x: 10,
+            y: 7,
+            width: 5,
+            height: 4,
+            minWidth: 5,
+            minHeight: 4,
             type: 'basic',
         },
     ]);
@@ -176,17 +189,33 @@ const Widgets: React.FC = () => {
     const handleAddWidget = useCallback((type: string) => {
         let x = 0, y = 0;
         let found = false;
-        
+
+        // Set default sizes for each widget type
         let defaultWidth = 2;
         let defaultHeight = 2;
         let minWidth = 1;
         let minHeight = 1;
-        
+
         if (type === 'basic') {
             defaultWidth = 5;
             defaultHeight = 4;
             minWidth = 5;
             minHeight = 4;
+        } else if (type === 'spiderplot') {
+            defaultWidth = 6;
+            defaultHeight = 6;
+            minWidth = 4;
+            minHeight = 4;
+        } else if (type === 'FFTGraph') {
+            defaultWidth = 6;
+            defaultHeight = 5;
+            minWidth = 4;
+            minHeight = 3;
+        } else if (type === 'bargraph' || type === 'statistic') {
+            defaultWidth = 5;
+            defaultHeight = 4;
+            minWidth = 3;
+            minHeight = 3;
         }
 
         for (let row = 0; row < gridSettings.rows - defaultHeight + 1 && !found; row++) {
@@ -371,7 +400,8 @@ const Widgets: React.FC = () => {
                 }}
             >
                 {GridLines}
-                {widgets.map((widget) => (
+                {/* Render all widgets in the grid, including new ones from sidebar */}
+                {widgets.map(widget => (
                     <DraggableWidget
                         key={widget.id}
                         widget={widget}
@@ -381,7 +411,29 @@ const Widgets: React.FC = () => {
                         dragState={dragState}
                         setDragState={setDragState}
                         onUpdateWidget={handleUpdateWidget}
-                    />
+                    >
+                        {widget.type === 'connection-selector' && (
+                            <ConnectionSelectorWidget onConnect={(type) => {
+                                setWidgets(prev => [
+                                    ...prev,
+                                    {
+                                        id: uuidv4(),
+                                        x: 17,
+                                        y: 8,
+                                        width: 8,
+                                        height: 6,
+                                        minWidth: 4,
+                                        minHeight: 3,
+                                        type: 'connection-data',
+                                        connectionType: type,
+                                    }
+                                ]);
+                            }} />
+                        )}
+                        {widget.type === 'connection-data' && (
+                            <ConnectionDataWidget type={widget.connectionType as 'ble' | 'serial' | 'wifi' ?? 'serial'} />
+                        )}
+                    </DraggableWidget>
                 ))}
             </div>
 
