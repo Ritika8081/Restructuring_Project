@@ -420,11 +420,12 @@ const Widgets: React.FC = () => {
                         const endY = (toWidget.y + toWidget.height / 2) * gridSettings.cellHeight;
                         // Control points for cubic Bezier curve
                         const dx = Math.abs(endX - startX);
-                        const controlX1 = startX + dx / 2;
-                        const controlY1 = startY;
-                        const controlX2 = endX - dx / 2;
-                        const controlY2 = endY;
-                        const path = `M ${startX} ${startY} C ${controlX1} ${controlY1}, ${controlX2} ${controlY2}, ${endX} ${endY}`;
+                        const controlOffset = Math.max(60, dx / 2);
+                        const c1x = startX + controlOffset;
+                        const c1y = startY;
+                        const c2x = endX - controlOffset;
+                        const c2y = endY;
+                        const path = `M ${startX} ${startY} C ${c1x} ${c1y}, ${c2x} ${c2y}, ${endX} ${endY}`;
                         return (
                             <g key={idx}>
                                 <path d={path} stroke="#90cdf4" strokeWidth={1.5} fill="none" markerEnd="url(#arrowhead)" />

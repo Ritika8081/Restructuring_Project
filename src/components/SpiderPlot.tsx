@@ -33,16 +33,16 @@ const SpiderPlot: React.FC<SpiderPlotProps> = ({
     width = 300,
     height = 300,
     colors = {
-        web: '#475569',
+        web: '#7d838dff',
         fill: '#10B981',
         stroke: '#10B981',
         points: '#10B981',
-        labels: '#374151'
+        labels: '#8b929dff'
     },
     showLabels = true,
     showValues = true,
     className = '',
-    backgroundColor = 'rgba(0, 0, 0, 0.02)',
+    backgroundColor = 'rgba(131, 128, 128, 0.02)',
     webLevels = 5,
     animated = true
 }) => {
@@ -239,13 +239,12 @@ const SpiderPlot: React.FC<SpiderPlotProps> = ({
             for (let level = 1; level <= webLevels; level++) {
                 const levelRadius = WEB_RADIUS * (level / webLevels);
                 const vertices = calculatePentagonVertices(levelRadius);
-                const ringColor = level === webLevels ? webColorStrong : webColorLight;
-                
+                // Use the same color for all rings
+                const ringColor = webColorLight;
                 // Create dotted pentagon by drawing multiple small segments
                 for (let side = 0; side < 5; side++) {
                     const startVertex = vertices[side];
                     const endVertex = vertices[(side + 1) % 5];
-                    
                     // Create dotted pentagon ring segments
                     createDottedLine(
                         plot, 
@@ -322,42 +321,6 @@ const SpiderPlot: React.FC<SpiderPlotProps> = ({
                 
                 plot.addLine(outlineLine);
             }
-
-            // 6. Draw data points (circles at pentagon vertices)
-            const pointColor = hexToColorRGBA(colors.points, 1.0);
-            dataPoints.forEach((point, index) => {
-                if (index < 5) { // Only draw first 5 points for pentagon
-                    const pointLine = new WebglLine(pointColor, 8);
-                    const pointSize = 0.03;
-                    pointLine.lineSpaceX(-1, 2 / 8);
-                    
-                    // Draw circle approximation using octagon
-                    for (let i = 0; i < 8; i++) {
-                        const circleAngle = (i * 2 * Math.PI) / 8;
-                        const px = point.x + pointSize * Math.cos(circleAngle);
-                        const py = point.y + pointSize * Math.sin(circleAngle);
-                        pointLine.setX(i, px);
-                        pointLine.setY(i, py);
-                    }
-                    
-                    plot.addLine(pointLine);
-                }
-            });
-
-            // 7. Add center point
-            const centerLine = new WebglLine(webColor, 8);
-            const centerSize = 0.02;
-            centerLine.lineSpaceX(-1, 2 / 8);
-            
-            for (let i = 0; i < 8; i++) {
-                const angle = (i * 2 * Math.PI) / 8;
-                const cx = centerSize * Math.cos(angle);
-                const cy = centerSize * Math.sin(angle);
-                centerLine.setX(i, cx);
-                centerLine.setY(i, cy);
-            }
-            
-            plot.addLine(centerLine);
 
             setIsInitialized(true);
 
