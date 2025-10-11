@@ -19,14 +19,14 @@ const Widgets: React.FC = () => {
     // Widget collection state with default basic widget (positioned for testing movement)
     const [widgets, setWidgets] = useState<Widget[]>([
         {
-            id: 'connection-selector',
+            id: 'connection-data',
             x: 2,
             y: 6,
-            width: 6,
-            height: 5,
+            width: 8,
+            height: 6,
             minWidth: 4,
             minHeight: 3,
-            type: 'connection-selector',
+            type: 'connection-data',
         },
         {
             id: 'basic-channel',
@@ -412,26 +412,8 @@ const Widgets: React.FC = () => {
                         setDragState={setDragState}
                         onUpdateWidget={handleUpdateWidget}
                     >
-                        {widget.type === 'connection-selector' && (
-                            <ConnectionSelectorWidget onConnect={(type) => {
-                                setWidgets(prev => [
-                                    ...prev,
-                                    {
-                                        id: uuidv4(),
-                                        x: 17,
-                                        y: 8,
-                                        width: 8,
-                                        height: 6,
-                                        minWidth: 4,
-                                        minHeight: 3,
-                                        type: 'connection-data',
-                                        connectionType: type,
-                                    }
-                                ]);
-                            }} />
-                        )}
                         {widget.type === 'connection-data' && (
-                            <ConnectionDataWidget type={widget.connectionType as 'ble' | 'serial' | 'wifi' ?? 'serial'} />
+                            <ConnectionDataWidget />
                         )}
                     </DraggableWidget>
                 ))}

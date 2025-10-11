@@ -17,8 +17,8 @@ const ConnectionSelectorWidget: React.FC<{ onConnect?: (type: string) => void }>
   };
 
   return (
-    <div style={{ padding: '1rem', border: '1px solid #2563eb', borderRadius: '8px', background: '#f0f6ff', minWidth: 220 }}>
-      <h3 style={{ color: '#2563eb', fontWeight: 'bold', marginBottom: 12 }}>Select Connection</h3>
+    <div >
+      <h3 >Select Connection</h3>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         {CONNECTION_TYPES.map((type) => (
           <label key={type.value} style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }}>

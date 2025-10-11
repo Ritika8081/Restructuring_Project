@@ -1,6 +1,8 @@
 'use client';
 import React, { useEffect, useRef, useState, useCallback } from 'react';
+import { useChannelData } from '@/lib/channelDataContext';
 import { WebglPlot, WebglLine, ColorRGBA } from 'webgl-plot';
+import { EXGFilter, Notch } from './lib/filter';
 
 interface Channel {
   id: string;
@@ -32,22 +34,43 @@ const DEFAULT_COLORS = [
   '#EC4899', '#6366F1', '#14B8A6', '#F43F5E'
 ];
 
-const BasicGraphRealtime: React.FC<BasicGraphRealtimeProps> = ({
-  channels: initialChannels = [
-    { id: 'ch1', name: 'CH 1', color: '#10B981', visible: true },
-  ],
-  bufferSize = 512,
-  width = 400,
-  height = 200,
-  showGrid = true,
-  backgroundColor = 'rgba(0, 0, 0, 0.1)',
-  showLegend = false,
-  sampleRate = 60,
-  timeWindow = 8,
-  onChannelsChange,
-  showChannelControls = false,
-  onSizeRequest,
-}) => {
+const BasicGraphRealtime: React.FC<BasicGraphRealtimeProps> = (props) => {
+  // Create filter instances for each channel
+  const exgFilters = useRef([
+    new EXGFilter(),
+    new EXGFilter(),
+    new EXGFilter()
+  ]);
+  const notchFilters = useRef([
+    new Notch(),
+    new Notch(),
+    new Notch()
+  ]);
+
+  // Example filter setup (customize as needed)
+  // Set bits and sampling rate for EXGFilter
+  useEffect(() => {
+    // Assume 500Hz, 12-bit ADC for demo; adjust as needed
+    exgFilters.current.forEach(f => f.setbits('12', 500));
+    notchFilters.current.forEach(f => f.setbits(500));
+  }, []);
+  const { samples } = useChannelData();
+  const {
+    channels: initialChannels = [
+      { id: 'ch1', name: 'CH 1', color: '#10B981', visible: true },
+    ],
+  bufferSize = 1000,
+    width = 400,
+    height = 200,
+    showGrid = true,
+    backgroundColor = 'rgba(0, 0, 0, 0.1)',
+    showLegend = false,
+    sampleRate = 60,
+    timeWindow = 8,
+    onChannelsChange,
+    showChannelControls = false,
+    onSizeRequest,
+  } = props;
   const [channels, setChannels] = useState<Channel[]>(initialChannels);
   const canvasRefs = useRef<Map<string, HTMLCanvasElement>>(new Map());
   const plotRefs = useRef<Map<string, WebglPlot>>(new Map());
@@ -225,44 +248,31 @@ const BasicGraphRealtime: React.FC<BasicGraphRealtimeProps> = ({
   };
 
   // Simulated multi-channel data stream 
+  // Live device data stream from context
   useEffect(() => {
-    const interval = setInterval(() => {
-      const time = Date.now() / 1000;
+    if (!samples || samples.length === 0) return;
+    // Filter and normalize device data before plotting
+    const normalize = (value: number) => {
+      if (value === undefined || value === null) return 0;
+      return Math.max(-1, Math.min(1, value));
+    };
+    samples.slice(-bufferSize).forEach(sample => {
+      if (channels.length > 0) {
+        // Apply EXG and Notch filters to each channel
+        let filteredCh0 = notchFilters.current[0].process(sample.ch0, 1);
+        filteredCh0 = exgFilters.current[0].process(filteredCh0, 1); // type 1: ECG
+        if (channels[0].visible && sample.ch0 !== undefined) pushData(channels[0].id, normalize(filteredCh0));
 
-      channels.forEach((channel, index) => {
-        if (!channel.visible) return;
+        let filteredCh1 = notchFilters.current[1].process(sample.ch1, 1);
+        filteredCh1 = exgFilters.current[1].process(filteredCh1, 1); // type 1: ECG
+        if (channels[1] && channels[1].visible && sample.ch1 !== undefined) pushData(channels[1].id, normalize(filteredCh1));
 
-        // Generate different signals for each channel
-        let signal = 0;
-        switch (index % 6) {
-          case 0:
-            signal = Math.sin(time * 2) * 0.6 + Math.random() * 0.08;
-            break;
-          case 1:
-            signal = Math.cos(time * 3) * 0.5 + Math.sin(time * 7) * 0.15;
-            break;
-          case 2:
-            signal = Math.sin(time * 1.5) * 0.6 + Math.cos(time * 4) * 0.2;
-            break;
-          case 3:
-            signal = Math.sin(time * 2.5) * 0.4 + Math.sin(time * 6) * 0.3;
-            break;
-          case 4:
-            signal = Math.cos(time * 1.8) * 0.7 + Math.sin(time * 5) * 0.08;
-            break;
-          case 5:
-            signal = Math.sin(time * 3.2) * 0.5 + Math.cos(time * 2.1) * 0.25;
-            break;
-        }
-        
-        signal = Math.max(-0.9, Math.min(0.9, signal));
-
-        pushData(channel.id, signal);
-      });
-    }, 1000 / sampleRate);
-
-    return () => clearInterval(interval);
-  }, [channels, sampleRate]);
+        let filteredCh2 = notchFilters.current[2].process(sample.ch2, 1);
+        filteredCh2 = exgFilters.current[2].process(filteredCh2, 1); // type 1: ECG
+        if (channels[2] && channels[2].visible && sample.ch2 !== undefined) pushData(channels[2].id, normalize(filteredCh2));
+      }
+    });
+  }, [samples, channels, bufferSize]);
 
   return (
     <div

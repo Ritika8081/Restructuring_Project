@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect } from 'react'
+import { useChannelData } from '@/lib/channelDataContext';
 
 // Extend the Navigator interface to include bluetooth
 declare global {
@@ -22,6 +23,7 @@ export default function BleConnection() {
   const [device, setDevice] = useState<BluetoothDevice | null>(null)
   const [receivedData, setReceivedData] = useState<string[]>([])
   const [rawData, setRawData] = useState<{ch0: number, ch1: number, ch2: number}[]>([])
+  const { addSample } = useChannelData();
   
   // Refs for functionality
   const scrollContainerRef = useRef<HTMLDivElement>(null)
@@ -69,30 +71,15 @@ export default function BleConnection() {
     const value = event.target.value
     if (value.byteLength === NEW_PACKET_LEN) {
       const newRawValues: {ch0: number, ch1: number, ch2: number}[] = []
-      
       for (let i = 0; i < NEW_PACKET_LEN; i += SINGLE_SAMPLE_LEN) {
         const view = new DataView(value.buffer.slice(i, i + SINGLE_SAMPLE_LEN))
-        
-        // Extract all 3 channels from BLE packet
-        // BLE packet structure (7 bytes per sample):
-        // [0] = Counter/Status
-        // [1][2] = Channel 0 (16-bit)
-        // [3][4] = Channel 1 (16-bit) 
-        // [5][6] = Channel 2 (16-bit)
-        
-        const ch0 = view.getInt16(1, false) // Channel 0 at offset 1
-        const ch1 = view.getInt16(3, false) // Channel 1 at offset 3
-        const ch2 = view.getInt16(5, false) // Channel 2 at offset 5
-        
+        const ch0 = view.getInt16(1, false)
+        const ch1 = view.getInt16(3, false)
+        const ch2 = view.getInt16(5, false)
         console.log(`BLE Sample: CH0=${ch0}, CH1=${ch1}, CH2=${ch2}`)
-        
-        // Add all 3 channels to raw data display
-        newRawValues.push({
-          ch0: ch0,
-          ch1: ch1,
-          ch2: ch2
-        })
-
+        newRawValues.push({ ch0, ch1, ch2 });
+        // Push to global channel data context
+        addSample({ ch0, ch1, ch2, timestamp: Date.now() });
         sampleIndex.current = (sampleIndex.current + 1) % 1000
         totalSamples.current += 1
       }
@@ -138,7 +125,6 @@ export default function BleConnection() {
       await dataChar?.startNotifications()
       dataChar?.addEventListener("characteristicvaluechanged", handleDataReceived)
 
-      console.log('Connected to:', selectedDevice.name)
       setReceivedData(['Connected! Starting data collection...'])
 
     } catch (error) {
@@ -155,45 +141,7 @@ export default function BleConnection() {
       >
         {isConnected ? 'Connected' : 'Connect to NPG Device'}
       </button>
-      
-      {device && (
-        <div className="text-center mb-4">
-          <p className="text-green-600">Connected to: {device.name || 'NPG-BLE Device'}</p>
-          <p className="text-sm text-gray-600">Sample Rate: {SAMPLE_RATE}Hz | Total Samples: {totalSamples.current}</p>
-        </div>
-      )}
-
-
-      {rawData.length > 0 && (
-        <div className="w-full max-w-2xl">
-          <h3 className="text-lg font-semibold mb-2">
-            All Channel Data ({rawData.length} samples) - Latest at bottom ↓
-          </h3>
-          <div 
-            ref={scrollContainerRef}
-            className="bg-blue-50 p-4 rounded-lg h-80 overflow-y-auto border"
-            style={{ 
-              scrollBehavior: 'auto',
-              display: 'flex',
-              flexDirection: 'column-reverse' // This makes latest items appear at bottom visually
-            }}
-          >
-            <div className="text-xs font-mono">
-              {rawData.map((sample, index) => (
-                <div key={index} className="mb-1 hover:bg-blue-100 px-2 py-1 rounded">
-                  <span className="font-semibold">Sample {index + 1}:</span> 
-                  <span className="text-red-600 ml-2">CH0: {sample.ch0}</span>
-                  <span className="text-green-600 ml-2">CH1: {sample.ch1}</span>
-                  <span className="text-blue-600 ml-2">CH2: {sample.ch2}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-          <div className="text-xs text-gray-500 mt-1 text-center">
-            Auto-scroll (keeps latest at bottom) - CH0: Red, CH1: Green, CH2: Blue
-          </div>
-        </div>
-      )}
+     
     </div>
   )
 }

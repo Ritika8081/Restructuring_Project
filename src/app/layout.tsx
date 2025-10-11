@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Header from "@/components/Header";
 import "./globals.css";
+import { ChannelDataProvider } from '@/lib/channelDataContext';
 
 export const metadata: Metadata = {
   title: "Widget Dashboard - Modular System",
@@ -15,10 +16,12 @@ export default function RootLayout({
   return (
     <html lang="en" className="h-full">
       <body className="h-full m-0 p-0 bg-gray-50">
+        <ChannelDataProvider>
         <Header />
         <main className="min-h-[calc(100vh-4rem)]">
           {children}
         </main>
+        </ChannelDataProvider>
       </body>
     </html>
   );

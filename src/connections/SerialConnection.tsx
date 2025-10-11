@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect } from 'react'
+import { useChannelData } from '@/lib/channelDataContext';
 
 // Extend the Navigator interface to include the serial property
 declare global {
@@ -10,6 +11,7 @@ declare global {
 }
 
 export default function SerialConnection() {
+  const { addSample } = useChannelData();
   const [isConnected, setIsConnected] = useState(false)
   const [device, setDevice] = useState<any | null>(null)
   const [receivedData, setReceivedData] = useState<string[]>([])
@@ -143,10 +145,10 @@ export default function SerialConnection() {
           const ch2 = (packet[7] << 8) | packet[8] // Channel 2
           
           const newSample = { ch0, ch1, ch2 }
-          
+          // Push to global channel data context
+          addSample({ ch0, ch1, ch2, timestamp: Date.now() });
           // Update current data (real-time display)
           setCurrentData(newSample)
-          
           // Update recent samples (keep only last MAX_DISPLAY_SAMPLES)
           setRecentSamples(prev => {
             const updated = [...prev, newSample]
@@ -154,7 +156,6 @@ export default function SerialConnection() {
               ? updated.slice(-MAX_DISPLAY_SAMPLES) 
               : updated
           })
-          
           sampleIndex.current = (sampleIndex.current + 1) % 1000
           totalSamples.current += 1
           
@@ -194,39 +195,9 @@ export default function SerialConnection() {
         {isConnected ? 'Connected' : 'Connect to NPG Device'}
       </button>
       
-      {device && (
-        <div className="text-center mb-4">
-          <p className="text-green-600">Connected to: NPG-LITE Serial Device</p>
-          <p className="text-sm text-gray-600">Sample Rate: {SAMPLE_RATE}Hz | Total Samples: {totalSamples.current}</p>
-        </div>
-      )}
+    
 
-      {/* Recent Samples (Limited to 50) */}
-      {recentSamples.length > 0 && (
-        <div className="w-full max-w-2xl">
-          <h3 className="text-lg font-semibold mb-2">
-            Recent Samples (Last {MAX_DISPLAY_SAMPLES})
-          </h3>
-          <div 
-            ref={scrollContainerRef}
-            className="bg-green-50 p-4 rounded-lg h-60 overflow-y-auto border"
-          >
-            <div className="text-xs font-mono">
-              {recentSamples.map((sample, index) => (
-                <div key={index} className="mb-1 hover:bg-green-100 px-2 py-1 rounded">
-                  <span className="font-semibold">#{totalSamples.current - recentSamples.length + index + 1}:</span> 
-                  <span className="text-red-600 ml-2">CH0: {sample.ch0}</span>
-                  <span className="text-green-600 ml-2">CH1: {sample.ch1}</span>
-                  <span className="text-blue-600 ml-2">CH2: {sample.ch2}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-          <div className="text-xs text-gray-500 mt-1 text-center">
-            Showing last {recentSamples.length} samples - CH0: Red, CH1: Green, CH2: Blue
-          </div>
-        </div>
-      )}
+     
     </div>
   )
 }
