@@ -16,17 +16,21 @@ import { v4 as uuidv4 } from 'uuid';
  * Manages widget state, grid settings, drag operations, and user interactions
  */
 const Widgets: React.FC = () => {
+    // Example connections: array of {from, to} widget ids
+    const [connections, setConnections] = useState<Array<{ from: string, to: string }>>([
+        { from: 'make-connection', to: 'basic-channel' },
+    ]);
     // Widget collection state with default basic widget (positioned for testing movement)
     const [widgets, setWidgets] = useState<Widget[]>([
         {
-            id: 'connection-data',
+            id: 'make-connection',
             x: 2,
             y: 6,
-            width: 8,
-            height: 6,
+            width: 6,
+            height: 4,
             minWidth: 4,
             minHeight: 3,
-            type: 'connection-data',
+            type: 'make-connection',
         },
         {
             id: 'basic-channel',
@@ -39,6 +43,8 @@ const Widgets: React.FC = () => {
             type: 'basic',
         },
     ]);
+    // Modal state for connection UI
+    const [showConnectionModal, setShowConnectionModal] = useState(false);
 
     // Grid configuration state - initialize with SSR-safe defaults, adjust in useEffect
     const [gridSettings, setGridSettings] = useState<GridSettings>({
@@ -240,6 +246,7 @@ const Widgets: React.FC = () => {
                 type,
             };
             setWidgets(prev => [...prev, newWidget]);
+            setConnections(prev => [...prev, { from: 'make-connection', to: newWidget.id }]);
             showToast(`${type} widget added`, 'success');
         } else {
             showToast('No space available for new widget', 'error');
@@ -400,6 +407,36 @@ const Widgets: React.FC = () => {
                 }}
             >
                 {GridLines}
+                {/* Dynamic arrows between widgets */}
+                <svg style={{ position: 'absolute', left: 0, top: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 50 }}>
+                    {connections.map(({ from, to }, idx) => {
+                        const fromWidget = widgets.find(w => w.id === from);
+                        const toWidget = widgets.find(w => w.id === to);
+                        if (!fromWidget || !toWidget) return null;
+                        // Arrow starts at center right of fromWidget, ends at center left of toWidget
+                        const startX = (fromWidget.x + fromWidget.width) * gridSettings.cellWidth;
+                        const startY = (fromWidget.y + fromWidget.height / 2) * gridSettings.cellHeight;
+                        const endX = toWidget.x * gridSettings.cellWidth;
+                        const endY = (toWidget.y + toWidget.height / 2) * gridSettings.cellHeight;
+                        // Control points for cubic Bezier curve
+                        const dx = Math.abs(endX - startX);
+                        const controlX1 = startX + dx / 2;
+                        const controlY1 = startY;
+                        const controlX2 = endX - dx / 2;
+                        const controlY2 = endY;
+                        const path = `M ${startX} ${startY} C ${controlX1} ${controlY1}, ${controlX2} ${controlY2}, ${endX} ${endY}`;
+                        return (
+                            <g key={idx}>
+                                <path d={path} stroke="#90cdf4" strokeWidth={1.5} fill="none" markerEnd="url(#arrowhead)" />
+                            </g>
+                        );
+                    })}
+                    <defs>
+                        <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto" markerUnits="strokeWidth">
+                            <polygon points="0 0, 10 3.5, 0 7" fill="#90cdf4" />
+                        </marker>
+                    </defs>
+                </svg>
                 {/* Render all widgets in the grid, including new ones from sidebar */}
                 {widgets.map(widget => (
                     <DraggableWidget
@@ -412,11 +449,86 @@ const Widgets: React.FC = () => {
                         setDragState={setDragState}
                         onUpdateWidget={handleUpdateWidget}
                     >
-                        {widget.type === 'connection-data' && (
-                            <ConnectionDataWidget />
-                        )}
+                        {widget.type === 'make-connection' ? (
+                            <div
+                                style={{
+                                    width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontWeight: 'bold', fontSize: 20, background: '#f3f4f6', borderRadius: 8, color: '#2563eb', border: '2px dashed #2563eb', position: 'relative'
+                                }}
+                                onMouseDown={e => e.stopPropagation()}
+                            >
+                                <span
+                                    tabIndex={0}
+                                    role="button"
+                                    aria-label="Make Connection"
+                                    onClick={e => { e.stopPropagation(); setShowConnectionModal(true); }}
+                                    style={{ outline: 'none' }}
+                                >
+                                    Make Connection
+                                </span>
+                                {showConnectionModal && (
+                                    <div
+                                        style={{
+                                            position: 'absolute',
+                                            top: '100%',
+                                            left: '50%',
+                                            transform: 'translateX(-50%)',
+                                            marginTop: 12,
+                                            background: 'white',
+                                            borderRadius: 12,
+                                            boxShadow: '0 2px 16px rgba(0,0,0,0.15)',
+                                            padding: 32,
+                                            minWidth: 400,
+                                            maxWidth: 480,
+                                            zIndex: 9999,
+                                        }}
+                                        onMouseDown={e => e.stopPropagation()}
+                                    >
+                                        <button
+                                            style={{ position: 'absolute', top: 12, right: 16, background: 'none', border: 'none', fontSize: 22, color: '#2563eb', cursor: 'pointer' }}
+                                            onClick={e => { e.stopPropagation(); setShowConnectionModal(false); }}
+                                        >
+                                            &times;
+                                        </button>
+                                        <ConnectionDataWidget />
+                                    </div>
+                                )}
+                            </div>
+                        ) : null}
+            {/* Modal for connection UI */}
                     </DraggableWidget>
                 ))}
+                {/* Popover rendered outside the widget, anchored near the Make Connection widget */}
+                {showConnectionModal && (() => {
+                    const makeConnectionWidget = widgets.find(w => w.type === 'make-connection');
+                    if (!makeConnectionWidget) return null;
+                    const left = (makeConnectionWidget.x + makeConnectionWidget.width) * gridSettings.cellWidth;
+                    const top = makeConnectionWidget.y * gridSettings.cellHeight;
+                    return (
+                        <div
+                            style={{
+                                position: 'absolute',
+                                left,
+                                top,
+                                background: 'white',
+                                borderRadius: 12,
+                                boxShadow: '0 2px 16px rgba(0,0,0,0.15)',
+                                padding: 32,
+                                minWidth: 400,
+                                maxWidth: 480,
+                                zIndex: 9999,
+                            }}
+                            onMouseDown={e => e.stopPropagation()}
+                        >
+                            <button
+                                style={{ position: 'absolute', top: 12, right: 16, background: 'none', border: 'none', fontSize: 22, color: '#2563eb', cursor: 'pointer' }}
+                                onClick={e => { e.stopPropagation(); setShowConnectionModal(false); }}
+                            >
+                                &times;
+                            </button>
+                            <ConnectionDataWidget />
+                        </div>
+                    );
+                })()}
             </div>
 
             <WidgetPalette 
