@@ -326,14 +326,6 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
                     {/* Widget content rendering */}
                     {widget.type === 'spiderplot' ? (
                         <SpiderPlot
-                            data={[
-                                { label: 'Channel1', value: 85, maxValue: 100 },
-                                { label: 'Channel2', value: 92, maxValue: 100 },
-                                { label: 'Channel3', value: 78, maxValue: 100 },
-                                { label: 'Channel4', value: 65, maxValue: 100 },
-                                { label: 'Channel5', value: 88, maxValue: 100 },
-                                { label: 'Channel6', value: 45, maxValue: 100 },
-                            ]}
                             width={availableWidth}
                             height={availableHeight}
                             showLabels={widget.width >= 3 && widget.height >= 3}
@@ -341,28 +333,6 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
                             animated={true}
                             backgroundColor="rgba(16, 185, 129, 0.02)"
                         />
-                    ) : widget.type === 'bargraph' ? (
-                        <StatisticGraph
-                            data={[
-                                { label: 'Q1', value: 85 },
-                                { label: 'Q2', value: 72 },
-                                { label: 'Q3', value: 95 },
-                                { label: 'Q4', value: 68 },
-                                { label: 'Q5', value: 89 },
-                                { label: 'Q6', value: 76 },
-                            ]}
-                            type="bar"
-                            width={availableWidth}
-                            height={availableHeight}
-                            colors={['#3B82F6', '#6366F1', '#8B5CF6', '#A855F7', '#C084FC', '#D8B4FE']}
-                            showLabels={widget.width >= 3}
-                            showValues={widget.width >= 3 && widget.height >= 3}
-                            showGrid={widget.width >= 4}
-                        />
-                    ) : widget.type === 'spiderplot' ? (
-                        <div className="w-full h-full">
-                            <SpiderPlot width={availableWidth} height={availableHeight} />
-                        </div>
                     ) : widget.type === 'FFTGraph' ? (
                         <div className="relative w-full h-full">
                             {availableWidth > 100 && availableHeight > 80 ? (

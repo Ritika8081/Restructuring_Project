@@ -547,18 +547,52 @@ const Widgets: React.FC = () => {
                                 setWidgets(prev => {
                                     // Keep make-connection widget
                                     const baseWidgets = prev.filter(w => w.type === 'make-connection');
-                                    // Add selected widgets from flowOptions
-                                    const newWidgets = flowOptions.filter(opt => opt.selected).map(opt => ({
-                                        id: opt.id,
-                                        x: 10, // Default position, can be improved
-                                        y: 2 + flowOptions.findIndex(o => o.id === opt.id),
-                                        width: 5,
+                                    // Map flowOptions to widget type and order
+                                    const typeMap: Record<string, string> = {
+                                        channel: 'basic',
+                                        fft: 'FFTGraph',
+                                        spiderplot: 'spiderplot',
+                                        bandpower: 'statistic',
+                                    };
+                                    // Strictly follow flowchart grid: 3 rows (channels), 4 columns (widget types)
+                                    const channelIds = [1, 2, 3];
+                                    const widgetTypes = ['channel', 'spiderplot', 'fft', 'bandpower'];
+                                    let newWidgets: Widget[] = [];
+                                    // Count selected widgets per type for compact arrangement
+                                    const selectedWidgets = flowOptions.filter(opt => opt.selected);
+                                    let colMap: Record<string, number> = {};
+                                    let row = 2;
+                                    let col = 2;
+                                    selectedWidgets.forEach((opt, idx) => {
+                                        // Assign columns by widget type, rows by channel
+                                        if (colMap[opt.type] === undefined) colMap[opt.type] = Object.keys(colMap).length;
+                                        const colIdx = colMap[opt.type];
+                                        // Extract channel number from id (e.g., 'spider-2' -> 2)
+                                        const chMatch = opt.id.match(/-(\d+)$/);
+                                        const rowIdx = chMatch ? parseInt(chMatch[1], 10) - 1 : idx;
+                                        newWidgets.push({
+                                            id: opt.id,
+                                            x: 2 + colIdx * 5,
+                                            y: 2 + rowIdx * 4,
+                                            width: 5,
+                                            height: 4,
+                                            minWidth: 3,
+                                            minHeight: 3,
+                                            type: typeMap[opt.type] || opt.type,
+                                        });
+                                    });
+                                    // Always keep make-connection widget at a fixed position
+                                    const makeConnectionWidget = baseWidgets.find(w => w.type === 'make-connection') || {
+                                        id: 'make-connection',
+                                        x: 0,
+                                        y: 0,
+                                        width: 6,
                                         height: 4,
-                                        minWidth: 3,
+                                        minWidth: 4,
                                         minHeight: 3,
-                                        type: opt.type,
-                                    }));
-                                    return [...baseWidgets, ...newWidgets];
+                                        type: 'make-connection',
+                                    };
+                                    return [makeConnectionWidget, ...newWidgets];
                                 });
                             }}
                         >Save</button>
