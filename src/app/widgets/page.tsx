@@ -45,18 +45,8 @@ const Widgets: React.FC = () => {
     const [connections, setConnections] = useState<Array<{ from: string, to: string }>>([
         { from: 'make-connection', to: 'basic-channel' },
     ]);
-    // Widget collection state with default basic widget (positioned for testing movement)
+    // Widget collection state with default basic widget (no make-connection widget)
     const [widgets, setWidgets] = useState<Widget[]>([
-        {
-            id: 'make-connection',
-            x: 2,
-            y: 6,
-            width: 6,
-            height: 4,
-            minWidth: 4,
-            minHeight: 3,
-            type: 'make-connection',
-        },
         {
             id: 'basic-channel',
             x: 10,
@@ -422,7 +412,7 @@ const Widgets: React.FC = () => {
     }, [gridSettings.showGridlines, gridSettings.cellWidth, gridSettings.cellHeight]);
 
     return (
-        <div className="min-h-screen w-screen bg-gray-100 relative overflow-hidden">
+    <div className="min-h-screen w-screen bg-gray-100 flex flex-col overflow-hidden">
             {/* Flow Configuration Modal */}
             {showFlowModal && (
                 <div style={{
@@ -457,10 +447,73 @@ const Widgets: React.FC = () => {
                             &times;
                         </button>
                         <h2 style={{ fontWeight: 'bold', fontSize: 22, marginBottom: 16 }}>Configure Flow</h2>
+                        <div style={{ display: 'flex', gap: 16, marginBottom: 16 }}>
+                            <button
+                                style={{ background: '#2563eb', color: 'white', padding: '8px 18px', borderRadius: 8, fontWeight: 'bold', border: 'none', cursor: 'pointer', fontSize: 16 }}
+                                onClick={() => {
+                                    // Download flowchart layout as JSON file
+                                    try {
+                                        const layout = {
+                                            modalPositions,
+                                            flowOptions,
+                                        };
+                                        const json = JSON.stringify(layout, null, 2);
+                                        const blob = new Blob([json], { type: 'application/json' });
+                                        const url = URL.createObjectURL(blob);
+                                        const a = document.createElement('a');
+                                        a.href = url;
+                                        a.download = 'flowchart-layout.json';
+                                        document.body.appendChild(a);
+                                        a.click();
+                                        document.body.removeChild(a);
+                                        URL.revokeObjectURL(url);
+                                        showToast('Flowchart layout downloaded!', 'success');
+                                    } catch (err) {
+                                        showToast('Failed to download layout', 'error');
+                                    }
+                                }}
+                            >Save Layout</button>
+                            <button
+                                style={{ background: '#10B981', color: 'white', padding: '8px 18px', borderRadius: 8, fontWeight: 'bold', border: 'none', cursor: 'pointer', fontSize: 16 }}
+                                onClick={() => {
+                                    // Open file selector to load flowchart layout
+                                    try {
+                                        const input = document.createElement('input');
+                                        input.type = 'file';
+                                        input.accept = '.json,application/json';
+                                        input.onchange = (e) => {
+                                            const target = e.target as HTMLInputElement | null;
+                                            if (!target || !target.files || target.files.length === 0) return;
+                                            const file = target.files[0];
+                                            if (!file) return;
+                                            const reader = new FileReader();
+                                            reader.onload = (ev) => {
+                                                try {
+                                                    const layout = JSON.parse(ev.target?.result as string);
+                                                    if (layout.modalPositions && layout.flowOptions) {
+                                                        setModalPositions(layout.modalPositions);
+                                                        setFlowOptions(layout.flowOptions);
+                                                        showToast('Flowchart layout loaded!', 'success');
+                                                    } else {
+                                                        showToast('Invalid layout file', 'error');
+                                                    }
+                                                } catch (err) {
+                                                    showToast('Failed to parse layout file', 'error');
+                                                }
+                                            };
+                                            reader.readAsText(file);
+                                        };
+                                        input.click();
+                                    } catch (err) {
+                                        showToast('Failed to open file selector', 'error');
+                                    }
+                                }}
+                            >Load Layout</button>
+                        </div>
                         {/* Flowchart grid layout */}
                         <div style={{ position: 'relative', width: 1200, height: 500, margin: 'auto', borderRadius: 12, border: '1px solid #e5e7eb', boxShadow: '0 4px 32px rgba(0,0,0,0.08)', overflow: 'hidden', background: '#fff' }}>
                             {/* Dynamic SVG arrows connecting widgets */}
-                            <svg style={{ position: 'absolute', left: 0, top: 0, width: '1200px', height: '500px', pointerEvents: 'none', zIndex: 1 }}>
+                            <svg style={{ position: 'absolute', left: 0, top: 0, width: '1200px', height: '500px', pointerEvents: showConnectionModal ? 'none' : 'auto', zIndex: showConnectionModal ? 0 : 1 }}>
                                 {/* Arrows from Make Connection to first widget in each channel */}
                                 {(() => {
                                     const makeConnId = 'make-connection';
@@ -528,15 +581,59 @@ const Widgets: React.FC = () => {
                                 </defs>
                             </svg>
                             {/* Flowchart nodes as boxes */}
-                            {/* Connection box */}
+                            {/* Connection box with connection type selection and modal logic */}
                             <div style={{ position: 'absolute', left: 10, top: 225, width: 120, height: 60, border: '2px solid #2563eb', borderRadius: 12, background: '#fff', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: 15, zIndex: 2, boxShadow: '0 2px 12px rgba(37,99,235,0.08)', letterSpacing: 0.5 }}>
-                                Make Connection
+                                <button  onClick={() => setShowConnectionModal(true)}>
+                                    Make Connection
+                                </button>
+                                {showConnectionModal && (
+                                    <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', zIndex: 99999, pointerEvents: 'auto' }}>
+                                        <div
+                                            style={{
+                                                position: 'fixed',
+                                                top: 0,
+                                                left: 0,
+                                                width: '100vw',
+                                                height: '100vh',
+                                                background: 'rgba(0,0,0,0.35)',
+                                                zIndex: 99999,
+                                                pointerEvents: 'auto',
+                                            }}
+                                            onClick={() => setShowConnectionModal(false)}
+                                        />
+                                        <div
+                                            style={{
+                                                position: 'fixed',
+                                                top: '50%',
+                                                left: '50%',
+                                                transform: 'translate(-50%, -50%)',
+                                                background: 'white',
+                                                borderRadius: 16,
+                                                boxShadow: '0 12px 48px rgba(0,0,0,0.32)',
+                                                border: '2px solid #2563eb',
+                                                padding: 40,
+                                                minWidth: 420,
+                                                maxWidth: 520,
+                                                zIndex: 100000,
+                                                pointerEvents: 'auto',
+                                            }}
+                                            onMouseDown={e => e.stopPropagation()}
+                                        >
+                                            <button
+                                                style={{ position: 'absolute', top: 12, right: 16, background: 'none', border: 'none', fontSize: 22, color: '#2563eb', cursor: 'pointer' }}
+                                                onClick={e => { e.stopPropagation(); setShowConnectionModal(false); }}
+                                            >
+                                                &times;
+                                            </button>
+                                            <ConnectionDataWidget />
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                             {/* Channel boxes and widgets for 3 channels */}
                             {[0,1,2].map(i => (
                                 <React.Fragment key={i}>
                                     {[0,1,2,3].map(j => {
-                                        // Find the widget for channel i and type j
                                         const typeMap = ['channel', 'spiderplot', 'fft', 'bandpower'];
                                         const opt = flowOptions.find(o => o.id === `channel-${i+1}` && j === 0
                                             || o.id === `spider-${i+1}` && j === 1
@@ -544,12 +641,13 @@ const Widgets: React.FC = () => {
                                             || o.id === `bandpower-${i+1}` && j === 3);
                                         if (!opt) return null;
                                         const widgetId = opt.id;
-                                       const widgetLeft = modalPositions[widgetId]?.left ?? (200 + j * 220);
-const widgetTop = modalPositions[widgetId]?.top ?? (100 + i * 120);
+                                        const widgetLeft = modalPositions[widgetId]?.left ?? (200 + j * 220);
+                                        const widgetTop = modalPositions[widgetId]?.top ?? (100 + i * 120);
                                         const widgetWidth = j === 3 ? 220 : 180;
                                         const widgetHeight = 70;
                                         // Drag logic
                                         const handleDrag = (e: React.MouseEvent<HTMLDivElement>) => {
+                                            if (showConnectionModal) return; // Disable drag when modal is open
                                             e.preventDefault();
                                             const startX = e.clientX;
                                             const startY = e.clientY;
@@ -573,11 +671,12 @@ const widgetTop = modalPositions[widgetId]?.top ?? (100 + i * 120);
                                         return (
                                             <div
                                                 key={j}
-                                                style={{ position: 'absolute', left: widgetLeft, top: widgetTop, width: widgetWidth, height: widgetHeight, border: '2px solid #222', borderRadius: 12, background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: 14, zIndex: 2, boxShadow: '0 2px 12px rgba(0,0,0,0.07)', transition: 'box-shadow 0.2s', gap: 8, padding: '0 10px', wordBreak: 'break-word', overflowWrap: 'break-word', textAlign: 'center', cursor: 'move' }}
+                                                style={{ position: 'absolute', left: widgetLeft, top: widgetTop, width: widgetWidth, height: widgetHeight, border: '2px solid #222', borderRadius: 12, background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: 14, zIndex: showConnectionModal ? 0 : 2, boxShadow: '0 2px 12px rgba(0,0,0,0.07)', transition: 'box-shadow 0.2s', gap: 8, padding: '0 10px', wordBreak: 'break-word', overflowWrap: 'break-word', textAlign: 'center', cursor: showConnectionModal ? 'default' : 'move', pointerEvents: showConnectionModal ? 'none' : 'auto' }}
                                                 onMouseDown={handleDrag}
                                             >
                                                 <span style={{ marginLeft: 8, flex: 1, wordBreak: 'break-word', overflowWrap: 'break-word', textAlign: 'center' }}>{opt.label}</span>
-                                                <button style={{ marginLeft: 8, background: '#ef4444', color: 'white', border: 'none', borderRadius: 8, padding: '4px 12px', cursor: 'pointer', fontWeight: 500, fontSize: 13, boxShadow: '0 1px 4px rgba(239,68,68,0.08)' }} onClick={() => {
+                                                <button style={{ marginLeft: 8, background: '#ef4444', color: 'white', border: 'none', borderRadius: 8, padding: '4px 12px', cursor: showConnectionModal ? 'default' : 'pointer', fontWeight: 500, fontSize: 13, boxShadow: '0 1px 4px rgba(239,68,68,0.08)', pointerEvents: showConnectionModal ? 'none' : 'auto' }} onClick={() => {
+                                                    if (showConnectionModal) return;
                                                     setFlowOptions(flowOptions.filter(o => o.id !== opt.id));
                                                     setWidgets(prev => prev.filter(widget => widget.id !== opt.id));
                                                 }}>Delete</button>
@@ -593,8 +692,6 @@ const widgetTop = modalPositions[widgetId]?.top ?? (100 + i * 120);
                                 setShowFlowModal(false);
                                 // Only show selected widgets in dashboard
                                 setWidgets(prev => {
-                                    // Keep make-connection widget
-                                    const baseWidgets = prev.filter(w => w.type === 'make-connection');
                                     // Map flowOptions to widget type and order
                                     const typeMap: Record<string, string> = {
                                         channel: 'basic',
@@ -629,31 +726,16 @@ const widgetTop = modalPositions[widgetId]?.top ?? (100 + i * 120);
                                             type: typeMap[opt.type] || opt.type,
                                         });
                                     });
-                                    // Always keep make-connection widget at a fixed position
-                                    const makeConnectionWidget = baseWidgets.find(w => w.type === 'make-connection') || {
-                                        id: 'make-connection',
-                                        x: 0,
-                                        y: 0,
-                                        width: 6,
-                                        height: 4,
-                                        minWidth: 4,
-                                        minHeight: 3,
-                                        type: 'make-connection',
-                                    };
-                                    return [makeConnectionWidget, ...newWidgets];
+                                    return newWidgets;
                                 });
                             }}
-                        >Save</button>
+                        >Play</button>
                     </div>
                 </div>
             )}
             <div
-                className="absolute"
-                style={{
-                    left: gridSettings.offsetX || 64,
-                    width: `calc(100vw - ${(gridSettings.offsetX || 64)}px)`,
-                    height: `calc(100vh - ${(gridSettings.offsetY || 64)}px)`
-                }}
+                className="flex flex-wrap items-stretch justify-center w-full h-full p-6 gap-6"
+                style={{ minHeight: `calc(100vh - ${(gridSettings.offsetY || 64)}px)` }}
             >
                 {GridLines}
                 {/* Dynamic arrows between widgets */}
@@ -689,96 +771,22 @@ const widgetTop = modalPositions[widgetId]?.top ?? (100 + i * 120);
                 </svg>
                 {/* Render all widgets in the grid, including new ones from sidebar */}
                 {widgets.map(widget => (
-                    <DraggableWidget
+                    <div
                         key={widget.id}
-                        widget={widget}
-                        widgets={widgets}
-                        onRemove={handleRemoveWidget}
-                        gridSettings={gridSettings}
-                        dragState={dragState}
-                        setDragState={setDragState}
-                        onUpdateWidget={handleUpdateWidget}
+                        style={{ flex: '1 1 320px', minWidth: 280, maxWidth: 480, display: 'flex', alignItems: 'stretch', justifyContent: 'center' }}
                     >
-                        {widget.type === 'make-connection' ? (
-                            <div
-                                style={{
-                                    width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontWeight: 'bold', fontSize: 20, background: '#f3f4f6', borderRadius: 8, color: '#2563eb', border: '2px dashed #2563eb', position: 'relative'
-                                }}
-                                onMouseDown={e => e.stopPropagation()}
-                            >
-                                <span
-                                    tabIndex={0}
-                                    role="button"
-                                    aria-label="Make Connection"
-                                    onClick={e => { e.stopPropagation(); setShowConnectionModal(true); }}
-                                    style={{ outline: 'none' }}
-                                >
-                                    Make Connection
-                                </span>
-                                {showConnectionModal && (
-                                    <div
-                                        style={{
-                                            position: 'absolute',
-                                            top: '100%',
-                                            left: '50%',
-                                            transform: 'translateX(-50%)',
-                                            marginTop: 12,
-                                            background: 'white',
-                                            borderRadius: 12,
-                                            boxShadow: '0 2px 16px rgba(0,0,0,0.15)',
-                                            padding: 32,
-                                            minWidth: 400,
-                                            maxWidth: 480,
-                                            zIndex: 9999,
-                                        }}
-                                        onMouseDown={e => e.stopPropagation()}
-                                    >
-                                        <button
-                                            style={{ position: 'absolute', top: 12, right: 16, background: 'none', border: 'none', fontSize: 22, color: '#2563eb', cursor: 'pointer' }}
-                                            onClick={e => { e.stopPropagation(); setShowConnectionModal(false); }}
-                                        >
-                                            &times;
-                                        </button>
-                                        <ConnectionDataWidget />
-                                    </div>
-                                )}
-                            </div>
-                        ) : null}
-            {/* Modal for connection UI */}
-                    </DraggableWidget>
+                        <DraggableWidget
+                            widget={widget}
+                            widgets={widgets}
+                            onRemove={handleRemoveWidget}
+                            gridSettings={gridSettings}
+                            dragState={dragState}
+                            setDragState={setDragState}
+                            onUpdateWidget={handleUpdateWidget}
+                        />
+                    </div>
                 ))}
                 {/* Popover rendered outside the widget, anchored near the Make Connection widget */}
-                {showConnectionModal && (() => {
-                    const makeConnectionWidget = widgets.find(w => w.type === 'make-connection');
-                    if (!makeConnectionWidget) return null;
-                    const left = (makeConnectionWidget.x + makeConnectionWidget.width) * gridSettings.cellWidth;
-                    const top = makeConnectionWidget.y * gridSettings.cellHeight;
-                    return (
-                        <div
-                            style={{
-                                position: 'absolute',
-                                left,
-                                top,
-                                background: 'white',
-                                borderRadius: 12,
-                                boxShadow: '0 2px 16px rgba(0,0,0,0.15)',
-                                padding: 32,
-                                minWidth: 400,
-                                maxWidth: 480,
-                                zIndex: 9999,
-                            }}
-                            onMouseDown={e => e.stopPropagation()}
-                        >
-                            <button
-                                style={{ position: 'absolute', top: 12, right: 16, background: 'none', border: 'none', fontSize: 22, color: '#2563eb', cursor: 'pointer' }}
-                                onClick={e => { e.stopPropagation(); setShowConnectionModal(false); }}
-                            >
-                                &times;
-                            </button>
-                            <ConnectionDataWidget />
-                        </div>
-                    );
-                })()}
             </div>
 
             <WidgetPalette 
