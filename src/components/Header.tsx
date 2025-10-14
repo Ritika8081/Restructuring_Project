@@ -5,14 +5,8 @@ import { useRouter } from 'next/navigation';
 
 const Header: React.FC = () => {
     const router = useRouter();
-
-    const handleNavigateToWidgets = () => {
-        router.push('/widgets');
-    };
-
-    const handleNavigateToHome = () => {
-        router.push('/');
-    };
+    // Use FlowModalContext for modal control
+    const { setShowFlowModal } = require('@/context/FlowModalContext').useFlowModal();
 
     return (
         <header className="bg-white border-b border-gray-200 sticky top-0 z-50">
@@ -25,12 +19,14 @@ const Header: React.FC = () => {
 
                     {/* Right Section - Navigation Buttons */}
                     <div className="flex items-center space-x-2">
+                        {/* Configure Flow Button in Navbar - uses context */}
                         <button
-                            onClick={handleNavigateToHome}
-                            className="flex items-center justify-center px-3 py-2 rounded-md border border-gray-300 bg-gray-50 text-gray-700 hover:bg-gray-100 hover:border-blue-400 transition-colors duration-150 font-medium"
+                            onClick={() => setShowFlowModal(true)}
+                            className="flex items-center justify-center px-3 py-2 rounded-md border border-blue-500 bg-blue-600 text-white hover:bg-blue-700 transition-colors duration-150 font-medium"
+                            style={{ marginLeft: '8px' }}
                         >
-                            <span className="text-lg mr-2">🏠</span>
-                            <span className="hidden sm:inline">Home</span>
+                            <span className="text-lg mr-2">⚙️</span>
+                            <span className="hidden sm:inline">Configure Flow</span>
                         </button>
                     </div>
                 </div>
