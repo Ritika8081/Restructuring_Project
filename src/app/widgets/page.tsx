@@ -588,21 +588,35 @@ const Widgets: React.FC = () => {
                         <div style={{ position: 'relative', width: 1200, height: 500, margin: 'auto', borderRadius: 12, border: '1px solid #e5e7eb', boxShadow: '0 4px 32px rgba(0,0,0,0.08)', overflow: 'hidden', background: '#fff' }}>
                             {/* Dynamic SVG arrows connecting widgets */}
                             <svg style={{ position: 'absolute', left: 0, top: 0, width: '1200px', height: '500px', pointerEvents: showConnectionModal ? 'none' : 'auto', zIndex: showConnectionModal ? 0 : 1 }}>
-                                {/* Arrows from Make Connection to first widget in each channel */}
+                                {/* Arrows from Make Connection to first available widget in each channel row */}
                                 {(() => {
                                     const makeConnId = 'make-connection';
                                     const makeConnPos = { left: 10, top: 225, width: 120, height: 60 };
-                                    // If you want to make Make Connection draggable, use modalPositions[makeConnId]
                                     const startX = makeConnPos.left + makeConnPos.width;
                                     const startY = makeConnPos.top + makeConnPos.height / 2;
+                                    // For each channel row, find the first present widget
                                     return [0,1,2].map(i => {
-                                        // Find first widget in channel
-                                        const j = 0;
-                                        const id = j === 0 ? `channel-${i+1}` : j === 1 ? `spider-${i+1}` : j === 2 ? `fft-${i+1}` : `bandpower-${i+1}`;
-                                        const opt = flowOptions.find(o => o.id === id);
-                                        if (!opt) return null;
-                                        const pos = modalPositions[id] || { left: 150 + j * 260, top: 100 + i * 120 };
-                                        const width = 180;
+                                        const widgetTypes = ['channel', 'spiderplot', 'fft', 'bandpower'];
+                                        // Find first present widget in this row
+                                        const firstOpt = widgetTypes
+                                            .map(type => {
+                                                const id = type === 'channel' ? `channel-${i+1}`
+                                                    : type === 'spiderplot' ? `spider-${i+1}`
+                                                    : type === 'fft' ? `fft-${i+1}`
+                                                    : `bandpower-${i+1}`;
+                                                return flowOptions.find(o => o.id === id);
+                                            })
+                                            .find(Boolean);
+                                        if (!firstOpt) return null;
+                                        const j = widgetTypes.findIndex(type => {
+                                            const id = type === 'channel' ? `channel-${i+1}`
+                                                : type === 'spiderplot' ? `spider-${i+1}`
+                                                : type === 'fft' ? `fft-${i+1}`
+                                                : `bandpower-${i+1}`;
+                                            return firstOpt.id === id;
+                                        });
+                                        const pos = modalPositions[firstOpt.id] || { left: 200 + j * 220, top: 100 + i * 120 };
+                                        const width = j === 3 ? 220 : 180;
                                         const height = 70;
                                         const endX = pos.left;
                                         const endY = pos.top + height / 2;
@@ -774,40 +788,63 @@ const Widgets: React.FC = () => {
                             style={{ marginTop: 24, background: '#10B981', color: 'white', padding: '10px 24px', borderRadius: 8, fontWeight: 'bold', border: 'none', cursor: 'pointer', fontSize: 18 }}
                             onClick={() => {
                                 setShowFlowModal(false);
-                                // Only show selected widgets in dashboard
+                                // Arrange selected widgets to fill dashboard space using grid, offset by header/sidebar
                                 setWidgets(prev => {
-                                    // Map flowOptions to widget type and order
                                     const typeMap: Record<string, string> = {
                                         channel: 'basic',
                                         fft: 'FFTGraph',
                                         spiderplot: 'spiderplot',
                                         bandpower: 'statistic',
                                     };
-                                    // Strictly follow flowchart grid: 3 rows (channels), 4 columns (widget types)
-                                    const channelIds = [1, 2, 3];
-                                    const widgetTypes = ['channel', 'spiderplot', 'fft', 'bandpower'];
-                                    let newWidgets: Widget[] = [];
-                                    // Count selected widgets per type for compact arrangement
                                     const selectedWidgets = flowOptions.filter(opt => opt.selected);
-                                    let colMap: Record<string, number> = {};
-                                    let row = 2;
-                                    let col = 2;
-                                    selectedWidgets.forEach((opt, idx) => {
-                                        // Assign columns by widget type, rows by channel
-                                        if (colMap[opt.type] === undefined) colMap[opt.type] = Object.keys(colMap).length;
-                                        const colIdx = colMap[opt.type];
-                                        // Extract channel number from id (e.g., 'spider-2' -> 2)
-                                        const chMatch = opt.id.match(/-(\d+)$/);
-                                        const rowIdx = chMatch ? parseInt(chMatch[1], 10) - 1 : idx;
-                                        newWidgets.push({
-                                            id: opt.id,
-                                            x: 2 + colIdx * 5,
-                                            y: 2 + rowIdx * 4,
-                                            width: 5,
-                                            height: 4,
-                                            minWidth: 3,
-                                            minHeight: 3,
-                                            type: typeMap[opt.type] || opt.type,
+                                    // Get grid settings and offsets
+                                    const cols = gridSettings.cols || 24;
+                                    const rows = gridSettings.rows || 16;
+                                    const offsetX = gridSettings.offsetX || 0;
+                                    const offsetY = gridSettings.offsetY || 0;
+                                    // Calculate grid arrangement
+                                    const count = selectedWidgets.length;
+                                    // Always use 3 rows to match flowchart channels
+                                    const gridRows = 3;
+                                    const gridCols = Math.ceil(count / gridRows);
+                                    // Calculate widget size to fill grid
+                                    const widgetWidth = Math.floor(cols / gridCols);
+                                    const widgetHeight = Math.floor(rows / gridRows);
+                                    // Place widgets in grid, offset by header/sidebar
+                                    let newWidgets: Widget[] = [];
+                                    // Offset widgets by 1 grid cell right and down for clear separation
+                                    const offsetCells = 3;
+                                    // Calculate dynamic widget size so all fit without overlap
+                                    const availableCols = cols - offsetCells;
+                                    const availableRows = rows - offsetCells;
+                                    const dynamicWidgetWidth = Math.max(3, Math.floor(availableCols / gridCols));
+                                    const dynamicWidgetHeight = Math.max(3, Math.floor(availableRows / gridRows));
+                                    // Arrange widgets in dashboard in the same order and grid as flowchart
+                                    const widgetTypes = ['channel', 'spiderplot', 'fft', 'bandpower'];
+                                    const channels = [1, 2, 3];
+                                    channels.forEach((ch, rowIdx) => {
+                                        widgetTypes.forEach((type, colIdx) => {
+                                            const widgetId = type === 'channel' ? `channel-${ch}`
+                                                : type === 'spiderplot' ? `spider-${ch}`
+                                                : type === 'fft' ? `fft-${ch}`
+                                                : `bandpower-${ch}`;
+                                            const opt = selectedWidgets.find(o => o.id === widgetId);
+                                            if (!opt) return;
+                                            const x = offsetCells + colIdx * dynamicWidgetWidth;
+                                            const y = offsetCells + rowIdx * dynamicWidgetHeight;
+                                            // Prevent overflow
+                                            const safeX = Math.min(x, cols - dynamicWidgetWidth);
+                                            const safeY = Math.min(y, rows - dynamicWidgetHeight);
+                                            newWidgets.push({
+                                                id: opt.id,
+                                                x: safeX,
+                                                y: safeY,
+                                                width: dynamicWidgetWidth,
+                                                height: dynamicWidgetHeight,
+                                                minWidth: 3,
+                                                minHeight: 3,
+                                                type: typeMap[opt.type] || opt.type,
+                                            });
                                         });
                                     });
                                     return newWidgets;
