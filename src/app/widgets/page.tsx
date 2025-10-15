@@ -14,6 +14,78 @@ import ConnectionDataWidget from '@/components/ConnectionDataWidget';
  * Manages widget state, grid settings, drag operations, and user interactions
  */
 const Widgets: React.FC = () => {
+    // Settings modal state for flowchart widgets
+    const [settingsModal, setSettingsModal] = useState<{ show: boolean, widgetId: string | null }>({ show: false, widgetId: null });
+
+    // Settings modal content (random for now, special for spiderplot)
+    const renderSettingsModal = () => {
+        if (!settingsModal.show || !settingsModal.widgetId) return null;
+        const opt = flowOptions.find(o => o.id === settingsModal.widgetId);
+        if (!opt) return null;
+        const isSpiderPlot = opt.type === 'spiderplot';
+        return (
+            <div style={{
+                position: 'fixed',
+                top: 0,
+                left: 0,
+                width: '100vw',
+                height: '100vh',
+                background: 'rgba(0,0,0,0.35)',
+                zIndex: 100001,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+            }}>
+                <div style={{
+                    background: 'white',
+                    borderRadius: 16,
+                    boxShadow: '0 12px 48px rgba(0,0,0,0.32)',
+                    border: '2px solid #2563eb',
+                    padding: 40,
+                    minWidth: 340,
+                    maxWidth: 420,
+                    position: 'relative',
+                }}>
+                    <button
+                        style={{ position: 'absolute', top: 12, right: 16, background: 'none', border: 'none', fontSize: 22, color: '#2563eb', cursor: 'pointer' }}
+                        onClick={() => setSettingsModal({ show: false, widgetId: null })}
+                    >
+                        &times;
+                    </button>
+                    <h3 style={{ fontWeight: 'bold', fontSize: 18, marginBottom: 16 }}>Settings for {opt.label}</h3>
+                    {isSpiderPlot ? (
+                        <div>
+                            <div style={{ marginBottom: 12 }}>
+                                <label style={{ fontWeight: 500 }}>Apply Filter:</label>
+                                <select style={{ marginLeft: 8 }}>
+                                    <option value="">Select Filter</option>
+                                    <option value="lowpass">Lowpass</option>
+                                    <option value="highpass">Highpass</option>
+                                    <option value="bandpass">Bandpass</option>
+                                </select>
+                            </div>
+                            <div style={{ marginBottom: 12 }}>
+                                <label style={{ fontWeight: 500 }}>Remove Filter:</label>
+                                <button style={{ marginLeft: 8, background: '#ef4444', color: 'white', border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer' }}>Remove</button>
+                            </div>
+                        </div>
+                    ) : (
+                        <div>
+                            <div style={{ marginBottom: 12 }}>
+                                <label style={{ fontWeight: 500 }}>Random Setting 1:</label>
+                                <input type="text" placeholder="Value" style={{ marginLeft: 8, border: '1px solid #ccc', borderRadius: 6, padding: '4px 8px' }} />
+                            </div>
+                            <div style={{ marginBottom: 12 }}>
+                                <label style={{ fontWeight: 500 }}>Random Setting 2:</label>
+                                <input type="number" placeholder="Number" style={{ marginLeft: 8, border: '1px solid #ccc', borderRadius: 6, padding: '4px 8px' }} />
+                            </div>
+                        </div>
+                    )}
+                    <button style={{ marginTop: 18, background: '#2563eb', color: 'white', border: 'none', borderRadius: 8, padding: '8px 18px', fontWeight: 'bold', cursor: 'pointer' }} onClick={() => setSettingsModal({ show: false, widgetId: null })}>Save</button>
+                </div>
+            </div>
+        );
+    };
     // Modal widget positions state (for flowchart modal)
     const initialModalPositions: Record<string, {left: number, top: number}> = {};
     for (let ci = 0; ci < 3; ci++) {
@@ -440,6 +512,8 @@ const Widgets: React.FC = () => {
                         overflow: 'auto',
                         margin: 'auto',
                     }}>
+                        {/* Settings modal always rendered at top level of flowchart modal */}
+                        {renderSettingsModal()}
                         <button
                             style={{ position: 'absolute', top: 12, right: 16, background: 'none', border: 'none', fontSize: 22, color: '#2563eb', cursor: 'pointer' }}
                             onClick={() => setShowFlowModal(false)}
@@ -671,15 +745,25 @@ const Widgets: React.FC = () => {
                                         return (
                                             <div
                                                 key={j}
-                                                style={{ position: 'absolute', left: widgetLeft, top: widgetTop, width: widgetWidth, height: widgetHeight, border: '2px solid #222', borderRadius: 12, background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: 14, zIndex: showConnectionModal ? 0 : 2, boxShadow: '0 2px 12px rgba(0,0,0,0.07)', transition: 'box-shadow 0.2s', gap: 8, padding: '0 10px', wordBreak: 'break-word', overflowWrap: 'break-word', textAlign: 'center', cursor: showConnectionModal ? 'default' : 'move', pointerEvents: showConnectionModal ? 'none' : 'auto' }}
+                                                style={{ position: 'absolute', left: widgetLeft, top: widgetTop, width: widgetWidth, height: widgetHeight, border: '2px solid #222', borderRadius: 12, background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: 14, zIndex: showConnectionModal || settingsModal.show ? 0 : 2, boxShadow: '0 2px 12px rgba(0,0,0,0.07)', transition: 'box-shadow 0.2s', gap: 8, padding: '0 10px', wordBreak: 'break-word', overflowWrap: 'break-word', textAlign: 'center', cursor: showConnectionModal || settingsModal.show ? 'default' : 'move', pointerEvents: showConnectionModal || settingsModal.show ? 'none' : 'auto' }}
                                                 onMouseDown={handleDrag}
                                             >
                                                 <span style={{ marginLeft: 8, flex: 1, wordBreak: 'break-word', overflowWrap: 'break-word', textAlign: 'center' }}>{opt.label}</span>
-                                                <button style={{ marginLeft: 8, background: '#ef4444', color: 'white', border: 'none', borderRadius: 8, padding: '4px 12px', cursor: showConnectionModal ? 'default' : 'pointer', fontWeight: 500, fontSize: 13, boxShadow: '0 1px 4px rgba(239,68,68,0.08)', pointerEvents: showConnectionModal ? 'none' : 'auto' }} onClick={() => {
-                                                    if (showConnectionModal) return;
+                                                <button style={{ marginLeft: 4, background: '#ef4444', color: 'white', border: 'none', borderRadius: 6, padding: '2px 7px', cursor: showConnectionModal || settingsModal.show ? 'default' : 'pointer', fontWeight: 500, fontSize: 11, boxShadow: '0 1px 4px rgba(239,68,68,0.08)', pointerEvents: showConnectionModal || settingsModal.show ? 'none' : 'auto', height: 22 }} onClick={() => {
+                                                    if (showConnectionModal || settingsModal.show) return;
                                                     setFlowOptions(flowOptions.filter(o => o.id !== opt.id));
                                                     setWidgets(prev => prev.filter(widget => widget.id !== opt.id));
                                                 }}>Delete</button>
+                                                <button
+                                                    style={{ marginLeft: 4, background: '#2563eb', color: 'white', border: 'none', borderRadius: 6, padding: '2px 6px', cursor: 'pointer', fontWeight: 500, fontSize: 11, boxShadow: '0 1px 4px rgba(37,99,235,0.08)', pointerEvents: 'auto', zIndex: 100002, height: 22, width: 22, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                                                    title="Settings"
+                                                    onClick={e => {
+                                                        e.stopPropagation();
+                                                        setSettingsModal({ show: true, widgetId });
+                                                    }}
+                                                >
+                                                    <svg width="14" height="14" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="7" stroke="white" strokeWidth="1.5"/><path d="M10 7V10L12 12" stroke="white" strokeWidth="1.5" strokeLinecap="round"/></svg>
+                                                </button>
                                             </div>
                                         );
                                     })}
