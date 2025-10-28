@@ -2,7 +2,6 @@
 
 import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import DraggableWidget from '@/components/DraggableWidget';
-import WidgetPalette from '@/components/WidgetPalette';
 import Toast from '@/components/ui/Toast';
 import ConfirmModal from '@/components/ui/ConfirmModal';
 import { Widget, GridSettings, DragState, ToastState, ConfirmState } from '@/types/widget.types';
@@ -62,8 +61,7 @@ const Widgets: React.FC = () => {
             window.removeEventListener('mouseup', handleMouseUp);
         };
     }, [drawingConnection]);
-    // Hide all arrows in flowchart modal
-    const [hideFlowArrows, setHideFlowArrows] = useState(false);
+   
     // Settings modal state for flowchart widgets
     const [settingsModal, setSettingsModal] = useState<{ show: boolean, widgetId: string | null }>({ show: false, widgetId: null });
 
@@ -178,10 +176,8 @@ const Widgets: React.FC = () => {
         { id: 'bandpower-3', label: 'Bandpower Graph of Channel 3', type: 'bandpower', selected: true },
     ];
     const [flowOptions, setFlowOptions] = useState(initialFlowOptions);
-    // Example connections: array of {from, to} widget ids
-    const [connections, setConnections] = useState<Array<{ from: string, to: string }>>([
-        { from: 'make-connection', to: 'basic-channel' },
-    ]);
+    // Connections between widgets (user-created)
+    const [connections, setConnections] = useState<Array<{ from: string, to: string }>>([]);
     // Widget collection state with default basic widget (no make-connection widget)
     const [widgets, setWidgets] = useState<Widget[]>([
         {
@@ -252,14 +248,12 @@ const Widgets: React.FC = () => {
 
         const adjustGridToScreen = () => {
             // UI Offsets
-            const SIDEBAR_WIDTH_COLLAPSED = 64; // w-16 (px)
             const HEADER_HEIGHT = 64; // h-16 (px)
-            const sidebarWidth = SIDEBAR_WIDTH_COLLAPSED;
             const headerHeight = HEADER_HEIGHT;
             const screenWidth = window.innerWidth;
             const screenHeight = window.innerHeight;
             // Calculate usable area for widgets
-            const usableWidth = screenWidth - sidebarWidth;
+            const usableWidth = screenWidth;
             const usableHeight = screenHeight - headerHeight;
 
             // Choose desired number of columns and rows (can be made configurable)
@@ -270,20 +264,19 @@ const Widgets: React.FC = () => {
             const cellWidth = usableWidth / targetCols;
             const cellHeight = usableHeight / targetRows;
 
-            setGridSettings(prev => ({
-                ...prev,
-                cols: targetCols,
-                rows: targetRows,
-                cellWidth,
-                cellHeight,
-                offsetX: sidebarWidth,
-                offsetY: headerHeight
-            }));
+                setGridSettings(prev => ({
+                    ...prev,
+                    cols: targetCols,
+                    rows: targetRows,
+                    cellWidth,
+                    cellHeight,
+                    offsetY: headerHeight
+                }));
 
             // Constrain existing widgets to new grid boundaries
             setWidgets(prevWidgets =>
                 prevWidgets.map(widget => {
-                    // Prevent widgets from overlapping header/sidebar
+                    // Prevent widgets from overlapping header
                     const minX = 0;
                     const maxX = targetCols - widget.width;
                     const minY = 0;
@@ -400,7 +393,6 @@ const Widgets: React.FC = () => {
                 type,
             };
             setWidgets(prev => [...prev, newWidget]);
-            setConnections(prev => [...prev, { from: 'make-connection', to: newWidget.id }]);
             showToast(`${type} widget added`, 'success');
         } else {
             showToast('No space available for new widget', 'error');
@@ -450,7 +442,7 @@ const Widgets: React.FC = () => {
             let newHeight = dragState.startHeight;
 
             if (dragState.dragType === 'move') {
-                // Prevent widgets from moving over header/sidebar
+                // Prevent widgets from moving over header
                 newX = Math.max(0, dragState.startX + deltaX);
                 newY = Math.max(0, dragState.startY + deltaY);
             } else if (dragState.dragType === 'resize') {
@@ -467,7 +459,7 @@ const Widgets: React.FC = () => {
 
             // Enhanced boundary constraints - allow symmetric edge positioning
             if (dragState.dragType === 'move') {
-                // Prevent widgets from moving over header/sidebar
+                // Prevent widgets from moving over header
                 const minX = 0;
                 const maxX = gridSettings.cols - newWidth;
                 const minY = 0;
@@ -594,9 +586,12 @@ const Widgets: React.FC = () => {
                             <button
                                 style={{ background: '#2563eb', color: 'white', padding: '8px 18px', borderRadius: 8, fontWeight: 'bold', border: 'none', cursor: 'pointer', fontSize: 16 }}
                                 onClick={() => {
-                                    // Download flowchart layout as JSON file
+                                    // Download full flowchart layout (widgets, grid, connections, positions, options) as JSON file
                                     try {
                                         const layout = {
+                                            widgets,
+                                            gridSettings,
+                                            connections,
                                             modalPositions,
                                             flowOptions,
                                         };
@@ -633,9 +628,12 @@ const Widgets: React.FC = () => {
                                             reader.onload = (ev) => {
                                                 try {
                                                     const layout = JSON.parse(ev.target?.result as string);
-                                                    if (layout.modalPositions && layout.flowOptions) {
-                                                        setModalPositions(layout.modalPositions);
-                                                        setFlowOptions(layout.flowOptions);
+                                                    if (layout && typeof layout === 'object') {
+                                                        if (layout.widgets) setWidgets(layout.widgets);
+                                                        if (layout.gridSettings) setGridSettings(layout.gridSettings);
+                                                        if (layout.connections) setConnections(layout.connections);
+                                                        if (layout.modalPositions) setModalPositions(layout.modalPositions);
+                                                        if (layout.flowOptions) setFlowOptions(layout.flowOptions);
                                                         showToast('Flowchart layout loaded!', 'success');
                                                     } else {
                                                         showToast('Invalid layout file', 'error');
@@ -652,21 +650,7 @@ const Widgets: React.FC = () => {
                                     }
                                 }}
                             >Load Layout</button>
-                            <button
-                                style={{ background: '#ef4444', color: 'white', padding: '8px 18px', borderRadius: 8, fontWeight: 'bold', border: 'none', cursor: 'pointer', fontSize: 16 }}
-                                onClick={() => {
-                                    setConnections([]);
-                                    setHideFlowArrows(true);
-                                    showToast('All arrows removed from flowchart', 'success');
-                                }}
-                            >Remove All Arrows</button>
-                            <button
-                                style={{ background: '#2563eb', color: 'white', padding: '8px 18px', borderRadius: 8, fontWeight: 'bold', border: 'none', cursor: 'pointer', fontSize: 16 }}
-                                onClick={() => {
-                                    setHideFlowArrows(false);
-                                    showToast('All arrows restored in flowchart', 'success');
-                                }}
-                            >Restore All Arrows</button>
+                            {/* Removed Remove/Restore All Arrows buttons per cleanup request */}
                         </div>
                         {/* Flowchart grid layout */}
                         <div style={{ position: 'relative', width: 1200, height: 500, margin: 'auto', borderRadius: 12, border: '1px solid #e5e7eb', boxShadow: '0 4px 32px rgba(0,0,0,0.08)', overflow: 'hidden', background: '#fff' }}>
@@ -732,89 +716,7 @@ const Widgets: React.FC = () => {
                                     </marker>
                                 </defs>
                             </svg>
-                            {!hideFlowArrows && (
-                                <svg style={{ position: 'absolute', left: 0, top: 0, width: '1200px', height: '500px', pointerEvents: showConnectionModal ? 'none' : 'auto', zIndex: showConnectionModal ? 0 : 1 }}>
-                                    {/* Arrows from Make Connection to first available widget in each channel row */}
-                                    {(() => {
-                                        const makeConnId = 'make-connection';
-                                        const makeConnPos = { left: 10, top: 225, width: 120, height: 60 };
-                                        const startX = makeConnPos.left + makeConnPos.width;
-                                        const startY = makeConnPos.top + makeConnPos.height / 2;
-                                        // For each channel row, find the first present widget
-                                        return [0, 1, 2].map(i => {
-                                            const widgetTypes = ['channel', 'spiderplot', 'fft', 'bandpower'];
-                                            // Find first present widget in this row
-                                            const firstOpt = widgetTypes
-                                                .map(type => {
-                                                    const id = type === 'channel' ? `channel-${i + 1}`
-                                                        : type === 'spiderplot' ? `spider-${i + 1}`
-                                                        : type === 'fft' ? `fft-${i + 1}`
-                                                        : `bandpower-${i + 1}`;
-                                                    return flowOptions.find(o => o.id === id);
-                                                })
-                                                .find(Boolean);
-                                            if (!firstOpt) return null;
-                                            const j = widgetTypes.findIndex(type => {
-                                                const id = type === 'channel' ? `channel-${i + 1}`
-                                                    : type === 'spiderplot' ? `spider-${i + 1}`
-                                                    : type === 'fft' ? `fft-${i + 1}`
-                                                    : `bandpower-${i + 1}`;
-                                                return firstOpt.id === id;
-                                            });
-                                            const pos = modalPositions[firstOpt.id] || { left: 200 + j * 220, top: 100 + i * 120 };
-                                            const width = j === 3 ? 220 : 180;
-                                            const height = 70;
-                                            const endX = pos.left;
-                                            const endY = pos.top + height / 2;
-                                            // Bezier curve arch
-                                            const controlX = (startX + endX) / 2;
-                                            const controlY = startY - 80 + i * 80;
-                                            const path = `M ${startX} ${startY} Q ${controlX} ${controlY} ${endX} ${endY}`;
-                                            return (
-                                                <path key={`makeconn-arrow-${i}`} d={path} stroke="#2563eb" strokeWidth={2.5} fill="none" markerEnd="url(#arrowhead)" />
-                                            );
-                                        });
-                                    })()}
-                                    {[0,1,2].map(i => {
-                                        // Get widgets for this channel in order
-                                        const widgetPositions = [0,1,2,3].map(j => {
-                                            const id = j === 0 ? `channel-${i+1}` : j === 1 ? `spider-${i+1}` : j === 2 ? `fft-${i+1}` : `bandpower-${i+1}`;
-                                            const opt = flowOptions.find(o => o.id === id);
-                                            if (!opt) return null;
-                                          const pos = modalPositions[id] || { left: 200 + j * 220, top: 100 + i * 120 };
-                                            const width = j === 3 ? 220 : 180;
-                                            const height = 70;
-                                            return { left: pos.left, top: pos.top, width, height, idx: j, opt };
-                                        }).filter(Boolean);
-                                        // Draw arrows between consecutive present widgets
-                                        return widgetPositions.slice(0, -1).map((from, k) => {
-                                            const to = widgetPositions[k+1];
-                                            if (!from || !to) return null;
-                                            // Arrow from center right of 'from' to center left of 'to'
-                                            const startX = from.left + from.width;
-                                            const startY = from.top + from.height/2;
-                                            const endX = to.left;
-                                            const endY = to.top + to.height/2;
-                                            // Use a cubic Bezier for a nice curve
-                                            const dx = Math.abs(endX - startX);
-                                            const controlOffset = Math.max(60, dx / 2);
-                                            const c1x = startX + controlOffset;
-                                            const c1y = startY;
-                                            const c2x = endX - controlOffset;
-                                            const c2y = endY;
-                                            const path = `M ${startX} ${startY} C ${c1x} ${c1y}, ${c2x} ${c2y}, ${endX} ${endY}`;
-                                            return (
-                                                <path key={`arrow-${i}-${from.idx}-${to.idx}`} d={path} stroke="#2563eb" strokeWidth={2.5} fill="none" markerEnd="url(#arrowhead)" />
-                                            );
-                                        });
-                                    })}
-                                    <defs>
-                                        <marker id="arrowhead" markerWidth="6" markerHeight="4" refX="6" refY="2" orient="auto" markerUnits="strokeWidth">
-                                            <polygon points="0 0, 6 2, 0 4" fill="#2563eb" />
-                                        </marker>
-                                    </defs>
-                                </svg>
-                            )}
+                            {/* Auto-flow arrows removed per cleanup request */}
                             {/* Flowchart nodes as boxes */}
                             {/* Connection box with connection type selection and modal logic */}
                             <div style={{ position: 'absolute', left: 10, top: 225, width: 120, height: 60, border: '2px solid #2563eb', borderRadius: 12, background: '#fff', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: 15, zIndex: 2, boxShadow: '0 2px 12px rgba(37,99,235,0.08)', letterSpacing: 0.5 }}>
@@ -958,61 +860,61 @@ const Widgets: React.FC = () => {
                                                         >
                                                             <svg width="14" height="14" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="7" stroke="white" strokeWidth="1.5" /><path d="M10 7V10L12 12" stroke="white" strokeWidth="1.5" strokeLinecap="round" /></svg>
                                                         </button>
-                                                    <svg style={{ marginLeft: 8, marginRight: 0, zIndex: 100 }} width={14} height={14}>
-                                                        {/* Output handle (right) - enable drag-to-connect */}
-                                                        <svg
-                                                            data-widgetid={widgetId}
-                                                            data-handle="output"
-                                                            style={{ cursor: 'crosshair', marginLeft: 8, marginRight: 0, zIndex: 100 }}
-                                                            width={14}
-                                                            height={14}
-                                                            onMouseDown={e => {
-                                                                e.stopPropagation();
-                                                                // Calculate output handle position using actual circle center
-                                                                const center = getCircleCenter(widgetId, 'output');
-                                                                if (center) {
-                                                                    setDrawingConnection({ from: widgetId, startX: center.x, startY: center.y });
-                                                                    setMousePos({ x: center.x, y: center.y });
-                                                                } else {
-                                                                    const startX = widgetLeft + widgetWidth;
-                                                                    const startY = widgetTop + widgetHeight / 2;
-                                                                    setDrawingConnection({ from: widgetId, startX, startY });
-                                                                    setMousePos({ x: startX, y: startY });
-                                                                }
-                                                            }}>
-                                                            <circle cx={7} cy={7} r={2.5} fill="#fff" stroke="#2563eb" strokeWidth={1.1} />
-                                                        </svg>
-                                                        {/* Input handle (left) - now outside SVG, with pointer events */}
-                                                        <div
-                                                            style={{ position: 'absolute', left: -7, top: '50%', transform: 'translateY(-50%)', zIndex: 100, width: 14, height: 14, cursor: drawingConnection ? 'pointer' : 'default' }}
-                                                            data-widgetid={widgetId}
-                                                            data-handle="input"
-                                                            onMouseUp={e => {
-                                                                e.stopPropagation();
-                                                                if (drawingConnection && drawingConnection.from !== widgetId) {
-                                                                    // Mark that input handled the mouseup to avoid the global handler clearing state first
-                                                                    inputHandledRef.current = true;
-                                                                    setConnections(prev => {
-                                                                        // Avoid duplicate identical connections
-                                                                        const exists = prev.some(c => c.from === drawingConnection.from && c.to === widgetId);
-                                                                        if (exists) return prev;
-                                                                        return [...prev, { from: drawingConnection.from, to: widgetId }];
-                                                                    });
-                                                                    setDrawingConnection(null);
-                                                                    setMousePos(null);
-                                                                    // Reset marker next tick
-                                                                    setTimeout(() => { inputHandledRef.current = false; }, 0);
-                                                                }
-                                                            }}
-                                                        >
-                                                            <svg width={14} height={14}>
+                                                        <svg style={{ marginLeft: 8, marginRight: 0, zIndex: 100 }} width={14} height={14}>
+                                                            {/* Output handle (right) - enable drag-to-connect */}
+                                                            <svg
+                                                                data-widgetid={widgetId}
+                                                                data-handle="output"
+                                                                style={{ cursor: 'crosshair', marginLeft: 8, marginRight: 0, zIndex: 100 }}
+                                                                width={14}
+                                                                height={14}
+                                                                onMouseDown={e => {
+                                                                    e.stopPropagation();
+                                                                    // Calculate output handle position using actual circle center
+                                                                    const center = getCircleCenter(widgetId, 'output');
+                                                                    if (center) {
+                                                                        setDrawingConnection({ from: widgetId, startX: center.x, startY: center.y });
+                                                                        setMousePos({ x: center.x, y: center.y });
+                                                                    } else {
+                                                                        const startX = widgetLeft + widgetWidth;
+                                                                        const startY = widgetTop + widgetHeight / 2;
+                                                                        setDrawingConnection({ from: widgetId, startX, startY });
+                                                                        setMousePos({ x: startX, y: startY });
+                                                                    }
+                                                                }}>
                                                                 <circle cx={7} cy={7} r={2.5} fill="#fff" stroke="#2563eb" strokeWidth={1.1} />
                                                             </svg>
-                                                        </div>
-                                                    </svg>
+                                                            {/* Input handle (left) - now outside SVG, with pointer events */}
+                                                            <div
+                                                                style={{ position: 'absolute', left: -7, top: '50%', transform: 'translateY(-50%)', zIndex: 100, width: 14, height: 14, cursor: drawingConnection ? 'pointer' : 'default' }}
+                                                                data-widgetid={widgetId}
+                                                                data-handle="input"
+                                                                onMouseUp={e => {
+                                                                    e.stopPropagation();
+                                                                    if (drawingConnection && drawingConnection.from !== widgetId) {
+                                                                        // Mark that input handled the mouseup to avoid the global handler clearing state first
+                                                                        inputHandledRef.current = true;
+                                                                        setConnections(prev => {
+                                                                            // Avoid duplicate identical connections
+                                                                            const exists = prev.some(c => c.from === drawingConnection.from && c.to === widgetId);
+                                                                            if (exists) return prev;
+                                                                            return [...prev, { from: drawingConnection.from, to: widgetId }];
+                                                                        });
+                                                                        setDrawingConnection(null);
+                                                                        setMousePos(null);
+                                                                        // Reset marker next tick
+                                                                        setTimeout(() => { inputHandledRef.current = false; }, 0);
+                                                                    }
+                                                                }}
+                                                            >
+                                                                <svg width={14} height={14}>
+                                                                    <circle cx={7} cy={7} r={2.5} fill="#fff" stroke="#2563eb" strokeWidth={1.1} />
+                                                                </svg>
+                                                            </div>
+                                                        </svg>
+                                                    </div>
                                                 </div>
                                             </div>
-                                        </div>
                                         );
                                     })}
                                 </React.Fragment>
@@ -1022,7 +924,7 @@ const Widgets: React.FC = () => {
                             style={{ marginTop: 24, background: '#10B981', color: 'white', padding: '10px 24px', borderRadius: 8, fontWeight: 'bold', border: 'none', cursor: 'pointer', fontSize: 18 }}
                             onClick={() => {
                                 setShowFlowModal(false);
-                                // Arrange selected widgets to fill dashboard space using grid, offset by header/sidebar
+                                // Arrange selected widgets to fill dashboard space using grid, offset by header
                                 setWidgets(prev => {
                                     const typeMap: Record<string, string> = {
                                         channel: 'basic',
@@ -1044,7 +946,7 @@ const Widgets: React.FC = () => {
                                     // Calculate widget size to fill grid
                                     const widgetWidth = Math.floor(cols / gridCols);
                                     const widgetHeight = Math.floor(rows / gridRows);
-                                    // Place widgets in grid, offset by header/sidebar
+                                    // Place widgets in grid, offset by header
                                     let newWidgets: Widget[] = [];
                                     // Offset widgets by 1 grid cell right and down for clear separation
                                     const offsetCells = 3;
@@ -1124,7 +1026,7 @@ const Widgets: React.FC = () => {
                         </marker>
                     </defs>
                 </svg>
-                {/* Render all widgets in the grid, including new ones from sidebar */}
+                {/* Render all widgets in the grid */}
                 {widgets.map(widget => (
                     <div
                         key={widget.id}
@@ -1143,15 +1045,6 @@ const Widgets: React.FC = () => {
                 ))}
                 {/* Popover rendered outside the widget, anchored near the Make Connection widget */}
             </div>
-
-            <WidgetPalette
-                onAddWidget={handleAddWidget}
-                widgets={widgets}
-                gridSettings={gridSettings}
-                onLoadLayout={handleLoadLayout}
-                showToast={showToast}
-                showConfirm={showConfirm}
-            />
 
             <Toast toast={toast} onClose={hideToast} />
             <ConfirmModal confirm={confirm} />
