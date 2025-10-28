@@ -61,7 +61,7 @@ const Widgets: React.FC = () => {
             window.removeEventListener('mouseup', handleMouseUp);
         };
     }, [drawingConnection]);
-   
+
     // Settings modal state for flowchart widgets
     const [settingsModal, setSettingsModal] = useState<{ show: boolean, widgetId: string | null }>({ show: false, widgetId: null });
 
@@ -193,6 +193,8 @@ const Widgets: React.FC = () => {
     ]);
     // Modal state for connection UI
     const [showConnectionModal, setShowConnectionModal] = useState(false);
+    // Dropdown state for adding new widget types
+    const [showAddDropdown, setShowAddDropdown] = useState(false);
 
     // Grid configuration state - initialize with SSR-safe defaults, adjust in useEffect
     const [gridSettings, setGridSettings] = useState<GridSettings>({
@@ -260,18 +262,28 @@ const Widgets: React.FC = () => {
             const targetCols = 24;
             const targetRows = 16;
 
-            // Dynamically calculate cell size to fill available area exactly
-            const cellWidth = usableWidth / targetCols;
-            const cellHeight = usableHeight / targetRows;
+            // Dynamically calculate cell size that fits whole grid cells into available area
+            // Use integer cell sizes so boxes are not cut off; center the grid inside usable area
+            const cellWidth = Math.max(1, Math.floor(usableWidth / targetCols));
+            const cellHeight = Math.max(1, Math.floor(usableHeight / targetRows));
 
-                setGridSettings(prev => ({
-                    ...prev,
-                    cols: targetCols,
-                    rows: targetRows,
-                    cellWidth,
-                    cellHeight,
-                    offsetY: headerHeight
-                }));
+            // Total pixel size the grid will occupy
+            const totalGridWidth = cellWidth * targetCols;
+            const totalGridHeight = cellHeight * targetRows;
+
+            // Center grid horizontally and vertically within usable area (below header)
+            const offsetX = Math.max(0, Math.floor((usableWidth - totalGridWidth) / 2));
+            const offsetY = headerHeight + Math.max(0, Math.floor((usableHeight - totalGridHeight) / 2));
+
+            setGridSettings(prev => ({
+                ...prev,
+                cols: targetCols,
+                rows: targetRows,
+                cellWidth,
+                cellHeight,
+                offsetX,
+                offsetY,
+            }));
 
             // Constrain existing widgets to new grid boundaries
             setWidgets(prevWidgets =>
@@ -362,6 +374,26 @@ const Widgets: React.FC = () => {
         } else if (type === 'FFTGraph') {
             defaultWidth = 6;
             defaultHeight = 5;
+            minWidth = 4;
+            minHeight = 3;
+        } else if (type === 'channel') {
+            defaultWidth = 4;
+            defaultHeight = 3;
+            minWidth = 3;
+            minHeight = 2;
+        } else if (type === 'bandpower') {
+            defaultWidth = 5;
+            defaultHeight = 4;
+            minWidth = 4;
+            minHeight = 3;
+        } else if (type === 'candle') {
+            defaultWidth = 4;
+            defaultHeight = 4;
+            minWidth = 3;
+            minHeight = 3;
+        } else if (type === 'game') {
+            defaultWidth = 6;
+            defaultHeight = 4;
             minWidth = 4;
             minHeight = 3;
         } else if (type === 'bargraph' || type === 'statistic') {
@@ -622,6 +654,24 @@ const Widgets: React.FC = () => {
                                     }
                                 }}
                             >Save Layout</button>
+                            {/* Add Widget dropdown */}
+                            <div style={{ position: 'relative' }}>
+                                <button
+                                    style={{ background: '#4b5563', color: 'white', padding: '8px 14px', borderRadius: 8, fontWeight: 'bold', border: 'none', cursor: 'pointer', fontSize: 16 }}
+                                    onClick={() => setShowAddDropdown(prev => !prev)}
+                                >Add Widget ▾</button>
+                                {showAddDropdown && (
+                                    <div style={{ position: 'absolute', right: 0, top: 'calc(100% + 6px)', background: 'white', border: '1px solid #e5e7eb', boxShadow: '0 6px 18px rgba(0,0,0,0.08)', borderRadius: 8, zIndex: 100005, minWidth: 200, overflow: 'hidden' }}>
+                                        <button onClick={() => { setShowAddDropdown(false); handleAddWidget('spiderplot'); }} style={{ display: 'block', width: '100%', padding: '10px 14px', textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer' }}>Spider Plot</button>
+                                        <button onClick={() => { setShowAddDropdown(false); handleAddWidget('FFTGraph'); }} style={{ display: 'block', width: '100%', padding: '10px 14px', textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer' }}>FFT</button>
+                                        <button onClick={() => { setShowAddDropdown(false); handleAddWidget('channel'); }} style={{ display: 'block', width: '100%', padding: '10px 14px', textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer' }}>Channel</button>
+                                        <button onClick={() => { setShowAddDropdown(false); handleAddWidget('candle'); }} style={{ display: 'block', width: '100%', padding: '10px 14px', textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer' }}>Candle</button>
+                                        <button onClick={() => { setShowAddDropdown(false); handleAddWidget('game'); }} style={{ display: 'block', width: '100%', padding: '10px 14px', textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer' }}>Game</button>
+                                        <button onClick={() => { setShowAddDropdown(false); handleAddWidget('bandpower'); }} style={{ display: 'block', width: '100%', padding: '10px 14px', textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer' }}>Bandpower</button>
+                                        <button onClick={() => { setShowAddDropdown(false); handleAddWidget('basic'); }} style={{ display: 'block', width: '100%', padding: '10px 14px', textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer' }}>Real-time Signal</button>
+                                    </div>
+                                )}
+                            </div>
                             <button
                                 style={{ background: '#10B981', color: 'white', padding: '8px 18px', borderRadius: 8, fontWeight: 'bold', border: 'none', cursor: 'pointer', fontSize: 16 }}
                                 onClick={() => {
@@ -1003,49 +1053,47 @@ const Widgets: React.FC = () => {
                     </div>
                 </div>
             )}
-            <div
-                className="flex flex-wrap items-stretch justify-center w-full h-full p-6 gap-6"
-                style={{ minHeight: `calc(100vh - ${(gridSettings.offsetY || 64)}px)` }}
-            >
-                {GridLines}
-                {/* Dynamic arrows between widgets */}
-                <svg style={{ position: 'absolute', left: 0, top: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 50 }}>
-                    {connections.map(({ from, to }, idx) => {
-                        const fromWidget = widgets.find(w => w.id === from);
-                        const toWidget = widgets.find(w => w.id === to);
-                        if (!fromWidget || !toWidget) return null;
-                        // Arrow starts at center right of fromWidget, ends at center left of toWidget
-                        const startX = (fromWidget.x + fromWidget.width) * gridSettings.cellWidth;
-                        const startY = (fromWidget.y + fromWidget.height / 2) * gridSettings.cellHeight;
-                        const endX = toWidget.x * gridSettings.cellWidth;
-                        const endY = (toWidget.y + toWidget.height / 2) * gridSettings.cellHeight;
-                        // Control points for cubic Bezier curve
-                        const dx = Math.abs(endX - startX);
-                        const controlOffset = Math.max(60, dx / 2);
-                        const c1x = startX + controlOffset;
-                        const c1y = startY;
-                        const c2x = endX - controlOffset;
-                        const c2y = endY;
-                        const path = `M ${startX} ${startY} C ${c1x} ${c1y}, ${c2x} ${c2y}, ${endX} ${endY}`;
-                        return (
-                            <g key={idx}>
-                                <path d={path} stroke="#90cdf4" strokeWidth={1.5} fill="none" markerEnd="url(#arrowhead)" />
-                            </g>
-                        );
-                    })}
-                    <defs>
-                        <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto" markerUnits="strokeWidth">
-                            <polygon points="0 0, 10 3.5, 0 7" fill="#90cdf4" />
-                        </marker>
-                    </defs>
-                </svg>
-                {/* Render all widgets in the grid */}
-                {widgets.map(widget => (
-                    <div
-                        key={widget.id}
-                        style={{ flex: '1 1 320px', minWidth: 280, maxWidth: 480, display: 'flex', alignItems: 'stretch', justifyContent: 'center' }}
-                    >
+            <div style={{ width: '100%', display: 'flex', justifyContent: 'center', boxSizing: 'border-box', minHeight: `calc(100vh - ${(gridSettings.offsetY || 64)}px)` }}>
+                {/* Centered grid container sized to whole grid in pixels so cells are never cut */}
+                <div style={{ position: 'relative', width: (gridSettings.cols || 24) * (gridSettings.cellWidth || 50), height: (gridSettings.rows || 16) * (gridSettings.cellHeight || 50), overflow: 'hidden' }}>
+                    {GridLines}
+
+                    {/* Dynamic arrows between widgets (coordinates are in grid pixels) */}
+                    <svg style={{ position: 'absolute', left: 0, top: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 50 }}>
+                        {connections.map(({ from, to }, idx) => {
+                            const fromWidget = widgets.find(w => w.id === from);
+                            const toWidget = widgets.find(w => w.id === to);
+                            if (!fromWidget || !toWidget) return null;
+                            // Arrow starts at center right of fromWidget, ends at center left of toWidget
+                            const startX = (fromWidget.x + fromWidget.width) * gridSettings.cellWidth;
+                            const startY = (fromWidget.y + fromWidget.height / 2) * gridSettings.cellHeight;
+                            const endX = toWidget.x * gridSettings.cellWidth;
+                            const endY = (toWidget.y + toWidget.height / 2) * gridSettings.cellHeight;
+                            // Control points for cubic Bezier curve
+                            const dx = Math.abs(endX - startX);
+                            const controlOffset = Math.max(60, dx / 2);
+                            const c1x = startX + controlOffset;
+                            const c1y = startY;
+                            const c2x = endX - controlOffset;
+                            const c2y = endY;
+                            const path = `M ${startX} ${startY} C ${c1x} ${c1y}, ${c2x} ${c2y}, ${endX} ${endY}`;
+                            return (
+                                <g key={idx}>
+                                    <path d={path} stroke="#90cdf4" strokeWidth={1.5} fill="none" markerEnd="url(#arrowhead)" />
+                                </g>
+                            );
+                        })}
+                        <defs>
+                            <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto" markerUnits="strokeWidth">
+                                <polygon points="0 0, 10 3.5, 0 7" fill="#90cdf4" />
+                            </marker>
+                        </defs>
+                    </svg>
+
+                    {/* Render all widgets positioned by grid pixels inside the sized container */}
+                    {widgets.map(widget => (
                         <DraggableWidget
+                            key={widget.id}
                             widget={widget}
                             widgets={widgets}
                             onRemove={handleRemoveWidget}
@@ -1054,9 +1102,10 @@ const Widgets: React.FC = () => {
                             setDragState={setDragState}
                             onUpdateWidget={handleUpdateWidget}
                         />
-                    </div>
-                ))}
-                {/* Popover rendered outside the widget, anchored near the Make Connection widget */}
+                    ))}
+
+                    {/* Popover rendered outside the widget, anchored near the Make Connection widget */}
+                </div>
             </div>
 
             <Toast toast={toast} onClose={hideToast} />
