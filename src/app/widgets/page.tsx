@@ -403,9 +403,20 @@ const Widgets: React.FC = () => {
      * Remove widget by ID
      */
     const handleRemoveWidget = useCallback((id: string) => {
+        // Remove the widget itself
         setWidgets(prev => prev.filter(widget => widget.id !== id));
+        // Remove any flow option entry for this widget
         setFlowOptions(prev => prev.filter(opt => opt.id !== id));
-        showToast('Widget removed', 'info');
+        // Remove any connections that reference this widget (from or to)
+        setConnections(prev => prev.filter(conn => conn.from !== id && conn.to !== id));
+        // Remove any stored modal position for this widget
+        setModalPositions(prev => {
+            const copy = { ...prev } as Record<string, { left: number, top: number }>;
+            if (copy[id]) delete copy[id];
+            return copy;
+        });
+
+        showToast('Widget removed (and related connections cleared)', 'info');
     }, [showToast]);
 
     /**
@@ -847,8 +858,10 @@ const Widgets: React.FC = () => {
                                                     <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                                                         <button style={{ background: '#ef4444', color: 'white', border: 'none', borderRadius: 6, padding: '2px 7px', cursor: showConnectionModal || settingsModal.show ? 'default' : 'pointer', fontWeight: 500, fontSize: 11, boxShadow: '0 1px 4px rgba(239,68,68,0.08)', pointerEvents: showConnectionModal || settingsModal.show ? 'none' : 'auto', height: 22 }} onClick={() => {
                                                             if (showConnectionModal || settingsModal.show) return;
-                                                            setFlowOptions(flowOptions.filter(o => o.id !== opt.id));
-                                                            setWidgets(prev => prev.filter(widget => widget.id !== opt.id));
+                                                            // Use central handler so connected arrows and modal positions are also cleaned up
+                                                            handleRemoveWidget(opt.id);
+                                                            // Also remove from flow options list
+                                                            setFlowOptions(prev => prev.filter(o => o.id !== opt.id));
                                                         }}>Delete</button>
                                                         <button
                                                             style={{ background: '#2563eb', color: 'white', border: 'none', borderRadius: 6, padding: '2px 6px', cursor: 'pointer', fontWeight: 500, fontSize: 11, boxShadow: '0 1px 4px rgba(37,99,235,0.08)', pointerEvents: 'auto', zIndex: 100002, height: 22, width: 22, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
