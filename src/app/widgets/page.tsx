@@ -158,6 +158,87 @@ const Widgets: React.FC = () => {
             return null;
         }
     };
+
+    // Geometry helpers for routing arrows around widget bounding boxes
+    const lineIntersect = (x1: number, y1: number, x2: number, y2: number, x3: number, y3: number, x4: number, y4: number) => {
+        const denom = (y4 - y3) * (x2 - x1) - (x4 - x3) * (y2 - y1);
+        if (denom === 0) return false; // parallel
+        const ua = ((x4 - x3) * (y1 - y3) - (y4 - y3) * (x1 - x3)) / denom;
+        const ub = ((x2 - x1) * (y1 - y3) - (y2 - y1) * (x1 - x3)) / denom;
+        return ua >= 0 && ua <= 1 && ub >= 0 && ub <= 1;
+    };
+
+    const segmentIntersectsRect = (x1: number, y1: number, x2: number, y2: number, rect: { left: number, top: number, right: number, bottom: number }) => {
+        // If either endpoint is inside rect, consider it intersecting
+        if (x1 >= rect.left && x1 <= rect.right && y1 >= rect.top && y1 <= rect.bottom) return true;
+        if (x2 >= rect.left && x2 <= rect.right && y2 >= rect.top && y2 <= rect.bottom) return true;
+        // Check intersection with each rect edge
+        if (lineIntersect(x1, y1, x2, y2, rect.left, rect.top, rect.right, rect.top)) return true;
+        if (lineIntersect(x1, y1, x2, y2, rect.right, rect.top, rect.right, rect.bottom)) return true;
+        if (lineIntersect(x1, y1, x2, y2, rect.right, rect.bottom, rect.left, rect.bottom)) return true;
+        if (lineIntersect(x1, y1, x2, y2, rect.left, rect.bottom, rect.left, rect.top)) return true;
+        return false;
+    };
+
+    const computeAvoidingPath = (startX: number, startY: number, endX: number, endY: number, obstacles: Array<{ left: number, top: number, right: number, bottom: number, id?: string }>, excludeIds: string[] = []) => {
+        // Quick check: if straight segment doesn't intersect any obstacle, return smooth cubic bezier
+        const intersectsAny = obstacles.some(ob => excludeIds.includes(ob.id || '') ? false : segmentIntersectsRect(startX, startY, endX, endY, ob));
+        if (!intersectsAny) {
+            const dx = endX - startX;
+            const controlOffset = Math.max(60, Math.abs(dx) / 2);
+            const c1x = startX + controlOffset;
+            const c1y = startY;
+            const c2x = endX - controlOffset;
+            const c2y = endY;
+            return `M ${startX} ${startY} C ${c1x} ${c1y}, ${c2x} ${c2y}, ${endX} ${endY}`;
+        }
+
+        // Try horizontal-middle elbow routing: start -> (mx,startY) -> (mx,endY) -> end
+        const containerWidth = Math.max(Math.abs(endX - startX), (gridSettings.cols || 24) * (gridSettings.cellWidth || 50));
+        const step = Math.max(20, (gridSettings.cellWidth || 50));
+        const baseMx = (startX + endX) / 2;
+        for (let k = 0; k <= containerWidth; k += step) {
+            for (const sign of [1, -1]) {
+                const mx = baseMx + sign * k;
+                const segs: Array<[number, number, number, number]> = [
+                    [startX, startY, mx, startY],
+                    [mx, startY, mx, endY],
+                    [mx, endY, endX, endY]
+                ];
+                const blocked = segs.some(([x1, y1, x2, y2]) => obstacles.some(ob => excludeIds.includes(ob.id || '') ? false : segmentIntersectsRect(x1, y1, x2, y2, ob)));
+                if (!blocked) {
+                    return `M ${startX} ${startY} L ${mx} ${startY} L ${mx} ${endY} L ${endX} ${endY}`;
+                }
+            }
+        }
+
+        // Try vertical-middle elbow routing: start -> (startX,my) -> (endX,my) -> end
+        const baseMy = (startY + endY) / 2;
+        const containerHeight = Math.max(Math.abs(endY - startY), (gridSettings.rows || 16) * (gridSettings.cellHeight || 50));
+        for (let k = 0; k <= containerHeight; k += step) {
+            for (const sign of [1, -1]) {
+                const my = baseMy + sign * k;
+                const segs: Array<[number, number, number, number]> = [
+                    [startX, startY, startX, my],
+                    [startX, my, endX, my],
+                    [endX, my, endX, endY]
+                ];
+                const blocked = segs.some(([x1, y1, x2, y2]) => obstacles.some(ob => excludeIds.includes(ob.id || '') ? false : segmentIntersectsRect(x1, y1, x2, y2, ob)));
+                if (!blocked) {
+                    return `M ${startX} ${startY} L ${startX} ${my} L ${endX} ${my} L ${endX} ${endY}`;
+                }
+            }
+        }
+
+        // Fallback: larger curved bezier
+        const dx = endX - startX;
+        const controlOffset = Math.max(120, Math.abs(dx));
+        const c1x = startX + controlOffset;
+        const c1y = startY;
+        const c2x = endX - controlOffset;
+        const c2y = endY;
+        return `M ${startX} ${startY} C ${c1x} ${c1y}, ${c2x} ${c2y}, ${endX} ${endY}`;
+    };
     // Use FlowModalContext for modal state
     const { showFlowModal, setShowFlowModal } = require('@/context/FlowModalContext').useFlowModal();
     // List of all possible widgets in the flow (initially based on flowchart)
@@ -609,6 +690,11 @@ const Widgets: React.FC = () => {
                         borderRadius: 12,
                         boxShadow: '0 2px 16px rgba(0,0,0,0.15)',
                         padding: 32,
+                        // Make text inside the flow configuration modal non-selectable
+                        WebkitUserSelect: 'none' as any,
+                        MozUserSelect: 'none' as any,
+                        msUserSelect: 'none' as any,
+                        userSelect: 'none' as any,
                         minWidth: 1200,
                         maxWidth: 1400,
                         width: '90vw',
@@ -711,10 +797,63 @@ const Widgets: React.FC = () => {
                                     }
                                 }}
                             >Load Layout</button>
-                            {/* Removed Remove/Restore All Arrows buttons per cleanup request */}
+                            {/* Make Connection button placed next to Load Layout for convenience */}
+                            <button
+                                style={{ background: '#f59e0b', color: 'white', padding: '8px 18px', borderRadius: 8, fontWeight: 'bold', border: 'none', cursor: 'pointer', fontSize: 16 }}
+                                onClick={() => setShowConnectionModal(true)}
+                            >Make Connection</button>
                         </div>
+                        {/* Connection modal (opened via toolbar Make Connection button) */}
+                        {showConnectionModal && (
+                            <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', zIndex: 100002, pointerEvents: 'auto' }}>
+                                <div
+                                    style={{
+                                        position: 'fixed',
+                                        top: 0,
+                                        left: 0,
+                                        width: '100vw',
+                                        height: '100vh',
+                                        background: 'rgba(81, 75, 75, 0.39)',
+                                        zIndex: 200002,
+                                        pointerEvents: 'auto',
+                                    }}
+                                    onClick={() => setShowConnectionModal(false)}
+                                />
+                                <div
+                                    style={{
+                                        position: 'fixed',
+                                        top: '50%',
+                                        left: '50%',
+                                        transform: 'translate(-50%, -50%)',
+                                        paddingLeft: 0,
+                                        paddingRight: 0,
+                                        marginLeft: 0,
+                                        marginRight: 0,
+                                        borderRadius: 16,
+                                        boxShadow: '0 12px 48px rgba(0,0,0,0.32)',
+                                        border: '2px solid #2563eb',
+                                        padding: 40,
+                                        minWidth: 420,
+                                        maxWidth: 520,
+                                        background: 'rgba(248, 247, 247, 1)',
+                                        zIndex: 200003,
+                                        pointerEvents: 'auto',
+                                    }}
+                                    onMouseDown={e => e.stopPropagation()}
+                                >
+                                    <button
+                                        style={{ position: 'absolute', top: 12, right: 16, background: 'none', border: 'none', fontSize: 22, color: '#2563eb', cursor: 'pointer' }}
+                                        onClick={e => { e.stopPropagation(); setShowConnectionModal(false); }}
+                                    >
+                                        &times;
+                                    </button>
+                                    <ConnectionDataWidget />
+                                </div>
+                            </div>
+                        )}
+
                         {/* Flowchart grid layout */}
-                        <div style={{ position: 'relative', width: 1200, height: 500, margin: 'auto', borderRadius: 12, border: '1px solid #e5e7eb', boxShadow: '0 4px 32px rgba(0,0,0,0.08)', overflow: 'hidden', background: '#fff' }}>
+                        <div style={{ position: 'relative', width: 1200, height: 500, margin: 'auto', borderRadius: 12, border: '1px solid #e5e7eb', boxShadow: '0 4px 32px rgba(0,0,0,0.08)', overflow: 'hidden', background: '#fff', WebkitUserSelect: 'none' as any, MozUserSelect: 'none' as any, msUserSelect: 'none' as any, userSelect: 'none' as any }}>
                             {/* Live arrow while dragging connection */}
                             {drawingConnection && mousePos && (
                                 <svg style={{ position: 'absolute', left: 0, top: 0, width: '1200px', height: '500px', pointerEvents: 'none', zIndex: 10000 }}>
@@ -760,15 +899,20 @@ const Widgets: React.FC = () => {
                                         endX = (toPos as { left: number, top: number }).left + 7;
                                         endY = (toPos as { left: number, top: number }).top + 35;
                                     }
-                                    const dx = endX - startX;
-                                    const controlOffset = Math.max(60, Math.abs(dx) / 2);
-                                    const c1x = startX + controlOffset;
-                                    const c1y = startY;
-                                    const c2x = endX - controlOffset;
-                                    const c2y = endY;
-                                    const path = `M ${startX} ${startY} C ${c1x} ${c1y}, ${c2x} ${c2y}, ${endX} ${endY}`;
+                                    // Build obstacle boxes from modalPositions for routing
+                                    const obstacles: Array<{ left: number, top: number, right: number, bottom: number, id?: string }> = [];
+                                    Object.keys(modalPositions).forEach(k => {
+                                        const p = modalPositions[k];
+                                        // approximate modal widget sizes used in layout (match earlier logic)
+                                        const widgetType = k.startsWith('channel') ? 'channel' : k.startsWith('spider') ? 'spiderplot' : k.startsWith('fft') ? 'fft' : 'bandpower';
+                                        const w = (widgetType === 'bandpower') ? 220 : 180;
+                                        const h = 70;
+                                        obstacles.push({ left: p.left, top: p.top, right: p.left + w, bottom: p.top + h, id: k });
+                                    });
+
+                                    const path = computeAvoidingPath(startX, startY, endX, endY, obstacles, [from, to]);
                                     return (
-                                        <path key={idx} d={path} stroke="#2563eb" strokeWidth={2.5} fill="none" markerEnd="url(#arrowhead)" />
+                                        <path key={idx} d={path} stroke="#2563eb" strokeWidth={2.5} fill="none" markerEnd="url(#arrowhead)" strokeLinecap="round" strokeLinejoin="round" />
                                     );
                                 })}
                                 <defs>
@@ -779,59 +923,7 @@ const Widgets: React.FC = () => {
                             </svg>
                             {/* Auto-flow arrows removed per cleanup request */}
                             {/* Flowchart nodes as boxes */}
-                            {/* Connection box with connection type selection and modal logic */}
-                            <div style={{ position: 'absolute', left: 10, top: 225, width: 120, height: 60, border: '2px solid #2563eb', borderRadius: 12, background: '#fff', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: 15, zIndex: 2, boxShadow: '0 2px 12px rgba(37,99,235,0.08)', letterSpacing: 0.5 }}>
-                                <button onClick={() => setShowConnectionModal(true)}>
-                                    Make Connection
-                                </button>
-                                {showConnectionModal && (
-                                    <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', zIndex: 100002, pointerEvents: 'auto' }}>
-                                        <div
-                                            style={{
-                                                position: 'fixed',
-                                                top: 0,
-                                                left: 0,
-                                                width: '100vw',
-                                                height: '100vh',
-                                                background: 'rgba(81, 75, 75, 0.39)',
-                                                zIndex: 200002,
-                                                pointerEvents: 'auto',
-                                            }}
-                                            onClick={() => setShowConnectionModal(false)}
-                                        />
-                                        <div
-                                            style={{
-                                                position: 'fixed',
-                                                top: '50%',
-                                                left: '50%',
-                                                transform: 'translate(-50%, -50%)',
-                                                paddingLeft: 0,
-                                                paddingRight: 0,
-                                                marginLeft: 0,
-                                                marginRight: 0,
-                                                borderRadius: 16,
-                                                boxShadow: '0 12px 48px rgba(0,0,0,0.32)',
-                                                border: '2px solid #2563eb',
-                                                padding: 40,
-                                                minWidth: 420,
-                                                maxWidth: 520,
-                                                background: 'rgba(248, 247, 247, 1)',
-                                                zIndex: 200003,
-                                                pointerEvents: 'auto',
-                                            }}
-                                            onMouseDown={e => e.stopPropagation()}
-                                        >
-                                            <button
-                                                style={{ position: 'absolute', top: 12, right: 16, background: 'none', border: 'none', fontSize: 22, color: '#2563eb', cursor: 'pointer' }}
-                                                onClick={e => { e.stopPropagation(); setShowConnectionModal(false); }}
-                                            >
-                                                &times;
-                                            </button>
-                                            <ConnectionDataWidget />
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
+                            {/* Inline Make Connection box removed — use the toolbar 'Make Connection' button instead */}
                             {/* Channel boxes and widgets for 3 channels */}
                             {[0, 1, 2].map(i => (
                                 <React.Fragment key={i}>
@@ -1069,17 +1161,12 @@ const Widgets: React.FC = () => {
                             const startY = (fromWidget.y + fromWidget.height / 2) * gridSettings.cellHeight;
                             const endX = toWidget.x * gridSettings.cellWidth;
                             const endY = (toWidget.y + toWidget.height / 2) * gridSettings.cellHeight;
-                            // Control points for cubic Bezier curve
-                            const dx = Math.abs(endX - startX);
-                            const controlOffset = Math.max(60, dx / 2);
-                            const c1x = startX + controlOffset;
-                            const c1y = startY;
-                            const c2x = endX - controlOffset;
-                            const c2y = endY;
-                            const path = `M ${startX} ${startY} C ${c1x} ${c1y}, ${c2x} ${c2y}, ${endX} ${endY}`;
+                            // Build obstacle boxes from widgets for routing
+                            const obstacles = widgets.map(w => ({ left: w.x * gridSettings.cellWidth, top: w.y * gridSettings.cellHeight, right: (w.x + w.width) * gridSettings.cellWidth, bottom: (w.y + w.height) * gridSettings.cellHeight, id: w.id }));
+                            const path = computeAvoidingPath(startX, startY, endX, endY, obstacles, [from, to]);
                             return (
                                 <g key={idx}>
-                                    <path d={path} stroke="#90cdf4" strokeWidth={1.5} fill="none" markerEnd="url(#arrowhead)" />
+                                    <path d={path} stroke="#90cdf4" strokeWidth={1.5} fill="none" markerEnd="url(#arrowhead)" strokeLinecap="round" strokeLinejoin="round" />
                                 </g>
                             );
                         })}
@@ -1104,7 +1191,7 @@ const Widgets: React.FC = () => {
                         />
                     ))}
 
-                    {/* Popover rendered outside the widget, anchored near the Make Connection widget */}
+                    {/* Popover rendered outside the widget, anchored near the connection controls */}
                 </div>
             </div>
 
