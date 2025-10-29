@@ -4,6 +4,7 @@ import StatisticGraph from '@/components/StatisticGraph';
 import FFTPlotRealtime from '@/components/FFTPlot';
 import BasicGraphRealtime from '@/components/BasicGraph';
 import ErrorBoundary from '@/components/ErrorBoundary';
+import { useChannelData } from '@/lib/channelDataContext';
 import { Widget, GridSettings, DragState } from '@/types/widget.types';
 import { checkCollisionAtPosition } from '@/utils/widget.utils';
 
@@ -326,15 +327,35 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
                 >
                     {/* Widget content rendering */}
                     {widget.type === 'spiderplot' ? (
-                        <SpiderPlot
-                            width={availableWidth}
-                            height={availableHeight}
-                            showLabels={widget.width >= 3 && widget.height >= 3}
-                            showValues={widget.width >= 4 && widget.height >= 4}
-                            animated={true}
-                            backgroundColor="rgba(16, 185, 129, 0.02)"
-                            data={incomingConnections.length > 0 ? incomingConnections.map((id, idx) => ({ label: id, value: 40 + (idx * 10) % 60, maxValue: 100 })) : undefined}
-                        />
+                        (() => {
+                            // Compute SpiderPlot axis values from live channel samples when available
+                            const { samples } = useChannelData();
+                            const axisData = incomingConnections.length > 0 ? incomingConnections.map((id, idx) => {
+                                // parse channel index from ids like 'channel-1' -> 0
+                                const m = String(id).match(/channel-(\d+)/i);
+                                const chIndex = m ? Math.max(0, parseInt(m[1], 10) - 1) : idx;
+                                const key = `ch${chIndex}`;
+                                const N = 128;
+                                const recent = samples.slice(-N);
+                                const values = recent.map(s => (s as any)[key] ?? 0);
+                                const rms = values.length > 0 ? Math.sqrt(values.reduce((acc, v) => acc + (v * v), 0) / values.length) : 0;
+                                // Scale RMS to 0-100 range for visualization (adjustable)
+                                const value = Math.min(100, rms * 100);
+                                return { label: id, value, maxValue: 100 };
+                            }) : undefined;
+
+                            return (
+                                <SpiderPlot
+                                    width={availableWidth}
+                                    height={availableHeight}
+                                    showLabels={widget.width >= 3 && widget.height >= 3}
+                                    showValues={widget.width >= 4 && widget.height >= 4}
+                                    animated={true}
+                                    backgroundColor="rgba(16, 185, 129, 0.02)"
+                                    data={axisData}
+                                />
+                            );
+                        })()
                     ) : widget.type === 'FFTGraph' ? (
                         <div className="relative w-full h-full">
                             {availableWidth > 100 && availableHeight > 80 ? (

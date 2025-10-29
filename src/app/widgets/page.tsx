@@ -141,11 +141,9 @@ const Widgets: React.FC = () => {
     // Keep positions for the other flowchart items (three rows: spiderplot, fft, bandpower)
     // Single spiderplot widget position
     initialModalPositions['spiderplot'] = { left: 320, top: 100 };
-    // FFT and Bandpower per-channel placeholders (3 rows)
-    for (let ci = 0; ci < 3; ci++) {
-        initialModalPositions[`fft-${ci + 1}`] = { left: 540, top: 100 + ci * 120 };
-        initialModalPositions[`bandpower-${ci + 1}`] = { left: 760, top: 100 + ci * 120 };
-    }
+    // FFT and Bandpower single placeholders
+    initialModalPositions['fft'] = { left: 540, top: 100 };
+    initialModalPositions['bandpower'] = { left: 760, top: 100 };
     const [modalPositions, setModalPositions] = useState<Record<string, { left: number, top: number }>>(initialModalPositions);
     // Helper to find exact center of input/output circle relative to the flowchart SVG
     const getCircleCenter = (widgetId: string, handle: 'input' | 'output') => {
@@ -263,7 +261,7 @@ const Widgets: React.FC = () => {
     // List of all possible widgets in the flow (initially based on flowchart)
     // Channel configuration: default show 3 channels, up to MAX_CHANNELS
     const MAX_CHANNELS = 16;
-    const DEFAULT_CHANNEL_COUNT = 3;
+    const DEFAULT_CHANNEL_COUNT = 1;
     const [channelCount, setChannelCount] = useState<number>(DEFAULT_CHANNEL_COUNT);
 
     // Generate initial flow options with default channelCount
@@ -271,13 +269,9 @@ const Widgets: React.FC = () => {
     for (let ch = 1; ch <= DEFAULT_CHANNEL_COUNT; ch++) {
         initialFlowOptions.push({ id: `channel-${ch}`, label: `Channel ${ch}`, type: 'channel', selected: true });
     }
-    // Single spider plot widget (can accept up to MAX_CHANNELS inputs)
-    initialFlowOptions.push({ id: `spiderplot`, label: `Spider Plot`, type: 'spiderplot', selected: true });
-    // Keep FFT and Bandpower widgets per channel for the first 3 channels as before
-    for (let ch = 1; ch <= 3; ch++) {
-        initialFlowOptions.push({ id: `fft-${ch}`, label: `FFT of Ch${ch}`, type: 'fft', selected: true });
-        initialFlowOptions.push({ id: `bandpower-${ch}`, label: `Bandpower Graph of Channel ${ch}`, type: 'bandpower', selected: true });
-    }
+    // By default we only include the configured channels in the flowchart.
+    // Other applications (spiderplot, FFT, Bandpower, etc.) can be added by the user
+    // using the drag-and-drop Applications palette into the flow modal.
     const [flowOptions, setFlowOptions] = useState(initialFlowOptions);
 
     // Handlers to increase/decrease visible channels in the combined widget
@@ -627,32 +621,42 @@ const Widgets: React.FC = () => {
      * item appears inside the flow configuration modal (not the dashboard).
      */
     const handleAddFlowItemAt = useCallback((type: string, left: number, top: number) => {
-        const id = `${type}-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
+        // Normalize incoming type to canonical flow types
+        const lower = (type || '').toString().toLowerCase();
+        let canonical = lower;
+        if (lower === 'fftgraph' || lower === 'fft') canonical = 'fft';
+        if (lower === 'bandpower' || lower === 'band') canonical = 'bandpower';
+        if (lower === 'spiderplot' || lower === 'spider') canonical = 'spiderplot';
+        if (lower === 'basic' || lower === 'realtime' || lower === 'real-time signal') canonical = 'basic';
+
         const labelMap: Record<string, string> = {
             spiderplot: 'Spider Plot',
-            FFTGraph: 'FFT',
+            fft: 'FFT',
             channel: 'Channel',
             candle: 'Candle',
             game: 'Game',
             bandpower: 'Bandpower',
             basic: 'Real-time Signal'
         };
-        const label = labelMap[type] || type;
+        const label = labelMap[canonical] || type;
+
+        // Create a unique id for every dropped instance so multiple copies are allowed
+        const id = `${canonical}-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
 
         // Add to flowOptions so it's rendered in the flow modal
-        setFlowOptions(prev => [...prev, { id, label, type, selected: true }]);
+        setFlowOptions(prev => [...prev, { id, label, type: canonical, selected: true }]);
 
         // Clamp left/top to reasonable bounds inside the flow modal container
         const containerWidth = 1200; // default used elsewhere
         const containerHeight = 500;
-        const widgetWidth = (type === 'bandpower') ? 220 : 180;
+        const widgetWidth = (canonical === 'bandpower') ? 220 : 180;
         const widgetHeight = 70;
         const clampedLeft = Math.max(8, Math.min(Math.round(left), Math.max(8, Math.floor(containerWidth - widgetWidth - 8))));
         const clampedTop = Math.max(8, Math.min(Math.round(top), Math.max(8, Math.floor(containerHeight - widgetHeight - 8))));
 
         setModalPositions(prev => ({ ...prev, [id]: { left: clampedLeft, top: clampedTop } }));
         showToast(`${label} added to flowchart`, 'success');
-    }, [setFlowOptions, setModalPositions, showToast]);
+    }, [flowOptions, setFlowOptions, setModalPositions, showToast]);
 
     /**
      * Remove widget by ID
@@ -852,8 +856,8 @@ const Widgets: React.FC = () => {
                         >
                             &times;
                         </button>
-                        <h2 style={{ fontWeight: 'bold', fontSize: 22, marginBottom: 16 }}>Configure Flow</h2>
-                        <div style={{ display: 'flex', gap: 16, marginBottom: 16 }}>
+                        <h2 style={{ fontWeight: 'bold', fontSize: 22, marginBottom: 2 }}>Configure Flow</h2>
+                        <div style={{ display: 'flex', gap: 16, marginBottom: 8 }}>
                             <button
                                 style={{ background: '#2563eb', color: 'white', padding: '8px 18px', borderRadius: 8, fontWeight: 'bold', border: 'none', cursor: 'pointer', fontSize: 16 }}
                                 onClick={() => {
@@ -865,6 +869,7 @@ const Widgets: React.FC = () => {
                                             connections,
                                             modalPositions,
                                             flowOptions,
+                                            channelCount,
                                         };
                                         const json = JSON.stringify(layout, null, 2);
                                         const blob = new Blob([json], { type: 'application/json' });
@@ -905,7 +910,14 @@ const Widgets: React.FC = () => {
                                                         if (layout.gridSettings) setGridSettings(layout.gridSettings);
                                                         if (layout.connections) setConnections(layout.connections);
                                                         if (layout.modalPositions) setModalPositions(layout.modalPositions);
-                                                        if (layout.flowOptions) setFlowOptions(layout.flowOptions);
+                                                            if (layout.flowOptions) setFlowOptions(layout.flowOptions);
+                                                            // Restore channel count if present; otherwise infer from flowOptions
+                                                            if (typeof layout.channelCount === 'number') {
+                                                                setChannelCount(layout.channelCount);
+                                                            } else if (layout.flowOptions && Array.isArray(layout.flowOptions)) {
+                                                                const cnt = (layout.flowOptions as any[]).filter(o => typeof o.id === 'string' && o.id.startsWith('channel-')).length;
+                                                                setChannelCount(cnt || 1);
+                                                            }
                                                         showToast('Flowchart layout loaded!', 'success');
                                                     } else {
                                                         showToast('Invalid layout file', 'error');
@@ -1588,14 +1600,14 @@ const Widgets: React.FC = () => {
                                     const channels = [1, 2, 3];
                                     channels.forEach((ch, rowIdx) => {
                                         widgetTypes.forEach((type, colIdx) => {
-                                            const widgetId = type === 'channel' ? `channel-${ch}`
-                                                : type === 'spiderplot' ? `spiderplot`
-                                                    : type === 'fft' ? `fft-${ch}`
-                                                        : `bandpower-${ch}`;
+                                                    const widgetId = type === 'channel' ? `channel-${ch}`
+                                                        : type === 'spiderplot' ? `spiderplot`
+                                                            : type === 'fft' ? `fft`
+                                                                : `bandpower`;
                                             const opt = selectedWidgets.find(o => o.id === widgetId);
                                             if (!opt) return;
-                                            // Avoid adding the single spiderplot more than once
-                                            if (widgetId === 'spiderplot' && newWidgets.some(w => w.id === 'spiderplot')) return;
+                                                    // Avoid adding singleton flow items more than once
+                                                    if ((widgetId === 'spiderplot' || widgetId === 'fft' || widgetId === 'bandpower') && newWidgets.some(w => w.id === widgetId)) return;
                                             const x = offsetCells + colIdx * dynamicWidgetWidth;
                                             const y = offsetCells + rowIdx * dynamicWidgetHeight;
                                             // Prevent overflow
