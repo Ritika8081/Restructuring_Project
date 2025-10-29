@@ -256,6 +256,45 @@ const Widgets: React.FC = () => {
         const c2y = endY;
         return `M ${startX} ${startY} C ${c1x} ${c1y}, ${c2x} ${c2y}, ${endX} ${endY}`;
     };
+    // Simpler directional cubic bezier path that anchors to widget sides
+    const getSmartPath = (x1: number, y1: number, x2: number, y2: number) => {
+        const dx = Math.abs(x2 - x1);
+        const offset = Math.max(60, dx * 0.4);
+        const c1x = x1 + offset;
+        const c2x = x2 - offset;
+        return `M ${x1} ${y1} C ${c1x} ${y1}, ${c2x} ${y2}, ${x2} ${y2}`;
+    };
+
+    // Sample cubic bezier points and check segment intersection with obstacles
+    const sampleCubic = (x1: number, y1: number, c1x: number, c1y: number, c2x: number, c2y: number, x2: number, y2: number, segments = 24) => {
+        const pts: Array<{ x: number, y: number }> = [];
+        for (let i = 0; i <= segments; i++) {
+            const t = i / segments;
+            const mt = 1 - t;
+            const x = mt * mt * mt * x1 + 3 * mt * mt * t * c1x + 3 * mt * t * t * c2x + t * t * t * x2;
+            const y = mt * mt * mt * y1 + 3 * mt * mt * t * c1y + 3 * mt * t * t * c2y + t * t * t * y2;
+            pts.push({ x, y });
+        }
+        return pts;
+    };
+
+    const bezierIntersectsObstacles = (x1: number, y1: number, x2: number, y2: number, obstacles: Array<{ left: number, top: number, right: number, bottom: number }>) => {
+        const dx = Math.abs(x2 - x1);
+        const offset = Math.max(60, dx * 0.4);
+        const c1x = x1 + offset;
+        const c1y = y1;
+        const c2x = x2 - offset;
+        const c2y = y2;
+        const pts = sampleCubic(x1, y1, c1x, c1y, c2x, c2y, x2, y2, 28);
+        for (let i = 0; i < pts.length - 1; i++) {
+            const a = pts[i];
+            const b = pts[i + 1];
+            for (const ob of obstacles) {
+                if (segmentIntersectsRect(a.x, a.y, b.x, b.y, ob)) return true;
+            }
+        }
+        return false;
+    };
     // Use FlowModalContext for modal state
     const { showFlowModal, setShowFlowModal } = require('@/context/FlowModalContext').useFlowModal();
     // List of all possible widgets in the flow (initially based on flowchart)
@@ -360,6 +399,13 @@ const Widgets: React.FC = () => {
     const gridSettingsRef = useRef<GridSettings>(gridSettings);
     // Flag to indicate an input handled mouseup and finalized the connection
     const inputHandledRef = useRef(false);
+
+    // Arrow refresh tick to force re-render when modal positions or connections change
+    const [arrowTick, setArrowTick] = useState(0);
+    useEffect(() => {
+        // Trigger a small re-render to ensure arrow geometry is recalculated after layout changes
+        setArrowTick(t => t + 1);
+    }, [modalPositions, connections, widgets, gridSettings]);
 
     // Keep refs synchronized with state
     useEffect(() => {
@@ -562,58 +608,6 @@ const Widgets: React.FC = () => {
         }
     }, [widgets, gridSettings, showToast]);
 
-    /**
-     * Add widget at a specific grid column/row (if possible).
-     * If the requested cell is occupied, falls back to auto-placement.
-     */
-    const handleAddWidgetAt = useCallback((type: string, col: number, row: number) => {
-        // Determine default sizes (mirror handleAddWidget logic)
-        let defaultWidth = 2;
-        let defaultHeight = 2;
-        let minWidth = 1;
-        let minHeight = 1;
-        if (type === 'basic') {
-            defaultWidth = 5; defaultHeight = 4; minWidth = 5; minHeight = 4;
-        } else if (type === 'spiderplot') {
-            defaultWidth = 6; defaultHeight = 6; minWidth = 4; minHeight = 4;
-        } else if (type === 'FFTGraph') {
-            defaultWidth = 6; defaultHeight = 5; minWidth = 4; minHeight = 3;
-        } else if (type === 'channel') {
-            defaultWidth = 4; defaultHeight = 3; minWidth = 3; minHeight = 2;
-        } else if (type === 'bandpower') {
-            defaultWidth = 5; defaultHeight = 4; minWidth = 4; minHeight = 3;
-        } else if (type === 'candle') {
-            defaultWidth = 4; defaultHeight = 4; minWidth = 3; minHeight = 3;
-        } else if (type === 'game') {
-            defaultWidth = 6; defaultHeight = 4; minWidth = 4; minHeight = 3;
-        } else if (type === 'bargraph' || type === 'statistic') {
-            defaultWidth = 5; defaultHeight = 4; minWidth = 3; minHeight = 3;
-        }
-
-        // Clamp to grid bounds
-        const clampedCol = Math.max(0, Math.min(col, (gridSettings.cols || 24) - defaultWidth));
-        const clampedRow = Math.max(0, Math.min(row, (gridSettings.rows || 16) - defaultHeight));
-
-        // If space available at requested spot, place it there
-        if (!checkCollisionAtPosition(widgets, 'temp', clampedCol, clampedRow, defaultWidth, defaultHeight, gridSettings)) {
-            const newWidget: Widget = {
-                id: `widget-${type}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-                x: clampedCol,
-                y: clampedRow,
-                width: defaultWidth,
-                height: defaultHeight,
-                minWidth,
-                minHeight,
-                type,
-            };
-            setWidgets(prev => [...prev, newWidget]);
-            showToast(`${type} widget added`, 'success');
-            return;
-        }
-
-        // Fallback: use automatic placement if requested cell is busy
-        handleAddWidget(type);
-    }, [widgets, gridSettings, showToast, handleAddWidget]);
 
     /**
      * Add an item to the flowchart modal at pixel coordinates (left, top)
@@ -633,7 +627,9 @@ const Widgets: React.FC = () => {
             spiderplot: 'Spider Plot',
             fft: 'FFT',
             channel: 'Channel',
+            envelope: 'Envelope',
             candle: 'Candle',
+            filter: 'Filter',
             game: 'Game',
             bandpower: 'Bandpower',
             basic: 'Real-time Signal'
@@ -998,9 +994,9 @@ const Widgets: React.FC = () => {
                                     {[
                                         { id: 'spiderplot', label: 'Spider Plot' },
                                         { id: 'FFTGraph', label: 'FFT' },
-                                        { id: 'channel', label: 'Channel' },
+                                        { id: 'envelope', label: 'Envelope' },
                                         { id: 'candle', label: 'Candle' },
-                                        { id: 'game', label: 'Game' },
+                                        { id: 'filter', label: 'Filter' },
                                         { id: 'bandpower', label: 'Bandpower' },
                                         { id: 'basic', label: 'Real-time Signal' },
                                     ].map(item => (
@@ -1035,7 +1031,6 @@ const Widgets: React.FC = () => {
                                         stroke="#2563eb"
                                         strokeWidth={2.5}
                                         fill="none"
-                                        markerEnd="url(#arrowhead)"
                                     />
                                 </svg>
                             )}
@@ -1083,16 +1078,18 @@ const Widgets: React.FC = () => {
                                         obstacles.push({ left: p.left, top: p.top, right: p.left + w, bottom: p.top + h, id: k });
                                     });
 
-                                    const path = computeAvoidingPath(startX, startY, endX, endY, obstacles, [from, to]);
+                                    // Anchor always to right edge of source and left edge of target when possible
+                                    let path = getSmartPath(startX, startY, endX, endY);
+                                    // If the cubic bezier intersects any widget boxes, fall back to obstacle-aware routing
+                                    const plainObstacles = obstacles.map(o => ({ left: o.left, top: o.top, right: o.right, bottom: o.bottom }));
+                                    if (bezierIntersectsObstacles(startX, startY, endX, endY, plainObstacles)) {
+                                        path = computeAvoidingPath(startX, startY, endX, endY, obstacles, [from, to]);
+                                    }
                                     return (
-                                        <path key={idx} d={path} stroke="#2563eb" strokeWidth={2.5} fill="none" markerEnd="url(#arrowhead)" strokeLinecap="round" strokeLinejoin="round" />
+                                        <path key={idx} d={path} stroke="#2563eb" strokeWidth={2.5} fill="none" strokeLinecap="round" strokeLinejoin="round" />
                                     );
                                 })}
-                                <defs>
-                                    <marker id="arrowhead" markerWidth="6" markerHeight="4" refX="6" refY="2" orient="auto" markerUnits="strokeWidth">
-                                        <polygon points="0 0, 6 2, 0 4" fill="#2563eb" />
-                                    </marker>
-                                </defs>
+                                {/* arrowheads removed */}
                             </svg>
                             {/* Auto-flow arrows removed per cleanup request */}
                             {/* Flowchart nodes as boxes */}
@@ -1265,29 +1262,7 @@ const Widgets: React.FC = () => {
                                                             const svgSize = Math.max(10, Math.floor(circleR * 2 + 2));
                                                             return (
                                                                 <div key={n} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: `3px 6px`, borderRadius: 4, height: rowHeight }}>
-                                                                    <svg
-                                                                        data-widgetid={`channel-${n}`}
-                                                                        data-handle="input"
-                                                                        width={svgSize}
-                                                                        height={svgSize}
-                                                                        style={{ cursor: drawingConnection ? 'pointer' : 'default' }}
-                                                                        onMouseUp={e => {
-                                                                            e.stopPropagation();
-                                                                            if (drawingConnection && drawingConnection.from !== `channel-${n}`) {
-                                                                                inputHandledRef.current = true;
-                                                                                setConnections(prev => {
-                                                                                    const exists = prev.some(c => c.from === drawingConnection.from && c.to === `channel-${n}`);
-                                                                                    if (exists) return prev;
-                                                                                    return [...prev, { from: drawingConnection.from, to: `channel-${n}` }];
-                                                                                });
-                                                                                setDrawingConnection(null);
-                                                                                setMousePos(null);
-                                                                                setTimeout(() => { inputHandledRef.current = false; }, 0);
-                                                                            }
-                                                                        }}
-                                                                    >
-                                                                        <circle cx={svgSize / 2} cy={svgSize / 2} r={circleR} fill="#fff" stroke="#2563eb" strokeWidth={1} />
-                                                                    </svg>
+                                                                    <div style={{ width: svgSize, height: svgSize }} />
 
                                                                     <span style={{ flex: 1, textAlign: 'center', fontSize: 11, fontWeight: 600 }}>Channel {n}</span>
 
@@ -1296,7 +1271,7 @@ const Widgets: React.FC = () => {
                                                                         data-handle="output"
                                                                         width={svgSize}
                                                                         height={svgSize}
-                                                                        style={{ cursor: 'crosshair' }}
+                                                                        style={{ cursor: 'crosshair', marginLeft: 6, marginRight: 0 }}
                                                                             onMouseDown={e => {
                                                                                 e.stopPropagation();
                                                                                 const center = getCircleCenter(`channel-${n}`, 'output');
@@ -1349,29 +1324,7 @@ const Widgets: React.FC = () => {
                                                                     const svgSize = Math.max(10, Math.floor(circleR * 2 + 2));
                                                                     return (
                                                                         <div key={n} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '2px 6px', borderRadius: 4, flex: 1 }}>
-                                                                            <svg
-                                                                                data-widgetid={`channel-${n}`}
-                                                                                data-handle="input"
-                                                                                width={svgSize}
-                                                                                height={svgSize}
-                                                                                style={{ cursor: drawingConnection ? 'pointer' : 'default' }}
-                                                                                onMouseUp={e => {
-                                                                                    e.stopPropagation();
-                                                                                    if (drawingConnection && drawingConnection.from !== `channel-${n}`) {
-                                                                                        inputHandledRef.current = true;
-                                                                                        setConnections(prev => {
-                                                                                            const exists = prev.some(c => c.from === drawingConnection.from && c.to === `channel-${n}`);
-                                                                                            if (exists) return prev;
-                                                                                            return [...prev, { from: drawingConnection.from, to: `channel-${n}` }];
-                                                                                        });
-                                                                                        setDrawingConnection(null);
-                                                                                        setMousePos(null);
-                                                                                        setTimeout(() => { inputHandledRef.current = false; }, 0);
-                                                                                    }
-                                                                                }}
-                                                                            >
-                                                                                <circle cx={svgSize / 2} cy={svgSize / 2} r={circleR} fill="#fff" stroke="#2563eb" strokeWidth={1} />
-                                                                            </svg>
+                                                                            <div style={{ width: svgSize, height: svgSize }} />
 
                                                                             <span style={{ flex: 1, textAlign: 'center', fontSize: 11, fontWeight: 600 }}>Ch {n}</span>
 
@@ -1380,7 +1333,7 @@ const Widgets: React.FC = () => {
                                                                                 data-handle="output"
                                                                                 width={svgSize}
                                                                                 height={svgSize}
-                                                                                style={{ cursor: 'crosshair' }}
+                                                                                style={{ cursor: 'crosshair', marginLeft: 6, marginRight: 0 }}
                                                                                 onMouseDown={e => {
                                                                                     e.stopPropagation();
                                                                                     const center = getCircleCenter(`channel-${n}`, 'output');
@@ -1508,10 +1461,10 @@ const Widgets: React.FC = () => {
                                                     <svg width="14" height="14" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="7" stroke="white" strokeWidth="1.5" /><path d="M10 7V10L12 12" stroke="white" strokeWidth="1.5" strokeLinecap="round" /></svg>
                                                 </button>
                                                 <svg style={{ marginLeft: 8, marginRight: 0, zIndex: 100 }} width={14} height={14}>
-                                                    <svg
+                                                        <svg
                                                         data-widgetid={widgetId}
                                                         data-handle="output"
-                                                        style={{ cursor: 'crosshair', marginLeft: 8, marginRight: 0, zIndex: 100 }}
+                                                        style={{ cursor: 'crosshair', marginLeft: 0, marginRight: 0, zIndex: 100 }}
                                                         width={14}
                                                         height={14}
                                                         onMouseDown={e => {
@@ -1650,18 +1603,19 @@ const Widgets: React.FC = () => {
                             const endY = (toWidget.y + toWidget.height / 2) * gridSettings.cellHeight;
                             // Build obstacle boxes from widgets for routing
                             const obstacles = widgets.map(w => ({ left: w.x * gridSettings.cellWidth, top: w.y * gridSettings.cellHeight, right: (w.x + w.width) * gridSettings.cellWidth, bottom: (w.y + w.height) * gridSettings.cellHeight, id: w.id }));
-                            const path = computeAvoidingPath(startX, startY, endX, endY, obstacles, [from, to]);
+                            let path = getSmartPath(startX, startY, endX, endY);
+                            // check intersection with widget obstacles and fallback
+                            const plainObstacles = obstacles.map(o => ({ left: o.left, top: o.top, right: o.right, bottom: o.bottom }));
+                            if (bezierIntersectsObstacles(startX, startY, endX, endY, plainObstacles)) {
+                                path = computeAvoidingPath(startX, startY, endX, endY, obstacles, [from, to]);
+                            }
                             return (
                                 <g key={idx}>
-                                    <path d={path} stroke="#90cdf4" strokeWidth={1.5} fill="none" markerEnd="url(#arrowhead)" strokeLinecap="round" strokeLinejoin="round" />
+                                    <path d={path} stroke="#90cdf4" strokeWidth={1.5} fill="none" strokeLinecap="round" strokeLinejoin="round" />
                                 </g>
                             );
                         })}
-                        <defs>
-                            <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto" markerUnits="strokeWidth">
-                                <polygon points="0 0, 10 3.5, 0 7" fill="#90cdf4" />
-                            </marker>
-                        </defs>
+                        {/* arrowheads removed */}
                     </svg>
 
                     {/* Render all widgets positioned by grid pixels inside the sized container */}
