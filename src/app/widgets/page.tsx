@@ -136,11 +136,15 @@ const Widgets: React.FC = () => {
     };
     // Modal widget positions state (for flowchart modal)
     const initialModalPositions: Record<string, { left: number, top: number }> = {};
+    // Place a combined Channels container (holds individual channel handles visually)
+    initialModalPositions['channels-box'] = { left: 60, top: 80 };
+    // Keep positions for the other flowchart items (three rows: spiderplot, fft, bandpower)
+    // Single spiderplot widget position
+    initialModalPositions['spiderplot'] = { left: 320, top: 100 };
+    // FFT and Bandpower per-channel placeholders (3 rows)
     for (let ci = 0; ci < 3; ci++) {
-        for (let cj = 0; cj < 4; cj++) {
-            const id = cj === 0 ? `channel-${ci + 1}` : cj === 1 ? `spider-${ci + 1}` : cj === 2 ? `fft-${ci + 1}` : `bandpower-${ci + 1}`;
-            initialModalPositions[id] = { left: 200 + cj * 220, top: 100 + ci * 120 };
-        }
+        initialModalPositions[`fft-${ci + 1}`] = { left: 540, top: 100 + ci * 120 };
+        initialModalPositions[`bandpower-${ci + 1}`] = { left: 760, top: 100 + ci * 120 };
     }
     const [modalPositions, setModalPositions] = useState<Record<string, { left: number, top: number }>>(initialModalPositions);
     // Helper to find exact center of input/output circle relative to the flowchart SVG
@@ -151,9 +155,24 @@ const Widgets: React.FC = () => {
             const selector = `[data-widgetid="${widgetId}"][data-handle="${handle}"]`;
             const el = document.querySelector(selector) as HTMLElement | null;
             if (!el || !svg) return null;
-            const rect = el.getBoundingClientRect();
+
+            // Prefer the actual <circle> element if present (more precise than wrapper SVG/div)
+            let targetRect: DOMRect | null = null;
+            try {
+                // If the selected element is an SVG or contains a circle child, use that circle's bounding box
+                const circle = (el as Element).querySelector && (el as Element).querySelector('circle');
+                if (circle) {
+                    targetRect = (circle as SVGCircleElement).getBoundingClientRect();
+                } else {
+                    targetRect = el.getBoundingClientRect();
+                }
+            } catch (err) {
+                targetRect = el.getBoundingClientRect();
+            }
+
+            if (!targetRect) return null;
             const svgRect = svg.getBoundingClientRect();
-            return { x: rect.left + rect.width / 2 - svgRect.left, y: rect.top + rect.height / 2 - svgRect.top };
+            return { x: targetRect.left + targetRect.width / 2 - svgRect.left, y: targetRect.top + targetRect.height / 2 - svgRect.top };
         } catch (err) {
             return null;
         }
@@ -242,21 +261,60 @@ const Widgets: React.FC = () => {
     // Use FlowModalContext for modal state
     const { showFlowModal, setShowFlowModal } = require('@/context/FlowModalContext').useFlowModal();
     // List of all possible widgets in the flow (initially based on flowchart)
-    const initialFlowOptions = [
-        { id: 'channel-1', label: 'Channel 1', type: 'channel', selected: true },
-        { id: 'spider-1', label: 'Spider Plot Ch1', type: 'spiderplot', selected: true },
-        { id: 'fft-1', label: 'FFT of Ch1', type: 'fft', selected: true },
-        { id: 'bandpower-1', label: 'Bandpower Graph of Channel 1', type: 'bandpower', selected: true },
-        { id: 'channel-2', label: 'Channel 2', type: 'channel', selected: true },
-        { id: 'spider-2', label: 'Spider Plot Ch2', type: 'spiderplot', selected: true },
-        { id: 'fft-2', label: 'FFT of Ch2', type: 'fft', selected: true },
-        { id: 'bandpower-2', label: 'Bandpower Graph of Channel 2', type: 'bandpower', selected: true },
-        { id: 'channel-3', label: 'Channel 3', type: 'channel', selected: true },
-        { id: 'spider-3', label: 'Spider Plot Ch3', type: 'spiderplot', selected: true },
-        { id: 'fft-3', label: 'FFT of Ch3', type: 'fft', selected: true },
-        { id: 'bandpower-3', label: 'Bandpower Graph of Channel 3', type: 'bandpower', selected: true },
-    ];
+    // Channel configuration: default show 3 channels, up to MAX_CHANNELS
+    const MAX_CHANNELS = 16;
+    const DEFAULT_CHANNEL_COUNT = 3;
+    const [channelCount, setChannelCount] = useState<number>(DEFAULT_CHANNEL_COUNT);
+
+    // Generate initial flow options with default channelCount
+    const initialFlowOptions: Array<{ id: string, label: string, type: string, selected: boolean }> = [];
+    for (let ch = 1; ch <= DEFAULT_CHANNEL_COUNT; ch++) {
+        initialFlowOptions.push({ id: `channel-${ch}`, label: `Channel ${ch}`, type: 'channel', selected: true });
+    }
+    // Single spider plot widget (can accept up to MAX_CHANNELS inputs)
+    initialFlowOptions.push({ id: `spiderplot`, label: `Spider Plot`, type: 'spiderplot', selected: true });
+    // Keep FFT and Bandpower widgets per channel for the first 3 channels as before
+    for (let ch = 1; ch <= 3; ch++) {
+        initialFlowOptions.push({ id: `fft-${ch}`, label: `FFT of Ch${ch}`, type: 'fft', selected: true });
+        initialFlowOptions.push({ id: `bandpower-${ch}`, label: `Bandpower Graph of Channel ${ch}`, type: 'bandpower', selected: true });
+    }
     const [flowOptions, setFlowOptions] = useState(initialFlowOptions);
+
+    // Handlers to increase/decrease visible channels in the combined widget
+    const increaseChannels = useCallback(() => {
+        setChannelCount(prev => {
+            const next = Math.min(MAX_CHANNELS, prev + 1);
+            if (next > prev) {
+                setFlowOptions(prevOpts => {
+                    const others = prevOpts.filter(o => !o.id.startsWith('channel-'));
+                    const channels = Array.from({ length: next }).map((_, i) => ({ id: `channel-${i + 1}`, label: `Channel ${i + 1}`, type: 'channel', selected: true }));
+                    return [...channels, ...others];
+                });
+            }
+            return next;
+        });
+    }, [MAX_CHANNELS]);
+
+    const decreaseChannels = useCallback(() => {
+        setChannelCount(prev => {
+            const next = Math.max(1, prev - 1);
+            if (next < prev) {
+                // Remove channels > next from flowOptions and connections
+                setFlowOptions(prevOpts => prevOpts.filter(o => {
+                    if (!o.id.startsWith('channel-')) return true;
+                    const idx = Number(o.id.split('-')[1]);
+                    return idx <= next;
+                }));
+                setConnections(prevConn => prevConn.filter(c => {
+                    const fromIdx = c.from.startsWith('channel-') ? Number(c.from.split('-')[1]) : -1;
+                    const toIdx = c.to.startsWith('channel-') ? Number(c.to.split('-')[1]) : -1;
+                    if (fromIdx > next || toIdx > next) return false;
+                    return true;
+                }));
+            }
+            return next;
+        });
+    }, []);
     // Connections between widgets (user-created)
     const [connections, setConnections] = useState<Array<{ from: string, to: string }>>([]);
     // Widget collection state with default basic widget (no make-connection widget)
@@ -923,157 +981,468 @@ const Widgets: React.FC = () => {
                             </svg>
                             {/* Auto-flow arrows removed per cleanup request */}
                             {/* Flowchart nodes as boxes */}
-                            {/* Inline Make Connection box removed — use the toolbar 'Make Connection' button instead */}
-                            {/* Channel boxes and widgets for 3 channels */}
-                            {[0, 1, 2].map(i => (
-                                <React.Fragment key={i}>
-                                    {[0, 1, 2, 3].map(j => {
-                                        const typeMap = ['channel', 'spiderplot', 'fft', 'bandpower'];
-                                        const opt = flowOptions.find(o => o.id === `channel-${i + 1}` && j === 0
-                                            || o.id === `spider-${i + 1}` && j === 1
-                                            || o.id === `fft-${i + 1}` && j === 2
-                                            || o.id === `bandpower-${i + 1}` && j === 3);
-                                        if (!opt) return null;
-                                        const widgetId = opt.id;
-                                        const widgetLeft = modalPositions[widgetId]?.left ?? (200 + j * 220);
-                                        const widgetTop = modalPositions[widgetId]?.top ?? (100 + i * 120);
-                                        const widgetWidth = j === 3 ? 220 : 180;
-                                        const widgetHeight = 70;
-                                        // Drag logic
-                                        const handleDrag = (e: React.MouseEvent<HTMLDivElement>) => {
-                                            if (showConnectionModal) return; // Disable drag when modal is open
-                                            e.preventDefault();
-                                            const startX = e.clientX;
-                                            const startY = e.clientY;
-                                            const origLeft = widgetLeft;
-                                            const origTop = widgetTop;
-                                            const onMouseMove = (moveEvent: MouseEvent) => {
-                                                const dx = moveEvent.clientX - startX;
-                                                const dy = moveEvent.clientY - startY;
-                                                // Snap to grid (10px)
-                                                const newLeft = Math.round((origLeft + dx) / 10) * 10;
-                                                const newTop = Math.round((origTop + dy) / 10) * 10;
-                                                setModalPositions(pos => ({ ...pos, [widgetId]: { left: newLeft, top: newTop } }));
-                                            };
-                                            const onMouseUp = () => {
-                                                window.removeEventListener('mousemove', onMouseMove);
-                                                window.removeEventListener('mouseup', onMouseUp);
-                                            };
-                                            window.addEventListener('mousemove', onMouseMove);
-                                            window.addEventListener('mouseup', onMouseUp);
-                                        };
-                                        return (
-                                            <div
-                                                key={j}
-                                                style={{ position: 'absolute', left: widgetLeft, top: widgetTop, width: widgetWidth, height: widgetHeight, border: '2px solid #222', borderRadius: 12, background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: 14, zIndex: showConnectionModal || settingsModal.show ? 0 : 2, boxShadow: '0 2px 12px rgba(0,0,0,0.07)', transition: 'box-shadow 0.2s', gap: 8, wordBreak: 'break-word', overflowWrap: 'break-word', textAlign: 'center', cursor: showConnectionModal || settingsModal.show ? 'default' : 'move', pointerEvents: showConnectionModal || settingsModal.show ? 'none' : 'auto' }}
-                                                onMouseDown={handleDrag}
-                                            >
-                                                {/* Connection handles: left (input) and right (output) - now inside widget, using flex layout */}
-                                                <div style={{ display: 'flex', alignItems: 'center', width: '100%', height: '100%', position: 'relative', justifyContent: 'space-between' }}>
-                                                    <div style={{ display: 'flex', alignItems: 'center', height: '100%' }}>
-                                                        <svg
-                                                            data-widgetid={widgetId}
-                                                            data-handle="input"
-                                                            style={{ marginLeft: 0, marginRight: 8, zIndex: 100 }}
-                                                            width={14}
-                                                            height={14}
-                                                            onMouseUp={e => {
-                                                                e.stopPropagation();
-                                                                if (drawingConnection && drawingConnection.from !== widgetId) {
-                                                                    // Mark that input handled the mouseup to avoid the global handler clearing state first
-                                                                    inputHandledRef.current = true;
-                                                                    setConnections(prev => {
-                                                                        const exists = prev.some(c => c.from === drawingConnection.from && c.to === widgetId);
-                                                                        if (exists) return prev;
-                                                                        return [...prev, { from: drawingConnection.from, to: widgetId }];
-                                                                    });
-                                                                    setDrawingConnection(null);
-                                                                    setMousePos(null);
-                                                                    setTimeout(() => { inputHandledRef.current = false; }, 0);
-                                                                }
-                                                            }}
-                                                        >
-                                                            <circle cx={7} cy={7} r={2.5} fill="#fff" stroke="#2563eb" strokeWidth={1.1} style={{ cursor: 'pointer' }} />
-                                                        </svg>
-                                                    </div>
-                                                    <span style={{ flex: 1, wordBreak: 'break-word', overflowWrap: 'break-word', textAlign: 'center', fontWeight: 600 }}>{opt.label}</span>
-                                                    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                                                        <button style={{ background: '#ef4444', color: 'white', border: 'none', borderRadius: 6, padding: '2px 7px', cursor: showConnectionModal || settingsModal.show ? 'default' : 'pointer', fontWeight: 500, fontSize: 11, boxShadow: '0 1px 4px rgba(239,68,68,0.08)', pointerEvents: showConnectionModal || settingsModal.show ? 'none' : 'auto', height: 22 }} onClick={() => {
-                                                            if (showConnectionModal || settingsModal.show) return;
-                                                            // Use central handler so connected arrows and modal positions are also cleaned up
-                                                            handleRemoveWidget(opt.id);
-                                                            // Also remove from flow options list
-                                                            setFlowOptions(prev => prev.filter(o => o.id !== opt.id));
-                                                        }}>Delete</button>
-                                                        <button
-                                                            style={{ background: '#2563eb', color: 'white', border: 'none', borderRadius: 6, padding: '2px 6px', cursor: 'pointer', fontWeight: 500, fontSize: 11, boxShadow: '0 1px 4px rgba(37,99,235,0.08)', pointerEvents: 'auto', zIndex: 100002, height: 22, width: 22, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                                                            title="Settings"
-                                                            onClick={e => {
-                                                                e.stopPropagation();
-                                                                setSettingsModal({ show: true, widgetId });
-                                                            }}
-                                                        >
-                                                            <svg width="14" height="14" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="7" stroke="white" strokeWidth="1.5" /><path d="M10 7V10L12 12" stroke="white" strokeWidth="1.5" strokeLinecap="round" /></svg>
-                                                        </button>
-                                                        <svg style={{ marginLeft: 8, marginRight: 0, zIndex: 100 }} width={14} height={14}>
-                                                            {/* Output handle (right) - enable drag-to-connect */}
-                                                            <svg
-                                                                data-widgetid={widgetId}
-                                                                data-handle="output"
-                                                                style={{ cursor: 'crosshair', marginLeft: 8, marginRight: 0, zIndex: 100 }}
-                                                                width={14}
-                                                                height={14}
-                                                                onMouseDown={e => {
-                                                                    e.stopPropagation();
-                                                                    // Calculate output handle position using actual circle center
-                                                                    const center = getCircleCenter(widgetId, 'output');
-                                                                    if (center) {
-                                                                        setDrawingConnection({ from: widgetId, startX: center.x, startY: center.y });
-                                                                        setMousePos({ x: center.x, y: center.y });
-                                                                    } else {
-                                                                        const startX = widgetLeft + widgetWidth;
-                                                                        const startY = widgetTop + widgetHeight / 2;
-                                                                        setDrawingConnection({ from: widgetId, startX, startY });
-                                                                        setMousePos({ x: startX, y: startY });
-                                                                    }
-                                                                }}>
-                                                                <circle cx={7} cy={7} r={2.5} fill="#fff" stroke="#2563eb" strokeWidth={1.1} />
-                                                            </svg>
-                                                            {/* Input handle (left) - now outside SVG, with pointer events */}
-                                                            <div
-                                                                style={{ position: 'absolute', left: -7, top: '50%', transform: 'translateY(-50%)', zIndex: 100, width: 14, height: 14, cursor: drawingConnection ? 'pointer' : 'default' }}
-                                                                data-widgetid={widgetId}
-                                                                data-handle="input"
-                                                                onMouseUp={e => {
-                                                                    e.stopPropagation();
-                                                                    if (drawingConnection && drawingConnection.from !== widgetId) {
-                                                                        // Mark that input handled the mouseup to avoid the global handler clearing state first
-                                                                        inputHandledRef.current = true;
-                                                                        setConnections(prev => {
-                                                                            // Avoid duplicate identical connections
-                                                                            const exists = prev.some(c => c.from === drawingConnection.from && c.to === widgetId);
-                                                                            if (exists) return prev;
-                                                                            return [...prev, { from: drawingConnection.from, to: widgetId }];
-                                                                        });
-                                                                        setDrawingConnection(null);
-                                                                        setMousePos(null);
-                                                                        // Reset marker next tick
-                                                                        setTimeout(() => { inputHandledRef.current = false; }, 0);
-                                                                    }
-                                                                }}
-                                                            >
-                                                                <svg width={14} height={14}>
-                                                                    <circle cx={7} cy={7} r={2.5} fill="#fff" stroke="#2563eb" strokeWidth={1.1} />
-                                                                </svg>
-                                                            </div>
-                                                        </svg>
-                                                    </div>
-                                                </div>
+                            {/* Combined Channels box: visually represent all channels inside one widget but keep individual channel ids for connections */}
+                            {(() => {
+                                // use `channelCount` state to determine how many channels to display
+                                const boxPos = modalPositions['channels-box'] || { left: 60, top: 80 };
+                                // Make channels widget visually similar to other widgets
+                                const boxWidth = 220; // match other widget widths (180-220)
+                                // Vertical layout: compute row height but shrink if needed so all channels fit without scroll
+                                const desiredRowHeight = 24; // preferred compact row height
+                                const headerHeight = 34; // compact header
+                                const viewportHeight = (typeof window !== 'undefined') ? window.innerHeight : 900;
+                                // If available, constrain the channels box to the flowchart container size so it won't be cut
+                                let containerHeight = viewportHeight;
+                                let containerTop = 0;
+                                let containerLeft = 0;
+                                try {
+                                    const flowSvg = document.getElementById('flowchart-arrow-svg');
+                                    if (flowSvg) {
+                                        const r = flowSvg.getBoundingClientRect();
+                                        containerHeight = r.height || containerHeight;
+                                        containerTop = r.top || 0;
+                                        containerLeft = r.left || 0;
+                                    }
+                                } catch (err) {
+                                    // ignore DOM errors during SSR
+                                }
+                                // Maximum available for the widget (leave some margin for modal chrome)
+                                const maxAllowedHeight = Math.max(160, Math.min(900, containerHeight - 24));
+                                // Compute a rowHeight that will allow all channels to fit within maxAllowedHeight
+                                let rowHeight = desiredRowHeight;
+                                const desiredHeight = headerHeight + channelCount * rowHeight + 12;
+                                if (desiredHeight > maxAllowedHeight) {
+                                    // Reduce rowHeight to fit, but don't go below a reasonable minimum
+                                    rowHeight = Math.max(10, Math.floor((maxAllowedHeight - headerHeight - 12) / channelCount));
+                                }
+                                const boxHeight = headerHeight + channelCount * rowHeight + 12;
+                                // effectiveTop will be computed after we decide single vs two-column height
+                                let effectiveTop = boxPos.top;
+
+                                const handleDragChannels = (e: React.MouseEvent<HTMLDivElement>) => {
+                                    e.preventDefault();
+                                    const startX = e.clientX;
+                                    const startY = e.clientY;
+                                    const origLeft = boxPos.left;
+                                    const origTop = boxPos.top;
+                                    const onMouseMove = (moveEvent: MouseEvent) => {
+                                        const dx = moveEvent.clientX - startX;
+                                        const dy = moveEvent.clientY - startY;
+                                        const newLeft = Math.round((origLeft + dx) / 10) * 10;
+                                        const newTop = Math.round((origTop + dy) / 10) * 10;
+                                        setModalPositions(pos => ({ ...pos, ['channels-box']: { left: newLeft, top: newTop } }));
+                                    };
+                                    const onMouseUp = () => {
+                                        window.removeEventListener('mousemove', onMouseMove);
+                                        window.removeEventListener('mouseup', onMouseUp);
+                                    };
+                                    window.addEventListener('mousemove', onMouseMove);
+                                    window.addEventListener('mouseup', onMouseUp);
+                                };
+
+                                const handleRemoveChannels = (e?: React.MouseEvent) => {
+                                    if (e) e.stopPropagation();
+                                    // Remove all channel flow options and any connections referencing channels
+                                    setFlowOptions(prev => prev.filter(o => !o.id.startsWith('channel-')));
+                                    setConnections(prev => prev.filter(c => !c.from.startsWith('channel-') && !c.to.startsWith('channel-')));
+                                    setModalPositions(prev => {
+                                        const copy = { ...prev } as Record<string, { left: number, top: number }>;
+                                        if (copy['channels-box']) delete copy['channels-box'];
+                                        // Remove any per-channel modal positions if they exist
+                                        Object.keys(copy).forEach(k => { if (k.startsWith('channel-')) delete copy[k]; });
+                                        return copy;
+                                    });
+                                    showToast('Channels removed', 'info');
+                                };
+
+                                // Decide layout (number of columns) dynamically based on available height and width
+                                const MIN_ROW_HEIGHT = 12; // absolute minimum readable row height
+                                const preferredRowHeight = desiredRowHeight; // 24
+                                // Compute maximum rows we can show using MIN_ROW_HEIGHT
+                                const maxRowsByHeight = Math.max(1, Math.floor((maxAllowedHeight - headerHeight - 12) / MIN_ROW_HEIGHT));
+                                // If we can fit in one column at preferredRowHeight, prefer that
+                                const fitsSingleAtPreferred = (headerHeight + channelCount * preferredRowHeight + 12) <= maxAllowedHeight;
+                                let colsLayout = 1;
+                                if (!fitsSingleAtPreferred) {
+                                    // Determine minimal columns required so rows <= maxRowsByHeight
+                                    colsLayout = Math.max(1, Math.min(4, Math.ceil(channelCount / maxRowsByHeight)));
+                                }
+                                // Now compute rows needed and final row height to fill available height
+                                const rowsNeeded = Math.ceil(channelCount / colsLayout);
+                                let finalRowHeight = Math.floor((maxAllowedHeight - headerHeight - 12) / rowsNeeded);
+                                finalRowHeight = Math.max(MIN_ROW_HEIGHT, Math.min(preferredRowHeight, finalRowHeight));
+                                const finalBoxHeight = headerHeight + rowsNeeded * finalRowHeight + 12;
+                                // Recompute effective top so the box remains visible
+                                effectiveTop = Math.max(8, Math.min(boxPos.top, Math.max(8, containerTop + containerHeight - finalBoxHeight - 8)));
+
+                                // Position the channels box inside the same flowchart container so it aligns with other widgets.
+                                // Compute container width so we can clamp the box to remain visible inside it.
+                                let containerWidth = 1200;
+                                try {
+                                    const flowSvg = document.getElementById('flowchart-arrow-svg');
+                                    if (flowSvg) {
+                                        const r = flowSvg.getBoundingClientRect();
+                                        containerWidth = r.width || containerWidth;
+                                    }
+                                } catch (err) {
+                                    // ignore
+                                }
+
+                                // Clamp left/top to keep the box within the flowchart container bounds
+                                const clampedLeft = Math.max(8, Math.min(boxPos.left, Math.max(8, Math.floor(containerWidth - boxWidth - 8))));
+                                const clampedTop = Math.max(8, Math.min(boxPos.top, Math.max(8, Math.floor(containerHeight - finalBoxHeight - 8))));
+
+                                return (
+                                    <div
+                                        key="channels-box"
+                                        // Render as absolute inside the flowchart container so it aligns with other modal widgets
+                                        style={{ position: 'absolute', left: clampedLeft, top: clampedTop, width: boxWidth, height: finalBoxHeight, border: '2px solid #222', borderRadius: 12, background: '#fff', padding: 6, display: 'flex', flexDirection: 'column', gap: 4, boxShadow: '0 2px 12px rgba(0,0,0,0.07)', zIndex: 2, overflow: 'visible' }}
+                                        onMouseDown={handleDragChannels}
+                                    >
+                                        {/* Header with widget name, delete and settings buttons (compact) */}
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6 }}>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                                <button
+                                                    style={{ background: '#d1d5db', color: '#111827', border: 'none', borderRadius: 6, padding: '2px 6px', cursor: 'pointer', fontWeight: 600, fontSize: 11 }}
+                                                    onClick={e => { e.stopPropagation(); decreaseChannels(); }}
+                                                    title="Decrease channels"
+                                                >
+                                                    −
+                                                </button>
+                                                <strong style={{ fontSize: 12 }}>Channels ({channelCount})</strong>
+                                                <button
+                                                    style={{ background: '#d1d5db', color: '#111827', border: 'none', borderRadius: 6, padding: '2px 6px', cursor: 'pointer', fontWeight: 600, fontSize: 11 }}
+                                                    onClick={e => { e.stopPropagation(); increaseChannels(); }}
+                                                    title="Increase channels"
+                                                >
+                                                    +
+                                                </button>
                                             </div>
-                                        );
-                                    })}
-                                </React.Fragment>
-                            ))}
+                                            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                                                <button
+                                                    style={{ background: '#ef4444', color: 'white', border: 'none', borderRadius: 6, padding: '2px 6px', cursor: 'pointer', fontWeight: 600, fontSize: 11 }}
+                                                    onClick={e => { e.stopPropagation(); handleRemoveChannels(); }}
+                                                    title="Delete Channels"
+                                                >
+                                                    Delete
+                                                </button>
+                                                <button
+                                                    style={{ background: '#2563eb', color: 'white', border: 'none', borderRadius: 6, padding: '2px 6px', cursor: 'pointer', fontWeight: 600, fontSize: 11 }}
+                                                    onClick={e => { e.stopPropagation(); setSettingsModal({ show: true, widgetId: 'channels-box' }); }}
+                                                    title="Settings"
+                                                >
+                                                    ⚙
+                                                </button>
+                                            </div>
+                                        </div>
+
+                                        {/* Channels list: switch to 2-column compact layout when vertical space is tight */}
+                                        {(() => {
+                                            const minSingleColHeight = headerHeight + channelCount * 12 + 12; // if below this, prefer multi-column
+                                            const useTwoColumns = boxHeight < minSingleColHeight || rowHeight < 12;
+                                            if (!useTwoColumns) {
+                                                // single column
+                                                return (
+                                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2, paddingTop: 4, paddingBottom: 4, overflow: 'visible' }}>
+                                                        {Array.from({ length: channelCount }).map((_, idx) => {
+                                                            const n = idx + 1;
+                                                            const circleR = Math.max(2, Math.floor(rowHeight * 0.16));
+                                                            const svgSize = Math.max(10, Math.floor(circleR * 2 + 2));
+                                                            return (
+                                                                <div key={n} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: `3px 6px`, borderRadius: 4, height: rowHeight }}>
+                                                                    <svg
+                                                                        data-widgetid={`channel-${n}`}
+                                                                        data-handle="input"
+                                                                        width={svgSize}
+                                                                        height={svgSize}
+                                                                        style={{ cursor: drawingConnection ? 'pointer' : 'default' }}
+                                                                        onMouseUp={e => {
+                                                                            e.stopPropagation();
+                                                                            if (drawingConnection && drawingConnection.from !== `channel-${n}`) {
+                                                                                inputHandledRef.current = true;
+                                                                                setConnections(prev => {
+                                                                                    const exists = prev.some(c => c.from === drawingConnection.from && c.to === `channel-${n}`);
+                                                                                    if (exists) return prev;
+                                                                                    return [...prev, { from: drawingConnection.from, to: `channel-${n}` }];
+                                                                                });
+                                                                                setDrawingConnection(null);
+                                                                                setMousePos(null);
+                                                                                setTimeout(() => { inputHandledRef.current = false; }, 0);
+                                                                            }
+                                                                        }}
+                                                                    >
+                                                                        <circle cx={svgSize / 2} cy={svgSize / 2} r={circleR} fill="#fff" stroke="#2563eb" strokeWidth={1} />
+                                                                    </svg>
+
+                                                                    <span style={{ flex: 1, textAlign: 'center', fontSize: 11, fontWeight: 600 }}>Channel {n}</span>
+
+                                                                    <svg
+                                                                        data-widgetid={`channel-${n}`}
+                                                                        data-handle="output"
+                                                                        width={svgSize}
+                                                                        height={svgSize}
+                                                                        style={{ cursor: 'crosshair' }}
+                                                                            onMouseDown={e => {
+                                                                                e.stopPropagation();
+                                                                                const center = getCircleCenter(`channel-${n}`, 'output');
+                                                                                if (center) {
+                                                                                    setDrawingConnection({ from: `channel-${n}`, startX: center.x, startY: center.y });
+                                                                                    setMousePos({ x: center.x, y: center.y });
+                                                                                } else {
+                                                                                    // Fallback: compute viewport coords of the visual center, then convert to SVG-relative coords
+                                                                                    try {
+                                                                                        const flowSvg = document.getElementById('flowchart-arrow-svg');
+                                                                                        const svgRect = flowSvg ? flowSvg.getBoundingClientRect() : { left: 0, top: 0 } as DOMRect;
+                                                                                        const finalLeft = (containerLeft || 0) + boxPos.left; // viewport left of the fixed box
+                                                                                        const viewportX = finalLeft + boxWidth; // right edge of box as fallback
+                                                                                        const viewportY = effectiveTop + headerHeight + idx * rowHeight + Math.floor(rowHeight / 2);
+                                                                                        const startX = viewportX - svgRect.left;
+                                                                                        const startY = viewportY - svgRect.top;
+                                                                                        setDrawingConnection({ from: `channel-${n}`, startX, startY });
+                                                                                        setMousePos({ x: startX, y: startY });
+                                                                                    } catch (err) {
+                                                                                        const startX = boxPos.left + boxWidth;
+                                                                                        const startY = effectiveTop + headerHeight + idx * rowHeight + Math.floor(rowHeight / 2);
+                                                                                        setDrawingConnection({ from: `channel-${n}`, startX, startY });
+                                                                                        setMousePos({ x: startX, y: startY });
+                                                                                    }
+                                                                                }
+                                                                            }}
+                                                                    >
+                                                                        <circle cx={svgSize / 2} cy={svgSize / 2} r={circleR} fill="#fff" stroke="#2563eb" strokeWidth={1} />
+                                                                    </svg>
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                );
+                                            }
+
+                                            // two-column layout: render rows, each with up to 2 channels side-by-side
+                                            const colsLayout = 2;
+                                            const rowsLayout = Math.ceil(channelCount / colsLayout);
+                                            return (
+                                                <div style={{ display: 'flex', flexDirection: 'column', gap: 2, paddingTop: 4, paddingBottom: 4 }}>
+                                                    {Array.from({ length: rowsLayout }).map((_, rowIdx) => {
+                                                        const leftIndex = rowIdx * colsLayout + 1;
+                                                        const rightIndex = leftIndex + 1;
+                                                        return (
+                                                            <div key={rowIdx} style={{ display: 'flex', gap: 6, alignItems: 'center', height: rowHeight }}>
+                                                                {[leftIndex, rightIndex].map((n, posIdx) => {
+                                                                    if (n > channelCount) return <div key={posIdx} style={{ flex: 1 }} />;
+                                                                    const circleR = Math.max(2, Math.floor(rowHeight * 0.16));
+                                                                    const svgSize = Math.max(10, Math.floor(circleR * 2 + 2));
+                                                                    return (
+                                                                        <div key={n} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '2px 6px', borderRadius: 4, flex: 1 }}>
+                                                                            <svg
+                                                                                data-widgetid={`channel-${n}`}
+                                                                                data-handle="input"
+                                                                                width={svgSize}
+                                                                                height={svgSize}
+                                                                                style={{ cursor: drawingConnection ? 'pointer' : 'default' }}
+                                                                                onMouseUp={e => {
+                                                                                    e.stopPropagation();
+                                                                                    if (drawingConnection && drawingConnection.from !== `channel-${n}`) {
+                                                                                        inputHandledRef.current = true;
+                                                                                        setConnections(prev => {
+                                                                                            const exists = prev.some(c => c.from === drawingConnection.from && c.to === `channel-${n}`);
+                                                                                            if (exists) return prev;
+                                                                                            return [...prev, { from: drawingConnection.from, to: `channel-${n}` }];
+                                                                                        });
+                                                                                        setDrawingConnection(null);
+                                                                                        setMousePos(null);
+                                                                                        setTimeout(() => { inputHandledRef.current = false; }, 0);
+                                                                                    }
+                                                                                }}
+                                                                            >
+                                                                                <circle cx={svgSize / 2} cy={svgSize / 2} r={circleR} fill="#fff" stroke="#2563eb" strokeWidth={1} />
+                                                                            </svg>
+
+                                                                            <span style={{ flex: 1, textAlign: 'center', fontSize: 11, fontWeight: 600 }}>Ch {n}</span>
+
+                                                                            <svg
+                                                                                data-widgetid={`channel-${n}`}
+                                                                                data-handle="output"
+                                                                                width={svgSize}
+                                                                                height={svgSize}
+                                                                                style={{ cursor: 'crosshair' }}
+                                                                                onMouseDown={e => {
+                                                                                    e.stopPropagation();
+                                                                                    const center = getCircleCenter(`channel-${n}`, 'output');
+                                                                                    if (center) {
+                                                                                        setDrawingConnection({ from: `channel-${n}`, startX: center.x, startY: center.y });
+                                                                                        setMousePos({ x: center.x, y: center.y });
+                                                                                    } else {
+                                                                                            // approximate start positions for left/right columns; convert viewport -> svg coords
+                                                                                            try {
+                                                                                                const flowSvg = document.getElementById('flowchart-arrow-svg');
+                                                                                                const svgRect = flowSvg ? flowSvg.getBoundingClientRect() : { left: 0, top: 0 } as DOMRect;
+                                                                                                const finalLeft = (containerLeft || 0) + boxPos.left;
+                                                                                                const colOffset = posIdx === 0 ? 0 : boxWidth / 2;
+                                                                                                const viewportX = finalLeft + colOffset + Math.floor(boxWidth / 2);
+                                                                                                const viewportY = effectiveTop + headerHeight + rowIdx * rowHeight + Math.floor(rowHeight / 2);
+                                                                                                const startX = viewportX - svgRect.left;
+                                                                                                const startY = viewportY - svgRect.top;
+                                                                                                setDrawingConnection({ from: `channel-${n}`, startX, startY });
+                                                                                                setMousePos({ x: startX, y: startY });
+                                                                                            } catch (err) {
+                                                                                                const colOffset = posIdx === 0 ? 0 : boxWidth / 2;
+                                                                                                const startX = boxPos.left + colOffset + Math.floor(boxWidth / 2);
+                                                                                                const startY = effectiveTop + headerHeight + rowIdx * rowHeight + Math.floor(rowHeight / 2);
+                                                                                                setDrawingConnection({ from: `channel-${n}`, startX, startY });
+                                                                                                setMousePos({ x: startX, y: startY });
+                                                                                            }
+                                                                                        }
+                                                                                    }}
+                                                                            >
+                                                                                <circle cx={svgSize / 2} cy={svgSize / 2} r={circleR} fill="#fff" stroke="#2563eb" strokeWidth={1} />
+                                                                            </svg>
+                                                                        </div>
+                                                                    );
+                                                                })}
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            );
+                                        })()}
+                                    </div>
+                                );
+                            })()}
+                            {/* Inline Make Connection box removed — use the toolbar 'Make Connection' button instead */}
+                            {/* Render flow options (except channel entries; those are inside the Channels box) */}
+                            {flowOptions.map((opt, idx) => {
+                                if (opt.id.startsWith('channel-')) return null;
+                                const widgetId = opt.id;
+                                const defaultLeft = 200 + (idx % 3) * 220;
+                                const defaultTop = 100 + Math.floor(idx / 3) * 120;
+                                const widgetLeft = modalPositions[widgetId]?.left ?? defaultLeft;
+                                const widgetTop = modalPositions[widgetId]?.top ?? defaultTop;
+                                const widgetWidth = opt.type === 'bandpower' ? 220 : 180;
+                                const widgetHeight = 70;
+
+                                const handleDrag = (e: React.MouseEvent<HTMLDivElement>) => {
+                                    if (showConnectionModal) return; // Disable drag when modal is open
+                                    e.preventDefault();
+                                    const startX = e.clientX;
+                                    const startY = e.clientY;
+                                    const origLeft = widgetLeft;
+                                    const origTop = widgetTop;
+                                    const onMouseMove = (moveEvent: MouseEvent) => {
+                                        const dx = moveEvent.clientX - startX;
+                                        const dy = moveEvent.clientY - startY;
+                                        const newLeft = Math.round((origLeft + dx) / 10) * 10;
+                                        const newTop = Math.round((origTop + dy) / 10) * 10;
+                                        setModalPositions(pos => ({ ...pos, [widgetId]: { left: newLeft, top: newTop } }));
+                                    };
+                                    const onMouseUp = () => {
+                                        window.removeEventListener('mousemove', onMouseMove);
+                                        window.removeEventListener('mouseup', onMouseUp);
+                                    };
+                                    window.addEventListener('mousemove', onMouseMove);
+                                    window.addEventListener('mouseup', onMouseUp);
+                                };
+
+                                return (
+                                    <div
+                                        key={widgetId}
+                                        style={{ position: 'absolute', left: widgetLeft, top: widgetTop, width: widgetWidth, height: widgetHeight, border: '2px solid #222', borderRadius: 12, background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: 14, zIndex: showConnectionModal || settingsModal.show ? 0 : 2, boxShadow: '0 2px 12px rgba(0,0,0,0.07)', transition: 'box-shadow 0.2s', gap: 8, wordBreak: 'break-word', overflowWrap: 'break-word', textAlign: 'center', cursor: showConnectionModal || settingsModal.show ? 'default' : 'move', pointerEvents: showConnectionModal || settingsModal.show ? 'none' : 'auto' }}
+                                        onMouseDown={handleDrag}
+                                    >
+                                        <div style={{ display: 'flex', alignItems: 'center', width: '100%', height: '100%', position: 'relative', justifyContent: 'space-between' }}>
+                                            <div style={{ display: 'flex', alignItems: 'center', height: '100%' }}>
+                                                <svg
+                                                    data-widgetid={widgetId}
+                                                    data-handle="input"
+                                                    style={{ marginLeft: 0, marginRight: 8, zIndex: 100 }}
+                                                    width={14}
+                                                    height={14}
+                                                    onMouseUp={e => {
+                                                        e.stopPropagation();
+                                                        if (drawingConnection && drawingConnection.from !== widgetId) {
+                                                            inputHandledRef.current = true;
+                                                            setConnections(prev => {
+                                                                const exists = prev.some(c => c.from === drawingConnection.from && c.to === widgetId);
+                                                                if (exists) return prev;
+                                                                return [...prev, { from: drawingConnection.from, to: widgetId }];
+                                                            });
+                                                            setDrawingConnection(null);
+                                                            setMousePos(null);
+                                                            setTimeout(() => { inputHandledRef.current = false; }, 0);
+                                                        }
+                                                    }}
+                                                >
+                                                    <circle cx={7} cy={7} r={2.5} fill="#fff" stroke="#2563eb" strokeWidth={1.1} style={{ cursor: 'pointer' }} />
+                                                </svg>
+                                            </div>
+                                            <span style={{ flex: 1, wordBreak: 'break-word', overflowWrap: 'break-word', textAlign: 'center', fontWeight: 600 }}>{opt.label}</span>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                                <button style={{ background: '#ef4444', color: 'white', border: 'none', borderRadius: 6, padding: '2px 7px', cursor: showConnectionModal || settingsModal.show ? 'default' : 'pointer', fontWeight: 500, fontSize: 11, boxShadow: '0 1px 4px rgba(239,68,68,0.08)', pointerEvents: showConnectionModal || settingsModal.show ? 'none' : 'auto', height: 22 }} onClick={() => {
+                                                    if (showConnectionModal || settingsModal.show) return;
+                                                    handleRemoveWidget(opt.id);
+                                                    setFlowOptions(prev => prev.filter(o => o.id !== opt.id));
+                                                }}>Delete</button>
+                                                <button
+                                                    style={{ background: '#2563eb', color: 'white', border: 'none', borderRadius: 6, padding: '2px 6px', cursor: 'pointer', fontWeight: 500, fontSize: 11, boxShadow: '0 1px 4px rgba(37,99,235,0.08)', pointerEvents: 'auto', zIndex: 100002, height: 22, width: 22, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                                                    title="Settings"
+                                                    onClick={e => {
+                                                        e.stopPropagation();
+                                                        setSettingsModal({ show: true, widgetId });
+                                                    }}
+                                                >
+                                                    <svg width="14" height="14" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="7" stroke="white" strokeWidth="1.5" /><path d="M10 7V10L12 12" stroke="white" strokeWidth="1.5" strokeLinecap="round" /></svg>
+                                                </button>
+                                                <svg style={{ marginLeft: 8, marginRight: 0, zIndex: 100 }} width={14} height={14}>
+                                                    <svg
+                                                        data-widgetid={widgetId}
+                                                        data-handle="output"
+                                                        style={{ cursor: 'crosshair', marginLeft: 8, marginRight: 0, zIndex: 100 }}
+                                                        width={14}
+                                                        height={14}
+                                                        onMouseDown={e => {
+                                                            e.stopPropagation();
+                                                            const center = getCircleCenter(widgetId, 'output');
+                                                            if (center) {
+                                                                setDrawingConnection({ from: widgetId, startX: center.x, startY: center.y });
+                                                                setMousePos({ x: center.x, y: center.y });
+                                                            } else {
+                                                                const startX = widgetLeft + widgetWidth;
+                                                                const startY = widgetTop + widgetHeight / 2;
+                                                                setDrawingConnection({ from: widgetId, startX, startY });
+                                                                setMousePos({ x: startX, y: startY });
+                                                            }
+                                                        }}>
+                                                        <circle cx={7} cy={7} r={2.5} fill="#fff" stroke="#2563eb" strokeWidth={1.1} />
+                                                    </svg>
+                                                    <div
+                                                        style={{ position: 'absolute', left: -7, top: '50%', transform: 'translateY(-50%)', zIndex: 100, width: 14, height: 14, cursor: drawingConnection ? 'pointer' : 'default' }}
+                                                        data-widgetid={widgetId}
+                                                        data-handle="input"
+                                                        onMouseUp={e => {
+                                                            e.stopPropagation();
+                                                            if (drawingConnection && drawingConnection.from !== widgetId) {
+                                                                inputHandledRef.current = true;
+                                                                setConnections(prev => {
+                                                                    const exists = prev.some(c => c.from === drawingConnection.from && c.to === widgetId);
+                                                                    if (exists) return prev;
+                                                                    return [...prev, { from: drawingConnection.from, to: widgetId }];
+                                                                });
+                                                                setDrawingConnection(null);
+                                                                setMousePos(null);
+                                                                setTimeout(() => { inputHandledRef.current = false; }, 0);
+                                                            }
+                                                        }}
+                                                    >
+                                                        <svg width={14} height={14}>
+                                                            <circle cx={7} cy={7} r={2.5} fill="#fff" stroke="#2563eb" strokeWidth={1.1} />
+                                                        </svg>
+                                                    </div>
+                                                </svg>
+                                            </div>
+                                        </div>
+                                    </div>
+                                );
+                            })}
                         </div>
                         <button
                             style={{ marginTop: 24, background: '#10B981', color: 'white', padding: '10px 24px', borderRadius: 8, fontWeight: 'bold', border: 'none', cursor: 'pointer', fontSize: 18 }}
@@ -1116,11 +1485,13 @@ const Widgets: React.FC = () => {
                                     channels.forEach((ch, rowIdx) => {
                                         widgetTypes.forEach((type, colIdx) => {
                                             const widgetId = type === 'channel' ? `channel-${ch}`
-                                                : type === 'spiderplot' ? `spider-${ch}`
+                                                : type === 'spiderplot' ? `spiderplot`
                                                     : type === 'fft' ? `fft-${ch}`
                                                         : `bandpower-${ch}`;
                                             const opt = selectedWidgets.find(o => o.id === widgetId);
                                             if (!opt) return;
+                                            // Avoid adding the single spiderplot more than once
+                                            if (widgetId === 'spiderplot' && newWidgets.some(w => w.id === 'spiderplot')) return;
                                             const x = offsetCells + colIdx * dynamicWidgetWidth;
                                             const y = offsetCells + rowIdx * dynamicWidgetHeight;
                                             // Prevent overflow
@@ -1188,6 +1559,7 @@ const Widgets: React.FC = () => {
                             dragState={dragState}
                             setDragState={setDragState}
                             onUpdateWidget={handleUpdateWidget}
+                            incomingConnections={connections.filter(c => c.to === widget.id).map(c => c.from)}
                         />
                     ))}
 

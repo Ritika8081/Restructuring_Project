@@ -20,9 +20,10 @@ type DraggableWidgetProps = {
     setDragState: React.Dispatch<React.SetStateAction<DragState>>;
     onUpdateWidget?: (id: string, updates: Partial<Widget>) => void;
     children?: React.ReactNode;
+    incomingConnections?: string[];
 };
 
-const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onRemove, gridSettings, dragState, setDragState, onUpdateWidget, children }) => {
+const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onRemove, gridSettings, dragState, setDragState, onUpdateWidget, children, incomingConnections = [] }) => {
     // Widget-specific channel state (for basic signal widgets)
     const [widgetChannels, setWidgetChannels] = useState<any[]>([
         { id: 'ch1', name: 'CH 1', color: '#10B981', visible: true },
@@ -332,6 +333,7 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
                             showValues={widget.width >= 4 && widget.height >= 4}
                             animated={true}
                             backgroundColor="rgba(16, 185, 129, 0.02)"
+                            data={incomingConnections.length > 0 ? incomingConnections.map((id, idx) => ({ label: id, value: 40 + (idx * 10) % 60, maxValue: 100 })) : undefined}
                         />
                     ) : widget.type === 'FFTGraph' ? (
                         <div className="relative w-full h-full">

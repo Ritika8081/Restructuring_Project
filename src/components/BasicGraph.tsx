@@ -2,7 +2,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { useChannelData } from '@/lib/channelDataContext';
 import { WebglPlot, WebglLine, ColorRGBA } from 'webgl-plot';
-import { EXGFilter, Notch } from './lib/filter';
 
 interface Channel {
   id: string;
@@ -35,25 +34,6 @@ const DEFAULT_COLORS = [
 ];
 
 const BasicGraphRealtime: React.FC<BasicGraphRealtimeProps> = (props) => {
-  // Create filter instances for each channel
-  const exgFilters = useRef([
-    new EXGFilter(),
-    new EXGFilter(),
-    new EXGFilter()
-  ]);
-  const notchFilters = useRef([
-    new Notch(),
-    new Notch(),
-    new Notch()
-  ]);
-
-  // Example filter setup (customize as needed)
-  // Set bits and sampling rate for EXGFilter
-  useEffect(() => {
-    // Assume 500Hz, 12-bit ADC for demo; adjust as needed
-    exgFilters.current.forEach(f => f.setbits('12', 500));
-    notchFilters.current.forEach(f => f.setbits(500));
-  }, []);
   const { samples } = useChannelData();
   const {
     channels: initialChannels = [
@@ -258,18 +238,18 @@ const BasicGraphRealtime: React.FC<BasicGraphRealtimeProps> = (props) => {
     };
     samples.slice(-bufferSize).forEach(sample => {
       if (channels.length > 0) {
-        // Apply EXG and Notch filters to each channel
-        let filteredCh0 = notchFilters.current[0].process(sample.ch0, 1);
-        filteredCh0 = exgFilters.current[0].process(filteredCh0, 1); // type 1: ECG
-        if (channels[0].visible && sample.ch0 !== undefined) pushData(channels[0].id, normalize(filteredCh0));
+        // Using raw samples (no EXG/Notch filtering)
+        if (channels[0] && channels[0].visible && sample.ch0 !== undefined) {
+          pushData(channels[0].id, normalize(sample.ch0));
+        }
 
-        let filteredCh1 = notchFilters.current[1].process(sample.ch1, 1);
-        filteredCh1 = exgFilters.current[1].process(filteredCh1, 1); // type 1: ECG
-        if (channels[1] && channels[1].visible && sample.ch1 !== undefined) pushData(channels[1].id, normalize(filteredCh1));
+        if (channels[1] && channels[1].visible && sample.ch1 !== undefined) {
+          pushData(channels[1].id, normalize(sample.ch1));
+        }
 
-        let filteredCh2 = notchFilters.current[2].process(sample.ch2, 1);
-        filteredCh2 = exgFilters.current[2].process(filteredCh2, 1); // type 1: ECG
-        if (channels[2] && channels[2].visible && sample.ch2 !== undefined) pushData(channels[2].id, normalize(filteredCh2));
+        if (channels[2] && channels[2].visible && sample.ch2 !== undefined) {
+          pushData(channels[2].id, normalize(sample.ch2));
+        }
       }
     });
   }, [samples, channels, bufferSize]);
