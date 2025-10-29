@@ -332,8 +332,6 @@ const Widgets: React.FC = () => {
     ]);
     // Modal state for connection UI
     const [showConnectionModal, setShowConnectionModal] = useState(false);
-    // Dropdown state for adding new widget types
-    const [showAddDropdown, setShowAddDropdown] = useState(false);
 
     // Grid configuration state - initialize with SSR-safe defaults, adjust in useEffect
     const [gridSettings, setGridSettings] = useState<GridSettings>({
@@ -571,6 +569,92 @@ const Widgets: React.FC = () => {
     }, [widgets, gridSettings, showToast]);
 
     /**
+     * Add widget at a specific grid column/row (if possible).
+     * If the requested cell is occupied, falls back to auto-placement.
+     */
+    const handleAddWidgetAt = useCallback((type: string, col: number, row: number) => {
+        // Determine default sizes (mirror handleAddWidget logic)
+        let defaultWidth = 2;
+        let defaultHeight = 2;
+        let minWidth = 1;
+        let minHeight = 1;
+        if (type === 'basic') {
+            defaultWidth = 5; defaultHeight = 4; minWidth = 5; minHeight = 4;
+        } else if (type === 'spiderplot') {
+            defaultWidth = 6; defaultHeight = 6; minWidth = 4; minHeight = 4;
+        } else if (type === 'FFTGraph') {
+            defaultWidth = 6; defaultHeight = 5; minWidth = 4; minHeight = 3;
+        } else if (type === 'channel') {
+            defaultWidth = 4; defaultHeight = 3; minWidth = 3; minHeight = 2;
+        } else if (type === 'bandpower') {
+            defaultWidth = 5; defaultHeight = 4; minWidth = 4; minHeight = 3;
+        } else if (type === 'candle') {
+            defaultWidth = 4; defaultHeight = 4; minWidth = 3; minHeight = 3;
+        } else if (type === 'game') {
+            defaultWidth = 6; defaultHeight = 4; minWidth = 4; minHeight = 3;
+        } else if (type === 'bargraph' || type === 'statistic') {
+            defaultWidth = 5; defaultHeight = 4; minWidth = 3; minHeight = 3;
+        }
+
+        // Clamp to grid bounds
+        const clampedCol = Math.max(0, Math.min(col, (gridSettings.cols || 24) - defaultWidth));
+        const clampedRow = Math.max(0, Math.min(row, (gridSettings.rows || 16) - defaultHeight));
+
+        // If space available at requested spot, place it there
+        if (!checkCollisionAtPosition(widgets, 'temp', clampedCol, clampedRow, defaultWidth, defaultHeight, gridSettings)) {
+            const newWidget: Widget = {
+                id: `widget-${type}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+                x: clampedCol,
+                y: clampedRow,
+                width: defaultWidth,
+                height: defaultHeight,
+                minWidth,
+                minHeight,
+                type,
+            };
+            setWidgets(prev => [...prev, newWidget]);
+            showToast(`${type} widget added`, 'success');
+            return;
+        }
+
+        // Fallback: use automatic placement if requested cell is busy
+        handleAddWidget(type);
+    }, [widgets, gridSettings, showToast, handleAddWidget]);
+
+    /**
+     * Add an item to the flowchart modal at pixel coordinates (left, top)
+     * This creates a flowOptions entry and a modalPositions entry so the
+     * item appears inside the flow configuration modal (not the dashboard).
+     */
+    const handleAddFlowItemAt = useCallback((type: string, left: number, top: number) => {
+        const id = `${type}-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
+        const labelMap: Record<string, string> = {
+            spiderplot: 'Spider Plot',
+            FFTGraph: 'FFT',
+            channel: 'Channel',
+            candle: 'Candle',
+            game: 'Game',
+            bandpower: 'Bandpower',
+            basic: 'Real-time Signal'
+        };
+        const label = labelMap[type] || type;
+
+        // Add to flowOptions so it's rendered in the flow modal
+        setFlowOptions(prev => [...prev, { id, label, type, selected: true }]);
+
+        // Clamp left/top to reasonable bounds inside the flow modal container
+        const containerWidth = 1200; // default used elsewhere
+        const containerHeight = 500;
+        const widgetWidth = (type === 'bandpower') ? 220 : 180;
+        const widgetHeight = 70;
+        const clampedLeft = Math.max(8, Math.min(Math.round(left), Math.max(8, Math.floor(containerWidth - widgetWidth - 8))));
+        const clampedTop = Math.max(8, Math.min(Math.round(top), Math.max(8, Math.floor(containerHeight - widgetHeight - 8))));
+
+        setModalPositions(prev => ({ ...prev, [id]: { left: clampedLeft, top: clampedTop } }));
+        showToast(`${label} added to flowchart`, 'success');
+    }, [setFlowOptions, setModalPositions, showToast]);
+
+    /**
      * Remove widget by ID
      */
     const handleRemoveWidget = useCallback((id: string) => {
@@ -798,24 +882,7 @@ const Widgets: React.FC = () => {
                                     }
                                 }}
                             >Save Layout</button>
-                            {/* Add Widget dropdown */}
-                            <div style={{ position: 'relative' }}>
-                                <button
-                                    style={{ background: '#4b5563', color: 'white', padding: '8px 14px', borderRadius: 8, fontWeight: 'bold', border: 'none', cursor: 'pointer', fontSize: 16 }}
-                                    onClick={() => setShowAddDropdown(prev => !prev)}
-                                >Add Widget ▾</button>
-                                {showAddDropdown && (
-                                    <div style={{ position: 'absolute', right: 0, top: 'calc(100% + 6px)', background: 'white', border: '1px solid #e5e7eb', boxShadow: '0 6px 18px rgba(0,0,0,0.08)', borderRadius: 8, zIndex: 100005, minWidth: 200, overflow: 'hidden' }}>
-                                        <button onClick={() => { setShowAddDropdown(false); handleAddWidget('spiderplot'); }} style={{ display: 'block', width: '100%', padding: '10px 14px', textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer' }}>Spider Plot</button>
-                                        <button onClick={() => { setShowAddDropdown(false); handleAddWidget('FFTGraph'); }} style={{ display: 'block', width: '100%', padding: '10px 14px', textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer' }}>FFT</button>
-                                        <button onClick={() => { setShowAddDropdown(false); handleAddWidget('channel'); }} style={{ display: 'block', width: '100%', padding: '10px 14px', textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer' }}>Channel</button>
-                                        <button onClick={() => { setShowAddDropdown(false); handleAddWidget('candle'); }} style={{ display: 'block', width: '100%', padding: '10px 14px', textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer' }}>Candle</button>
-                                        <button onClick={() => { setShowAddDropdown(false); handleAddWidget('game'); }} style={{ display: 'block', width: '100%', padding: '10px 14px', textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer' }}>Game</button>
-                                        <button onClick={() => { setShowAddDropdown(false); handleAddWidget('bandpower'); }} style={{ display: 'block', width: '100%', padding: '10px 14px', textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer' }}>Bandpower</button>
-                                        <button onClick={() => { setShowAddDropdown(false); handleAddWidget('basic'); }} style={{ display: 'block', width: '100%', padding: '10px 14px', textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer' }}>Real-time Signal</button>
-                                    </div>
-                                )}
-                            </div>
+                            {/* Left palette is now shown inside the flow area as a draggable list (see below) */}
                             <button
                                 style={{ background: '#10B981', color: 'white', padding: '8px 18px', borderRadius: 8, fontWeight: 'bold', border: 'none', cursor: 'pointer', fontSize: 16 }}
                                 onClick={() => {
@@ -911,7 +978,43 @@ const Widgets: React.FC = () => {
                         )}
 
                         {/* Flowchart grid layout */}
-                        <div style={{ position: 'relative', width: 1200, height: 500, margin: 'auto', borderRadius: 12, border: '1px solid #e5e7eb', boxShadow: '0 4px 32px rgba(0,0,0,0.08)', overflow: 'hidden', background: '#fff', WebkitUserSelect: 'none' as any, MozUserSelect: 'none' as any, msUserSelect: 'none' as any, userSelect: 'none' as any }}>
+                        {/* Row layout: left palette + flow area to avoid overlap */}
+                        <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start', paddingTop: 8 }}>
+                            <div style={{ width: 220, flex: '0 0 220', height: 520, overflowY: 'auto', padding: 8, borderRadius: 8, background: '#fafafa', border: '1px solid #e6e7eb' }}>
+                                <div style={{ fontWeight: 600, padding: '6px 8px', color: '#374151' }}>Applications</div>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
+                                    {[
+                                        { id: 'spiderplot', label: 'Spider Plot' },
+                                        { id: 'FFTGraph', label: 'FFT' },
+                                        { id: 'channel', label: 'Channel' },
+                                        { id: 'candle', label: 'Candle' },
+                                        { id: 'game', label: 'Game' },
+                                        { id: 'bandpower', label: 'Bandpower' },
+                                        { id: 'basic', label: 'Real-time Signal' },
+                                    ].map(item => (
+                                        <div
+                                            key={item.id}
+                                            draggable
+                                            onDragStart={(e) => { try { e.dataTransfer.setData('application/widget-type', item.id); e.dataTransfer.effectAllowed = 'copy'; } catch (err) {} }}
+                                            style={{ cursor: 'grab', padding: '8px 10px', background: '#fff', border: '1px solid #e5e7eb', borderRadius: 6, boxShadow: '0 1px 2px rgba(0,0,0,0.04)', color: '#111827' }}
+                                        >
+                                            {item.label}
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+
+                            <div onDragOver={(e) => { e.preventDefault(); }} onDrop={(e) => {
+                                e.preventDefault();
+                                const type = e.dataTransfer.getData('application/widget-type') || e.dataTransfer.getData('text/plain');
+                                if (!type) return;
+                                const target = e.currentTarget as HTMLElement;
+                                const rect = target.getBoundingClientRect();
+                                const x = e.clientX - rect.left;
+                                const y = e.clientY - rect.top;
+                                // Add as a flowchart item (not dashboard widget). Compute pixel left/top inside flow area.
+                                handleAddFlowItemAt(type, x, y);
+                            }} style={{ position: 'relative', flex: 1, minWidth: 900, height: 500, margin: 'auto', borderRadius: 12, border: '1px solid #e5e7eb', boxShadow: '0 4px 32px rgba(0,0,0,0.08)', overflow: 'hidden', background: '#fff', WebkitUserSelect: 'none' as any, MozUserSelect: 'none' as any, msUserSelect: 'none' as any, userSelect: 'none' as any }}>
                             {/* Live arrow while dragging connection */}
                             {drawingConnection && mousePos && (
                                 <svg style={{ position: 'absolute', left: 0, top: 0, width: '1200px', height: '500px', pointerEvents: 'none', zIndex: 10000 }}>
@@ -1444,6 +1547,7 @@ const Widgets: React.FC = () => {
                                 );
                             })}
                         </div>
+                    </div>
                         <button
                             style={{ marginTop: 24, background: '#10B981', color: 'white', padding: '10px 24px', borderRadius: 8, fontWeight: 'bold', border: 'none', cursor: 'pointer', fontSize: 18 }}
                             onClick={() => {
