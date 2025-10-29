@@ -407,6 +407,23 @@ const Widgets: React.FC = () => {
         setArrowTick(t => t + 1);
     }, [modalPositions, connections, widgets, gridSettings]);
 
+    // When the flow modal is opened, DOM nodes for modal items may not be ready immediately.
+    // Schedule a double rAF to force arrow recalculation after the modal has painted.
+    useEffect(() => {
+        if (!showFlowModal) return;
+        let raf1: number | null = null;
+        let raf2: number | null = null;
+        raf1 = requestAnimationFrame(() => {
+            raf2 = requestAnimationFrame(() => {
+                setArrowTick(t => t + 1);
+            });
+        });
+        return () => {
+            if (raf1) cancelAnimationFrame(raf1);
+            if (raf2) cancelAnimationFrame(raf2);
+        };
+    }, [showFlowModal]);
+
     // Keep refs synchronized with state
     useEffect(() => {
         widgetsRef.current = widgets;
