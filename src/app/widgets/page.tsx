@@ -1540,6 +1540,7 @@ const Widgets: React.FC = () => {
                                         channel: 'basic',
                                         fft: 'FFTGraph',
                                         spiderplot: 'spiderplot',
+                                        candle: 'candle',
                                         bandpower: 'statistic',
                                     };
                                     const selectedWidgets = flowOptions.filter(opt => opt.selected);
@@ -1565,35 +1566,33 @@ const Widgets: React.FC = () => {
                                     const availableRows = rows - offsetCells;
                                     const dynamicWidgetWidth = Math.max(3, Math.floor(availableCols / gridCols));
                                     const dynamicWidgetHeight = Math.max(3, Math.floor(availableRows / gridRows));
-                                    // Arrange widgets in dashboard in the same order and grid as flowchart
-                                    const widgetTypes = ['channel', 'spiderplot', 'fft', 'bandpower'];
-                                    const channels = [1, 2, 3];
-                                    channels.forEach((ch, rowIdx) => {
-                                        widgetTypes.forEach((type, colIdx) => {
-                                                    const widgetId = type === 'channel' ? `channel-${ch}`
-                                                        : type === 'spiderplot' ? `spiderplot`
-                                                            : type === 'fft' ? `fft`
-                                                                : `bandpower`;
-                                            const opt = selectedWidgets.find(o => o.id === widgetId);
-                                            if (!opt) return;
-                                                    // Avoid adding singleton flow items more than once
-                                                    if ((widgetId === 'spiderplot' || widgetId === 'fft' || widgetId === 'bandpower') && newWidgets.some(w => w.id === widgetId)) return;
-                                            const x = offsetCells + colIdx * dynamicWidgetWidth;
-                                            const y = offsetCells + rowIdx * dynamicWidgetHeight;
-                                            // Prevent overflow
-                                            const safeX = Math.min(x, cols - dynamicWidgetWidth);
-                                            const safeY = Math.min(y, rows - dynamicWidgetHeight);
-                                            newWidgets.push({
-                                                id: opt.id,
-                                                x: safeX,
-                                                y: safeY,
-                                                width: dynamicWidgetWidth,
-                                                height: dynamicWidgetHeight,
-                                                minWidth: 3,
-                                                minHeight: 3,
-                                                type: typeMap[opt.type] || opt.type,
-                                            });
-                                        });
+                                    // Arrange selected widgets in dashboard grid order (fill 3 rows by default)
+                                    const widgetTypes = selectedWidgets;
+                                    widgetTypes.forEach((opt, idx) => {
+                                        const rowIdx = idx % gridRows;
+                                        const colIdx = Math.floor(idx / gridRows);
+                                        const x = offsetCells + colIdx * dynamicWidgetWidth;
+                                        const y = offsetCells + rowIdx * dynamicWidgetHeight;
+                                        // Prevent overflow
+                                        const safeX = Math.min(x, cols - dynamicWidgetWidth);
+                                        const safeY = Math.min(y, rows - dynamicWidgetHeight);
+                                        const widgetObj: Widget = {
+                                            id: opt.id,
+                                            x: safeX,
+                                            y: safeY,
+                                            width: dynamicWidgetWidth,
+                                            height: dynamicWidgetHeight,
+                                            minWidth: 3,
+                                            minHeight: 3,
+                                            type: typeMap[opt.type] || opt.type,
+                                        };
+                                        // If this flow option corresponds to a channel (channel-#), record the channel index
+                                        if (typeof opt.id === 'string' && opt.id.startsWith('channel-')) {
+                                            const m = opt.id.match(/channel-(\d+)/i);
+                                            const idxVal = m ? Math.max(1, parseInt(m[1], 10)) : 1;
+                                            (widgetObj as any).channelIndex = idxVal;
+                                        }
+                                        newWidgets.push(widgetObj);
                                     });
                                     return newWidgets;
                                 });
@@ -1607,33 +1606,7 @@ const Widgets: React.FC = () => {
                 <div style={{ position: 'relative', width: (gridSettings.cols || 24) * (gridSettings.cellWidth || 50), height: (gridSettings.rows || 16) * (gridSettings.cellHeight || 50), overflow: 'hidden' }}>
                     {GridLines}
 
-                    {/* Dynamic arrows between widgets (coordinates are in grid pixels) */}
-                    <svg style={{ position: 'absolute', left: 0, top: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 50 }}>
-                        {connections.map(({ from, to }, idx) => {
-                            const fromWidget = widgets.find(w => w.id === from);
-                            const toWidget = widgets.find(w => w.id === to);
-                            if (!fromWidget || !toWidget) return null;
-                            // Arrow starts at center right of fromWidget, ends at center left of toWidget
-                            const startX = (fromWidget.x + fromWidget.width) * gridSettings.cellWidth;
-                            const startY = (fromWidget.y + fromWidget.height / 2) * gridSettings.cellHeight;
-                            const endX = toWidget.x * gridSettings.cellWidth;
-                            const endY = (toWidget.y + toWidget.height / 2) * gridSettings.cellHeight;
-                            // Build obstacle boxes from widgets for routing
-                            const obstacles = widgets.map(w => ({ left: w.x * gridSettings.cellWidth, top: w.y * gridSettings.cellHeight, right: (w.x + w.width) * gridSettings.cellWidth, bottom: (w.y + w.height) * gridSettings.cellHeight, id: w.id }));
-                            let path = getSmartPath(startX, startY, endX, endY);
-                            // check intersection with widget obstacles and fallback
-                            const plainObstacles = obstacles.map(o => ({ left: o.left, top: o.top, right: o.right, bottom: o.bottom }));
-                            if (bezierIntersectsObstacles(startX, startY, endX, endY, plainObstacles)) {
-                                path = computeAvoidingPath(startX, startY, endX, endY, obstacles, [from, to]);
-                            }
-                            return (
-                                <g key={idx}>
-                                    <path d={path} stroke="#90cdf4" strokeWidth={1.5} fill="none" strokeLinecap="round" strokeLinejoin="round" />
-                                </g>
-                            );
-                        })}
-                        {/* arrowheads removed */}
-                    </svg>
+                    {/* dashboard arrows removed: connections still render inside the flow modal only */}
 
                     {/* Render all widgets positioned by grid pixels inside the sized container */}
                     {widgets.map(widget => (

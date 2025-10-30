@@ -15,6 +15,8 @@ export interface Widget {
     type: string;               // Widget type (basic, spiderplot, FFTGraph, bargraph, connection-data)
     zIndex?: number;            // Stacking order for overlays
     connectionType?: string;    // For connection-data widgets: 'ble', 'serial', 'wifi'
+    // For widgets created from channel flow nodes: index of the channel (1-based)
+    channelIndex?: number;
 }
 
 /**

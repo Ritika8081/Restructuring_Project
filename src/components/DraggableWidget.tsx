@@ -1,5 +1,6 @@
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import SpiderPlot from '@/components/SpiderPlot';
+import CandleChart from '@/components/Candle';
 import StatisticGraph from '@/components/StatisticGraph';
 import FFTPlotRealtime from '@/components/FFTPlot';
 import BasicGraphRealtime from '@/components/BasicGraph';
@@ -26,9 +27,60 @@ type DraggableWidgetProps = {
 
 const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onRemove, gridSettings, dragState, setDragState, onUpdateWidget, children, incomingConnections = [] }) => {
     // Widget-specific channel state (for basic signal widgets)
-    const [widgetChannels, setWidgetChannels] = useState<any[]>([
-        { id: 'ch1', name: 'CH 1', color: '#10B981', visible: true },
-    ]);
+    // Prefer explicit `widget.channelIndex` (set by the arranger) and fall back to parsing widget.id
+    const [widgetChannels, setWidgetChannels] = useState<any[]>(() => {
+        try {
+            if (widget && widget.type === 'basic') {
+                // Prefer explicit channelIndex property when present
+                const propIndex = (widget as any).channelIndex;
+                const colors = ['#10B981', '#3B82F6', '#F59E0B', '#EF4444', '#8B5CF6', '#06B6D4'];
+                if (typeof propIndex === 'number' && propIndex >= 1) {
+                    const idx = Math.max(1, Math.floor(propIndex));
+                    const color = colors[(idx - 1) % colors.length];
+                    // channel data keys are zero-based (ch0, ch1, ...). Use ch{idx-1} as id.
+                    return [{ id: `ch${idx - 1}`, name: `CH ${idx}`, color, visible: true }];
+                }
+                // Fallback to parsing id (legacy behavior)
+                if (typeof widget.id === 'string' && widget.id.startsWith('channel-')) {
+                    const m = widget.id.match(/channel-(\d+)/i);
+                    const idx = m ? Math.max(1, parseInt(m[1], 10)) : 1;
+                    const color = colors[(idx - 1) % colors.length];
+                    return [{ id: `ch${idx - 1}`, name: `CH ${idx}`, color, visible: true }];
+                }
+            }
+        } catch (err) {
+            // fallthrough
+        }
+        return [{ id: 'ch1', name: 'CH 1', color: '#10B981', visible: true }];
+    });
+
+    // If the widget prop changes (for example arranger sets widget.channelIndex), update
+    // the internal widgetChannels so the displayed data follows the assigned channel.
+    useEffect(() => {
+        try {
+            if (widget && widget.type === 'basic') {
+                const propIndex = (widget as any).channelIndex;
+                const colors = ['#10B981', '#3B82F6', '#F59E0B', '#EF4444', '#8B5CF6', '#06B6D4'];
+                if (typeof propIndex === 'number' && propIndex >= 1) {
+                    const idx = Math.max(1, Math.floor(propIndex));
+                    const color = colors[(idx - 1) % colors.length];
+                    setWidgetChannels([{ id: `ch${idx}`, name: `CH ${idx}`, color, visible: true }]);
+                    return;
+                }
+                // Fallback to parse id
+                if (typeof widget.id === 'string' && widget.id.startsWith('channel-')) {
+                    const m = widget.id.match(/channel-(\d+)/i);
+                    const idx = m ? Math.max(1, parseInt(m[1], 10)) : 1;
+                    const color = colors[(idx - 1) % colors.length];
+                    setWidgetChannels([{ id: `ch${idx}`, name: `CH ${idx}`, color, visible: true }]);
+                    return;
+                }
+            }
+        } catch (err) {
+            // ignore
+        }
+        // Default fallback keep existing value
+    }, [widget.id, (widget as any).channelIndex]);
 
     /**
      * Handle mouse down events for drag/resize operations
@@ -100,118 +152,8 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
         }
     }, [widget, widgets, onUpdateWidget, gridSettings]);
 
-    /**
-     * Handle channel configuration changes (for signal widgets)
-     */
-    const handleChannelsChange = useCallback((channels: any[]) => {
-        const currentChannelIds = widgetChannels.map(ch => ch.id).sort().join(',');
-        const newChannelIds = channels.map(ch => ch.id).sort().join(',');
-        
-        if (currentChannelIds !== newChannelIds) {
-            setWidgetChannels(channels);
-        }
-    }, [widgetChannels]);
-
-    /**
-     * Add new channel to signal widget (max 6 channels)
-     */
-    const addChannel = useCallback((e: React.MouseEvent) => {
-        e.stopPropagation();
-        if (widgetChannels.length >= 6) return;
-
-        const nextIndex = widgetChannels.length + 1;
-        const colors = ['#10B981', '#3B82F6', '#F59E0B', '#EF4444', '#8B5CF6', '#06B6D4'];
-
-        const newChannel = {
-            id: `ch${nextIndex}`,
-            name: `CH ${nextIndex}`,
-            color: colors[(nextIndex - 1) % colors.length],
-            visible: true,
-        };
-
-        const newChannels = [...widgetChannels, newChannel];
-        setWidgetChannels(newChannels);
-        handleChannelsChange(newChannels);
-        // Request resize to fit all channels
-        if (widget.type === 'basic' && onUpdateWidget) {
-            // Minimum height per channel (should match BasicGraph.tsx logic)
-            const minChannelHeight = 60;
-            const minTotalWidth = 180;
-            const requiredCanvasHeight = (newChannels.length * minChannelHeight) + Math.max(0, newChannels.length - 1);
-            const requiredCanvasWidth = minTotalWidth;
-            const requiredGridWidth = Math.ceil(requiredCanvasWidth / gridSettings.cellWidth);
-            const requiredGridHeight = Math.ceil(requiredCanvasHeight / gridSettings.cellHeight);
-            const minGridWidth = 5;
-            const minGridHeight = 4;
-            const newWidth = Math.max(widget.width, requiredGridWidth, minGridWidth);
-            const newHeight = Math.max(widget.height, requiredGridHeight, minGridHeight);
-            if (widget.width < newWidth || widget.height < newHeight) {
-                const wouldCollide = checkCollisionAtPosition(
-                    widgets.filter(w => w.id !== widget.id),
-                    widget.id,
-                    widget.x,
-                    widget.y,
-                    newWidth,
-                    newHeight,
-                    gridSettings
-                );
-                if (!wouldCollide) {
-                    onUpdateWidget(widget.id, {
-                        width: newWidth,
-                        height: newHeight,
-                        minWidth: Math.max(widget.minWidth || 1, minGridWidth),
-                        minHeight: Math.max(widget.minHeight || 1, minGridHeight),
-                        zIndex: Date.now()
-                    });
-                }
-            }
-        }
-    }, [widgetChannels, handleChannelsChange, widget, onUpdateWidget, gridSettings, widgets]);
-
-    /**
-     * Remove channel from signal widget (minimum 1 channel required)
-     */
-    const removeChannel = useCallback((e: React.MouseEvent) => {
-        e.stopPropagation();
-        if (widgetChannels.length <= 1) return;
-
-        const newChannels = widgetChannels.slice(0, -1);
-        setWidgetChannels(newChannels);
-        handleChannelsChange(newChannels);
-        // Request resize to fit all channels
-        if (widget.type === 'basic' && onUpdateWidget) {
-            const minChannelHeight = 60;
-            const minTotalWidth = 180;
-            const requiredCanvasHeight = (newChannels.length * minChannelHeight) + Math.max(0, newChannels.length - 1);
-            const requiredCanvasWidth = minTotalWidth;
-            const requiredGridWidth = Math.ceil(requiredCanvasWidth / gridSettings.cellWidth);
-            const requiredGridHeight = Math.ceil(requiredCanvasHeight / gridSettings.cellHeight);
-            const minGridWidth = 5;
-            const minGridHeight = 4;
-            const newWidth = Math.max(widget.width, requiredGridWidth, minGridWidth);
-            const newHeight = Math.max(widget.height, requiredGridHeight, minGridHeight);
-            if (widget.width < newWidth || widget.height < newHeight) {
-                const wouldCollide = checkCollisionAtPosition(
-                    widgets.filter(w => w.id !== widget.id),
-                    widget.id,
-                    widget.x,
-                    widget.y,
-                    newWidth,
-                    newHeight,
-                    gridSettings
-                );
-                if (!wouldCollide) {
-                    onUpdateWidget(widget.id, {
-                        width: newWidth,
-                        height: newHeight,
-                        minWidth: Math.max(widget.minWidth || 1, minGridWidth),
-                        minHeight: Math.max(widget.minHeight || 1, minGridHeight),
-                        zIndex: Date.now()
-                    });
-                }
-            }
-        }
-    }, [widgetChannels, handleChannelsChange, widget, onUpdateWidget, gridSettings, widgets]);
+    // Note: in-widget channel add/remove controls were removed intentionally so channel
+    // assignment is controlled exclusively from the Flow modal (channelCount / flow options).
 
     /**
      * Memoized style calculation for widget positioning and sizing
@@ -270,30 +212,7 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
                         </span>
                     </h3>
 
-                    {/* Channel controls for basic signal widgets */}
-                    {widget.type === 'basic' && (
-                        <div className="flex items-center gap-1 ml-2">
-                            {widgetChannels.length < 6 && (
-                                <button
-                                    onClick={addChannel}
-                                    className="w-5 h-5 border border-gray-400 border-dashed rounded flex items-center justify-center text-gray-400 hover:border-green-500 hover:text-green-500 hover:bg-green-50 transition-all text-xs ml-1 z-30"
-                                    title={`Add channel (${widgetChannels.length}/6)`}
-                                >
-                                    +
-                                </button>
-                            )}
-
-                            {widgetChannels.length > 1 && (
-                                <button
-                                    onClick={removeChannel}
-                                    className="w-5 h-5 border border-gray-400 border-dashed rounded flex items-center justify-center text-gray-400 hover:border-red-500 hover:text-red-500 hover:bg-red-50 transition-all text-xs z-30"
-                                    title={`Remove channel (${widgetChannels.length}/6)`}
-                                >
-                                    −
-                                </button>
-                            )}
-                        </div>
-                    )}
+                    {/* Channel controls removed: channel configuration is managed from Flow modal only */}
                 </div>
 
                 <div className="flex items-center gap-1 relative z-30">
@@ -387,6 +306,10 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
                                 type="bar"
                             />
                         </div>
+                    ) : widget.type === 'candle' ? (
+                        <div className="w-full h-full overflow-hidden flex items-center justify-center p-0.5">
+                            <CandleChart width={availableWidth - 4} height={availableHeight - 4} />
+                        </div>
                     ) : widget.type === 'basic' ? (
                         <div className="w-full h-full overflow-hidden flex items-center justify-center p-0.5">
                             <BasicGraphRealtime
@@ -398,7 +321,6 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
                                 backgroundColor="rgba(16, 185, 129, 0.02)"
                                 sampleRate={60}
                                 timeWindow={8}
-                                onChannelsChange={handleChannelsChange}
                                 onSizeRequest={handleSizeRequest}
                                 showChannelControls={false}
                                 showLegend={false}
