@@ -6,6 +6,7 @@ import FFTPlotRealtime from '@/components/FFTPlot';
 import BasicGraphRealtime from '@/components/BasicGraph';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import { useChannelData } from '@/lib/channelDataContext';
+import filterRegistry from '@/lib/filterRegistry';
 import { Widget, GridSettings, DragState } from '@/types/widget.types';
 import { checkCollisionAtPosition } from '@/utils/widget.utils';
 
@@ -81,6 +82,9 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
         }
         // Default fallback keep existing value
     }, [widget.id, (widget as any).channelIndex]);
+
+    // Global channel samples from context (used by multiple widget render paths)
+    const { samples } = useChannelData();
 
     /**
      * Handle mouse down events for drag/resize operations
@@ -246,11 +250,20 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
                 >
                     {/* Widget content rendering */}
                     {widget.type === 'spiderplot' ? (
-                        (() => {
+                            (() => {
                             // Compute SpiderPlot axis values from live channel samples when available
-                            const { samples } = useChannelData();
                             const axisData = incomingConnections.length > 0 ? incomingConnections.map((id, idx) => {
                                 // parse channel index from ids like 'channel-1' -> 0
+                                if (String(id).startsWith('filter-')) {
+                                    // Read processed buffer from registry
+                                    const buf = filterRegistry.getFilterBuffer(id);
+                                    const N = Math.min(128, buf.length);
+                                    if (N === 0) return { label: id, value: 0, maxValue: 100 };
+                                    const recent = buf.slice(-N);
+                                    const rms = Math.sqrt(recent.reduce((acc, v) => acc + (v * v), 0) / recent.length);
+                                    const value = Math.min(100, Math.abs(rms) * 100);
+                                    return { label: id, value, maxValue: 100 };
+                                }
                                 const m = String(id).match(/channel-(\d+)/i);
                                 const chIndex = m ? Math.max(0, parseInt(m[1], 10) - 1) : idx;
                                 const key = `ch${chIndex}`;
@@ -308,7 +321,33 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
                         </div>
                     ) : widget.type === 'candle' ? (
                         <div className="w-full h-full overflow-hidden flex items-center justify-center p-0.5">
-                            <CandleChart width={availableWidth - 4} height={availableHeight - 4} />
+                            {(() => {
+                                // Determine betaPower from incoming connection (prefer filter outputs)
+                                let betaValue = 0;
+                                if (incomingConnections && incomingConnections.length > 0) {
+                                    const src = incomingConnections[0];
+                                    if (String(src).startsWith('filter-')) {
+                                        const buf = filterRegistry.getFilterBuffer(src);
+                                        if (buf && buf.length > 0) {
+                                            const recent = buf.slice(-128);
+                                            const mean = recent.reduce((a, b) => a + Math.abs(b), 0) / recent.length;
+                                            betaValue = Math.min(100, mean * 100);
+                                        }
+                                    } else {
+                                        // assume channel-x
+                                        const m = String(src).match(/channel-(\d+)/i);
+                                        const chIndex = m ? Math.max(0, parseInt(m[1], 10) - 1) : 0;
+                                        const key = `ch${chIndex}`;
+                                        const recent = samples.slice(-128);
+                                        if (recent.length > 0) {
+                                            const vals = recent.map(s => (s as any)[key] ?? 0);
+                                            const rms = Math.sqrt(vals.reduce((acc, v) => acc + v * v, 0) / vals.length);
+                                            betaValue = Math.min(100, rms * 100);
+                                        }
+                                    }
+                                }
+                                return <CandleChart width={availableWidth - 4} height={availableHeight - 4} betaPower={betaValue} />;
+                            })()}
                         </div>
                     ) : widget.type === 'basic' ? (
                         <div className="w-full h-full overflow-hidden flex items-center justify-center p-0.5">

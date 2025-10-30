@@ -6,6 +6,8 @@ type CandleChartProps = {
   height?: number | string;
   betaPower?: number; // controls brightness
   isFullPage?: boolean;
+  threshold?: number; // minimum betaPower to start lighting (0-100)
+  minVisible?: number; // minimum visible brightness (0-1)
   backgroundColor?: string;
 };
 
@@ -14,17 +16,29 @@ const CandleChart: React.FC<CandleChartProps> = ({
   height = '100%',
   betaPower = 0,
   isFullPage = false,
+  threshold = 10,
+  minVisible = 0.05,
   backgroundColor = 'transparent',
 }) => {
-  const brightness = Math.max(0.1, Math.min(1, betaPower / 100));
-  const [displayBrightness, setDisplayBrightness] = useState(0.1);
+  const clampedThreshold = Math.max(0, Math.min(100, threshold));
+  const clampedMinVisible = Math.max(0, Math.min(1, minVisible));
+
+  // Map betaPower to a 0..1 brightness value relative to threshold
+  const raw = typeof betaPower === 'number' ? betaPower : 0;
+  const scaled = raw <= clampedThreshold ? 0 : (raw - clampedThreshold) / Math.max(1, (100 - clampedThreshold));
+  // final brightness in [0,1], clamped and including minVisible when >0
+  const brightness = scaled > 0 ? Math.max(clampedMinVisible, Math.min(1, scaled)) : 0;
+  const [displayBrightness, setDisplayBrightness] = useState(0);
 
   useEffect(() => {
-    const target = Math.max(0.1, Math.min(1, betaPower / 100));
+    // Smoothly animate displayBrightness towards brightness only when brightness > 0.
+    const target = brightness;
     const timer = setInterval(() => {
       setDisplayBrightness(prev => {
         const diff = target - prev;
-        return Math.abs(diff) < 0.01 ? target : prev + diff * 0.12;
+        // If both are zero, keep at zero
+        if (Math.abs(diff) < 0.005) return target;
+        return prev + diff * 0.14;
       });
     }, 16);
     return () => clearInterval(timer);

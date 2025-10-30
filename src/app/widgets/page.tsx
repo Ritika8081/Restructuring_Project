@@ -64,13 +64,48 @@ const Widgets: React.FC = () => {
 
     // Settings modal state for flowchart widgets
     const [settingsModal, setSettingsModal] = useState<{ show: boolean, widgetId: string | null }>({ show: false, widgetId: null });
+    // Draft of settings for the currently-open modal
+    const [settingsDraft, setSettingsDraft] = useState<Record<string, any> | null>(null);
 
-    // Settings modal content (random for now, special for spiderplot)
+    // Open settings for a given flow option id and seed the draft from flowOptions
+    const openSettings = (widgetId: string) => {
+        const opt = flowOptions.find(o => o.id === widgetId);
+        setSettingsDraft(opt && (opt as any).config ? { ...(opt as any).config } : {});
+        setSettingsModal({ show: true, widgetId });
+    };
+
+    // Save current settingsDraft into flowOptions for the open widget
+    const saveSettings = () => {
+        if (!settingsModal.show || !settingsModal.widgetId) {
+            setSettingsModal({ show: false, widgetId: null });
+            setSettingsDraft(null);
+            return;
+        }
+        setFlowOptions(prev => prev.map(o => o.id === settingsModal.widgetId ? { ...o, config: settingsDraft } : o));
+        setSettingsModal({ show: false, widgetId: null });
+        setSettingsDraft(null);
+    };
+
+    // Settings modal content (render per-node-type)
     const renderSettingsModal = () => {
         if (!settingsModal.show || !settingsModal.widgetId) return null;
         const opt = flowOptions.find(o => o.id === settingsModal.widgetId);
         if (!opt) return null;
-        const isSpiderPlot = opt.type === 'spiderplot';
+        const type = opt.type || (opt.id && String(opt.id).startsWith('filter-') ? 'filter' : 'unknown');
+        const isSpiderPlot = type === 'spiderplot';
+        const isChannel = type === 'channel';
+    const isFFT = type === 'fft' || String(opt.id).startsWith('fft-');
+        const isFilter = type === 'filter' || String(opt.id).startsWith('filter-') || String(type).includes('filter');
+
+        // Short help text for each EXG preset to show a concise explanation in the modal
+        const exgHelpMapShort: Record<number, string> = {
+            1: 'ECG — tuned for cardiac signals. Typical useful band: ~0.5–150 Hz (diagnostic content often 0.5–40 Hz); preserves QRS energy.',
+            2: 'EOG — tuned for eye-movement signals. Dominant energy is very low frequency: ~0.1–10 Hz; emphasizes slow drifts and blinks.',
+            3: 'EEG — tuned for brainwave signals; preserves common EEG bands (≈0.5–45 Hz).',
+            4: 'EMG — tuned for muscle activity. Broadband, typically ~20–500 Hz; preserves high-frequency bursts and spikes.'
+        };
+        const notchHelpShort = 'Notch removes mains interference at the selected frequency (50 Hz or 60 Hz).';
+        const samplingRateHelp = 'Set this to match your device sampling rate so filters work correctly.';
         return (
             <div style={{
                 position: 'fixed',
@@ -91,45 +126,164 @@ const Widgets: React.FC = () => {
                     border: '2px solid #2563eb',
                     padding: 40,
                     minWidth: 340,
-                    maxWidth: 420,
+                    maxWidth: 520,
                     position: 'relative',
                 }}>
                     <button
                         style={{ position: 'absolute', top: 12, right: 16, background: 'none', border: 'none', fontSize: 22, color: '#2563eb', cursor: 'pointer' }}
-                        onClick={() => setSettingsModal({ show: false, widgetId: null })}
+                        onClick={() => { setSettingsModal({ show: false, widgetId: null }); setSettingsDraft(null); }}
                     >
                         &times;
                     </button>
-                    <h3 style={{ fontWeight: 'bold', fontSize: 18, marginBottom: 16 }}>Settings for {opt.label}</h3>
-                    {isSpiderPlot ? (
+                    <h3 style={{ fontWeight: 'bold', fontSize: 18, marginBottom: 12 }}>Settings for {opt.label}</h3>
+
+                    {/* Informative description and live config summary to help users understand what this node will do */}
+                    {(() => {
+                        const existing = (opt as any).config || {};
+                        const draft = settingsDraft || {};
+                        const dirty = JSON.stringify(existing) !== JSON.stringify(draft);
+                        const kind = draft.kind || existing.kind || (isFilter ? 'filter' : opt.type || 'item');
+                        const exgKindMap: Record<number, string> = { 1: 'ECG', 2: 'EOG', 3: 'EEG', 4: 'EMG' };
+                        const notchMap: Record<number, string> = { 1: '50 Hz', 2: '60 Hz' };
+                        let description = '';
+                        if (isFilter) {
+                            description = `This ${kind} node will process incoming channel samples and output the filtered result. After saving, connect a channel to this node's input and then connect this node's output to a dashboard widget to visualize the filtered data.`;
+                            if ((draft.kind || existing.kind) === 'notch') {
+                                description += ' Notch removes mains interference; choose 50 Hz or 60 Hz depending on your power grid.';
+                            }
+                            if ((draft.kind || existing.kind) === 'exg') {
+                                const t = (draft.exgType || existing.exgType) || 1;
+                                description += ` EXG presets select a processing chain tuned for ${exgKindMap[t] || 'ECG'} signals.`;
+                            }
+                        } else if (isSpiderPlot) {
+                            description = 'SpiderPlot aggregates multiple channel inputs into a radial plot. You can optionally apply a filter here which will be applied to every connected axis.';
+                        } else if (isChannel) {
+                            description = 'Channel settings allow renaming the channel and similar metadata. Channel data itself comes from the device input stream.';
+                        } else {
+                            description = 'Configure this node. Changes are saved to the flow and will apply when you arrange/play the dashboard.';
+                        }
+
+                        return (
+                            <div style={{ marginBottom: 14, color: '#374151' }}>
+                                <div style={{ marginBottom: 8 }}>{description}</div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                    <div style={{ fontSize: 12, color: '#6b7280' }}>Current config:</div>
+                                    <div style={{ background: '#f3f4f6', padding: '6px 10px', borderRadius: 6, fontSize: 13, color: '#111827' }}>
+                                        {kind && <span style={{ marginRight: 10 }}><strong>kind:</strong> {String(kind)}</span>}
+                                        {((draft.samplingRate || existing.samplingRate) && <span style={{ marginRight: 10 }}><strong>sr:</strong> {draft.samplingRate || existing.samplingRate}</span>)}
+                                        {((draft.exgType || existing.exgType) && <span style={{ marginRight: 10 }}><strong>exg:</strong> {exgKindMap[(draft.exgType || existing.exgType) as number]}</span>)}
+                                        {((draft.notchType || existing.notchType) && <span style={{ marginRight: 10 }}><strong>notch:</strong> {notchMap[(draft.notchType || existing.notchType) as number]}</span>)}
+                                    </div>
+                                    {dirty ? <span style={{ marginLeft: 8, color: '#b91c1c', fontWeight: 600 }}>Unsaved changes</span> : <span style={{ marginLeft: 8, color: '#059669', fontWeight: 600 }}>Saved</span>}
+                                </div>
+                            </div>
+                        );
+                    })()}
+
+                    {isSpiderPlot && (
                         <div>
                             <div style={{ marginBottom: 12 }}>
                                 <label style={{ fontWeight: 500 }}>Apply Filter:</label>
-                                <select style={{ marginLeft: 8 }}>
-                                    <option value="">Select Filter</option>
-                                    <option value="lowpass">Lowpass</option>
+                                <select value={(settingsDraft && settingsDraft.kind) || ''} onChange={e => setSettingsDraft(prev => ({ ...(prev || {}), kind: e.target.value }))} style={{ marginLeft: 8 }}>
+                                    <option value="">None</option>
                                     <option value="highpass">Highpass</option>
-                                    <option value="bandpass">Bandpass</option>
+                                    <option value="exg">EXG</option>
                                 </select>
-                            </div>
-                            <div style={{ marginBottom: 12 }}>
-                                <label style={{ fontWeight: 500 }}>Remove Filter:</label>
-                                <button style={{ marginLeft: 8, background: '#ef4444', color: 'white', border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer' }}>Remove</button>
-                            </div>
-                        </div>
-                    ) : (
-                        <div>
-                            <div style={{ marginBottom: 12 }}>
-                                <label style={{ fontWeight: 500 }}>Random Setting 1:</label>
-                                <input type="text" placeholder="Value" style={{ marginLeft: 8, border: '1px solid #ccc', borderRadius: 6, padding: '4px 8px' }} />
-                            </div>
-                            <div style={{ marginBottom: 12 }}>
-                                <label style={{ fontWeight: 500 }}>Random Setting 2:</label>
-                                <input type="number" placeholder="Number" style={{ marginLeft: 8, border: '1px solid #ccc', borderRadius: 6, padding: '4px 8px' }} />
                             </div>
                         </div>
                     )}
-                    <button style={{ marginTop: 18, background: '#2563eb', color: 'white', border: 'none', borderRadius: 8, padding: '8px 18px', fontWeight: 'bold', cursor: 'pointer' }} onClick={() => setSettingsModal({ show: false, widgetId: null })}>Save</button>
+
+                    {isFFT && (
+                        <div>
+                            <div style={{ marginBottom: 12 }}>
+                                <label style={{ fontWeight: 500 }}>FFT Size:</label>
+                                <select value={(settingsDraft && settingsDraft.fftSize) || 256} onChange={e => setSettingsDraft(prev => ({ ...(prev || {}), fftSize: parseInt(e.target.value, 10) }))} style={{ marginLeft: 8 }}>
+                                    <option value={128}>128</option>
+                                    <option value={256}>256</option>
+                                    <option value={512}>512</option>
+                                    <option value={1024}>1024</option>
+                                </select>
+                                <div style={{ marginTop: 6, fontSize: 12, color: '#6b7280' }}>Choose FFT window size (power of two). Larger sizes give finer frequency resolution but more latency.</div>
+                            </div>
+
+                            <div style={{ marginBottom: 12 }}>
+                                <label style={{ fontWeight: 500 }}>Window:</label>
+                                <select value={(settingsDraft && settingsDraft.window) || 'hann'} onChange={e => setSettingsDraft(prev => ({ ...(prev || {}), window: e.target.value }))} style={{ marginLeft: 8 }}>
+                                    <option value="none">None</option>
+                                    <option value="hann">Hann</option>
+                                    <option value="hamming">Hamming</option>
+                                    <option value="blackman">Blackman</option>
+                                </select>
+                                <div style={{ marginTop: 6, fontSize: 12, color: '#6b7280' }}>Windowing reduces spectral leakage. Hann is a good default for biomedical signals.</div>
+                            </div>
+
+                            <div style={{ marginBottom: 12 }}>
+                                <label style={{ fontWeight: 500 }}>Sampling Rate (Hz):</label>
+                                <select value={(settingsDraft && settingsDraft.samplingRate) || 250} onChange={e => setSettingsDraft(prev => ({ ...(prev || {}), samplingRate: parseInt(e.target.value, 10) }))} style={{ marginLeft: 8 }}>
+                                    <option value={250}>250</option>
+                                    <option value={500}>500</option>
+                                    <option value={1000}>1000</option>
+                                </select>
+                                <div style={{ marginTop: 6, fontSize: 12, color: '#6b7280' }}>{samplingRateHelp}</div>
+                            </div>
+                        </div>
+                    )}
+
+                    {isChannel && (
+                        <div>
+                            <div style={{ marginBottom: 12 }}>
+                                <label style={{ fontWeight: 500 }}>Channel Label:</label>
+                                <input value={(settingsDraft && settingsDraft.label) || opt.label} onChange={e => setSettingsDraft(prev => ({ ...(prev || {}), label: e.target.value }))} style={{ marginLeft: 8, border: '1px solid #ccc', borderRadius: 6, padding: '4px 8px' }} />
+                            </div>
+                        </div>
+                    )}
+
+                    {isFilter && (
+                        <div>
+                            <div style={{ marginBottom: 12 }}>
+                                <label style={{ fontWeight: 500 }}>Filter Type:</label>
+                                <select value={(settingsDraft && settingsDraft.exgType) || 1} onChange={e => setSettingsDraft(prev => ({ ...(prev || {}), kind: 'exg', exgType: parseInt(e.target.value, 10) }))} style={{ marginLeft: 8 }}>
+                                    <option value={1}>ECG</option>
+                                    <option value={2}>EOG</option>
+                                    <option value={3}>EEG</option>
+                                    <option value={4}>EMG</option>
+                                </select>
+                                <div style={{ marginTop: 6, fontSize: 12, color: '#6b7280' }}>
+                                    {exgHelpMapShort[(settingsDraft && settingsDraft.exgType) || (opt && (opt as any).config && (opt as any).config.exgType) || 1]}
+                                </div>
+                            </div>
+                            <div style={{ marginBottom: 12 }}>
+                                <label style={{ fontWeight: 500 }}>Sampling Rate:</label>
+                                <select value={(settingsDraft && settingsDraft.samplingRate) || 250} onChange={e => setSettingsDraft(prev => ({ ...(prev || {}), samplingRate: parseInt(e.target.value, 10) }))} style={{ marginLeft: 8 }}>
+                                    <option value={250}>250</option>
+                                    <option value={500}>500</option>
+                                </select>
+                                <div style={{ marginTop: 6, fontSize: 12, color: '#6b7280' }}>{samplingRateHelp}</div>
+                            </div>
+
+                            <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <label style={{ fontWeight: 500, marginRight: 8 }}>Notch Frequency:</label>
+                                <select value={(settingsDraft && settingsDraft.notchType) || 1} onChange={e => setSettingsDraft(prev => ({ ...(prev || {}), notchType: parseInt(e.target.value, 10) }))} style={{ marginLeft: 8 }}>
+                                    <option value={1}>50 Hz</option>
+                                    <option value={2}>60 Hz</option>
+                                </select>
+                                <div style={{ marginLeft: 10, fontSize: 12, color: '#6b7280' }}>{notchHelpShort}</div>
+                            </div>
+
+                            {/* Notch frequency is shown only for explicit Notch nodes (isNotch) - not selectable from Filter Kind */}
+                        </div>
+                    )}
+
+                    {!isSpiderPlot && !isChannel && !isFilter && (
+                        <div>
+                            <div style={{ marginBottom: 12 }}>
+                                <label style={{ fontWeight: 500 }}>Generic Option 1:</label>
+                                <input value={(settingsDraft && settingsDraft.opt1) || ''} onChange={e => setSettingsDraft(prev => ({ ...(prev || {}), opt1: e.target.value }))} style={{ marginLeft: 8, border: '1px solid #ccc', borderRadius: 6, padding: '4px 8px' }} />
+                            </div>
+                        </div>
+                    )}
+
+                    <button style={{ marginTop: 18, background: '#2563eb', color: 'white', border: 'none', borderRadius: 8, padding: '8px 18px', fontWeight: 'bold', cursor: 'pointer' }} onClick={saveSettings}>Save</button>
                 </div>
             </div>
         );
@@ -313,43 +467,85 @@ const Widgets: React.FC = () => {
     // using the drag-and-drop Applications palette into the flow modal.
     const [flowOptions, setFlowOptions] = useState(initialFlowOptions);
 
+    // Register/unregister filter nodes when flowOptions change
+    const prevFilterIdsRef = useRef<Set<string>>(new Set());
+    useEffect(() => {
+        try {
+            const currentFilters = new Set<string>();
+            for (const opt of flowOptions) {
+                const isFilter = opt.type === 'filter' || (typeof opt.id === 'string' && (opt.id as string).startsWith('filter-'));
+                if (isFilter) {
+                    currentFilters.add(opt.id);
+                    const cfg = (opt as any).config;
+                    if (cfg) {
+                        // register or update filter in registry
+                        try { filterRegistry.registerFilter(opt.id, cfg); } catch (e) { /* ignore */ }
+                    }
+                }
+            }
+            // unregister removed filters
+            const prev = prevFilterIdsRef.current;
+            for (const id of prev) {
+                if (!currentFilters.has(id)) {
+                    try { filterRegistry.unregisterFilter(id); } catch (e) { }
+                }
+            }
+            prevFilterIdsRef.current = currentFilters;
+        } catch (err) {
+            // ignore
+        }
+    }, [flowOptions]);
+
     // Handlers to increase/decrease visible channels in the combined widget
     const increaseChannels = useCallback(() => {
-        setChannelCount(prev => {
-            const next = Math.min(MAX_CHANNELS, prev + 1);
-            if (next > prev) {
-                setFlowOptions(prevOpts => {
-                    const others = prevOpts.filter(o => !o.id.startsWith('channel-'));
-                    const channels = Array.from({ length: next }).map((_, i) => ({ id: `channel-${i + 1}`, label: `Channel ${i + 1}`, type: 'channel', selected: true }));
-                    return [...channels, ...others];
-                });
-            }
-            return next;
+        // Find max existing channel number and add next
+        setFlowOptions(prevOpts => {
+            const channelIds = prevOpts.filter(o => typeof o.id === 'string' && o.id.startsWith('channel-'));
+            const nums = channelIds.map(o => {
+                const m = (o.id as string).match(/channel-(\d+)/i);
+                return m ? parseInt(m[1], 10) : 0;
+            });
+            const maxExisting = nums.length > 0 ? Math.max(...nums) : 0;
+            const next = Math.min(MAX_CHANNELS, maxExisting + 1);
+            if (next <= maxExisting) return prevOpts;
+            return [{ id: `channel-${next}`, label: `Channel ${next}`, type: 'channel', selected: true }, ...prevOpts];
         });
+        setChannelCount(prev => Math.min(MAX_CHANNELS, prev + 1));
     }, [MAX_CHANNELS]);
 
     const decreaseChannels = useCallback(() => {
-        setChannelCount(prev => {
-            const next = Math.max(1, prev - 1);
-            if (next < prev) {
-                // Remove channels > next from flowOptions and connections
-                setFlowOptions(prevOpts => prevOpts.filter(o => {
-                    if (!o.id.startsWith('channel-')) return true;
-                    const idx = Number(o.id.split('-')[1]);
-                    return idx <= next;
-                }));
-                setConnections(prevConn => prevConn.filter(c => {
-                    const fromIdx = c.from.startsWith('channel-') ? Number(c.from.split('-')[1]) : -1;
-                    const toIdx = c.to.startsWith('channel-') ? Number(c.to.split('-')[1]) : -1;
-                    if (fromIdx > next || toIdx > next) return false;
-                    return true;
-                }));
-            }
-            return next;
+        setFlowOptions(prevOpts => {
+            const channelIds = prevOpts.filter(o => typeof o.id === 'string' && o.id.startsWith('channel-'));
+            if (channelIds.length === 0) return prevOpts;
+            const nums = channelIds.map(o => {
+                const m = (o.id as string).match(/channel-(\d+)/i);
+                return m ? parseInt(m[1], 10) : 0;
+            });
+            const maxExisting = nums.length > 0 ? Math.max(...nums) : 0;
+            if (maxExisting <= 1) return prevOpts;
+            const removeId = `channel-${maxExisting}`;
+            // remove the highest-numbered channel and any connections to it
+            setConnections(prevConn => prevConn.filter(c => c.from !== removeId && c.to !== removeId));
+            setModalPositions(prev => {
+                const copy = { ...prev } as Record<string, { left: number, top: number }>;
+                if (copy[removeId]) delete copy[removeId];
+                return copy;
+            });
+            return prevOpts.filter(o => o.id !== removeId);
         });
+        setChannelCount(prev => Math.max(1, prev - 1));
     }, []);
     // Connections between widgets (user-created)
     const [connections, setConnections] = useState<Array<{ from: string, to: string }>>([]);
+    // Keep filter registry connections in sync
+    const filterRegistry = require('@/lib/filterRegistry').default;
+    useEffect(() => {
+        try {
+            filterRegistry.syncConnections(connections);
+        } catch (err) {
+            // ignore
+        }
+    }, [connections]);
     // Widget collection state with default basic widget (no make-connection widget)
     const [widgets, setWidgets] = useState<Widget[]>([
         {
@@ -1112,8 +1308,16 @@ const Widgets: React.FC = () => {
                             {/* Flowchart nodes as boxes */}
                             {/* Combined Channels box: visually represent all channels inside one widget but keep individual channel ids for connections */}
                             {(() => {
-                                // use `channelCount` state to determine how many channels to display
+                                // derive channel list from flowOptions so removing one channel doesn't renumber others
                                 const boxPos = modalPositions['channels-box'] || { left: 60, top: 80 };
+                                const channelOptions = flowOptions.filter(o => typeof o.id === 'string' && o.id.startsWith('channel-')).slice().sort((a, b) => {
+                                    const ma = (a.id as string).match(/channel-(\d+)/i);
+                                    const mb = (b.id as string).match(/channel-(\d+)/i);
+                                    const na = ma ? parseInt(ma[1], 10) : 0;
+                                    const nb = mb ? parseInt(mb[1], 10) : 0;
+                                    return na - nb;
+                                });
+                                const channelsCount = channelOptions.length;
                                 // Make channels widget visually similar to other widgets
                                 const boxWidth = 220; // match other widget widths (180-220)
                                 // Vertical layout: compute row height but shrink if needed so all channels fit without scroll
@@ -1139,12 +1343,12 @@ const Widgets: React.FC = () => {
                                 const maxAllowedHeight = Math.max(160, Math.min(900, containerHeight - 24));
                                 // Compute a rowHeight that will allow all channels to fit within maxAllowedHeight
                                 let rowHeight = desiredRowHeight;
-                                const desiredHeight = headerHeight + channelCount * rowHeight + 12;
+                                const desiredHeight = headerHeight + channelsCount * rowHeight + 12;
                                 if (desiredHeight > maxAllowedHeight) {
                                     // Reduce rowHeight to fit, but don't go below a reasonable minimum
                                     rowHeight = Math.max(10, Math.floor((maxAllowedHeight - headerHeight - 12) / channelCount));
                                 }
-                                const boxHeight = headerHeight + channelCount * rowHeight + 12;
+                                const boxHeight = headerHeight + channelsCount * rowHeight + 12;
                                 // effectiveTop will be computed after we decide single vs two-column height
                                 let effectiveTop = boxPos.top;
 
@@ -1182,6 +1386,38 @@ const Widgets: React.FC = () => {
                                         return copy;
                                     });
                                     showToast('Channels removed', 'info');
+                                };
+
+                                // Remove a specific channel by id (do not renumber remaining channels)
+                                const removeChannelAt = (channelId: string, e?: React.MouseEvent) => {
+                                    if (e) e.stopPropagation();
+                                    const id = channelId;
+                                    const m = (id || '').match(/channel-(\d+)/i);
+                                    const idx = m ? parseInt(m[1], 10) : null;
+
+                                    // Remove the flow option for this channel
+                                    setFlowOptions(prev => prev.filter(o => o.id !== id));
+
+                                    // Remove any connections referencing this channel
+                                    setConnections(prev => prev.filter(c => c.from !== id && c.to !== id));
+
+                                    // Remove modal position for this channel
+                                    setModalPositions(prev => {
+                                        const copy = { ...prev } as Record<string, { left: number, top: number }>;
+                                        if (copy[id]) delete copy[id];
+                                        return copy;
+                                    });
+
+                                    // Remove any dashboard widget directly bound to this channel id or matching channelIndex
+                                    setWidgets(prev => prev.filter(w => {
+                                        if (w.id === id) return false;
+                                        if (idx && (w as any).channelIndex && (w as any).channelIndex === idx) return false;
+                                        return true;
+                                    }));
+
+                                    // Decrease visible count (informational) but do not renumber existing ids
+                                    setChannelCount(prev => Math.max(0, prev - 1));
+                                    showToast(`${id} removed`, 'info');
                                 };
 
                                 // Decide layout (number of columns) dynamically based on available height and width
@@ -1257,7 +1493,7 @@ const Widgets: React.FC = () => {
                                                 </button>
                                                 <button
                                                     style={{ background: '#2563eb', color: 'white', border: 'none', borderRadius: 6, padding: '2px 6px', cursor: 'pointer', fontWeight: 600, fontSize: 11 }}
-                                                    onClick={e => { e.stopPropagation(); setSettingsModal({ show: true, widgetId: 'channels-box' }); }}
+                                                    onClick={e => { e.stopPropagation(); openSettings('channels-box'); }}
                                                     title="Settings"
                                                 >
                                                     ⚙
@@ -1267,33 +1503,43 @@ const Widgets: React.FC = () => {
 
                                         {/* Channels list: switch to 2-column compact layout when vertical space is tight */}
                                         {(() => {
-                                            const minSingleColHeight = headerHeight + channelCount * 12 + 12; // if below this, prefer multi-column
+                                            const minSingleColHeight = headerHeight + channelsCount * 12 + 12; // if below this, prefer multi-column
                                             const useTwoColumns = boxHeight < minSingleColHeight || rowHeight < 12;
                                             if (!useTwoColumns) {
                                                 // single column
                                                 return (
                                                     <div style={{ display: 'flex', flexDirection: 'column', gap: 2, paddingTop: 4, paddingBottom: 4, overflow: 'visible' }}>
-                                                        {Array.from({ length: channelCount }).map((_, idx) => {
-                                                            const n = idx + 1;
+                                                        {channelOptions.map((opt, idx) => {
+                                                            const id = opt.id as string;
+                                                            const m = id.match(/channel-(\d+)/i);
+                                                            const n = m ? parseInt(m[1], 10) : idx + 1;
                                                             const circleR = Math.max(2, Math.floor(rowHeight * 0.16));
                                                             const svgSize = Math.max(10, Math.floor(circleR * 2 + 2));
                                                             return (
-                                                                <div key={n} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: `3px 6px`, borderRadius: 4, height: rowHeight }}>
+                                                                <div key={id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: `3px 6px`, borderRadius: 4, height: rowHeight }}>
                                                                     <div style={{ width: svgSize, height: svgSize }} />
 
-                                                                    <span style={{ flex: 1, textAlign: 'center', fontSize: 11, fontWeight: 600 }}>Channel {n}</span>
+                                                                    <span style={{ flex: 1, textAlign: 'center', fontSize: 11, fontWeight: 600 }}>{opt.label}</span>
+
+                                                                    <button
+                                                                        onClick={e => removeChannelAt(id, e)}
+                                                                        title={`Remove ${opt.label}`}
+                                                                        style={{ marginRight: 6, background: '#ef4444', color: 'white', border: 'none', borderRadius: 6, padding: '2px 6px', cursor: 'pointer', fontWeight: 600, fontSize: 11 }}
+                                                                    >
+                                                                        ×
+                                                                    </button>
 
                                                                     <svg
-                                                                        data-widgetid={`channel-${n}`}
+                                                                        data-widgetid={id}
                                                                         data-handle="output"
                                                                         width={svgSize}
                                                                         height={svgSize}
-                                                                        style={{ cursor: 'crosshair', marginLeft: 6, marginRight: 0 }}
+                                                                        style={{ cursor: 'crosshair', marginLeft: 0, marginRight: 0 }}
                                                                             onMouseDown={e => {
                                                                                 e.stopPropagation();
-                                                                                const center = getCircleCenter(`channel-${n}`, 'output');
+                                                                                const center = getCircleCenter(id, 'output');
                                                                                 if (center) {
-                                                                                    setDrawingConnection({ from: `channel-${n}`, startX: center.x, startY: center.y });
+                                                                                    setDrawingConnection({ from: id, startX: center.x, startY: center.y });
                                                                                     setMousePos({ x: center.x, y: center.y });
                                                                                 } else {
                                                                                     // Fallback: compute viewport coords of the visual center, then convert to SVG-relative coords
@@ -1305,12 +1551,12 @@ const Widgets: React.FC = () => {
                                                                                         const viewportY = effectiveTop + headerHeight + idx * rowHeight + Math.floor(rowHeight / 2);
                                                                                         const startX = viewportX - svgRect.left;
                                                                                         const startY = viewportY - svgRect.top;
-                                                                                        setDrawingConnection({ from: `channel-${n}`, startX, startY });
+                                                                                        setDrawingConnection({ from: id, startX, startY });
                                                                                         setMousePos({ x: startX, y: startY });
                                                                                     } catch (err) {
                                                                                         const startX = boxPos.left + boxWidth;
                                                                                         const startY = effectiveTop + headerHeight + idx * rowHeight + Math.floor(rowHeight / 2);
-                                                                                        setDrawingConnection({ from: `channel-${n}`, startX, startY });
+                                                                                        setDrawingConnection({ from: id, startX, startY });
                                                                                         setMousePos({ x: startX, y: startY });
                                                                                     }
                                                                                 }
@@ -1327,35 +1573,38 @@ const Widgets: React.FC = () => {
 
                                             // two-column layout: render rows, each with up to 2 channels side-by-side
                                             const colsLayout = 2;
-                                            const rowsLayout = Math.ceil(channelCount / colsLayout);
+                                            const rowsLayout = Math.ceil(channelsCount / colsLayout);
                                             return (
                                                 <div style={{ display: 'flex', flexDirection: 'column', gap: 2, paddingTop: 4, paddingBottom: 4 }}>
                                                     {Array.from({ length: rowsLayout }).map((_, rowIdx) => {
-                                                        const leftIndex = rowIdx * colsLayout + 1;
-                                                        const rightIndex = leftIndex + 1;
+                                                        const leftIndex = rowIdx * colsLayout;
                                                         return (
                                                             <div key={rowIdx} style={{ display: 'flex', gap: 6, alignItems: 'center', height: rowHeight }}>
-                                                                {[leftIndex, rightIndex].map((n, posIdx) => {
-                                                                    if (n > channelCount) return <div key={posIdx} style={{ flex: 1 }} />;
+                                                                {[0, 1].map((posIdx) => {
+                                                                    const option = channelOptions[leftIndex + posIdx];
+                                                                    if (!option) return <div key={posIdx} style={{ flex: 1 }} />;
+                                                                    const id = option.id as string;
+                                                                    const m = id.match(/channel-(\d+)/i);
+                                                                    const n = m ? parseInt(m[1], 10) : leftIndex + posIdx + 1;
                                                                     const circleR = Math.max(2, Math.floor(rowHeight * 0.16));
                                                                     const svgSize = Math.max(10, Math.floor(circleR * 2 + 2));
                                                                     return (
-                                                                        <div key={n} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '2px 6px', borderRadius: 4, flex: 1 }}>
+                                                                        <div key={id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '2px 6px', borderRadius: 4, flex: 1 }}>
                                                                             <div style={{ width: svgSize, height: svgSize }} />
 
-                                                                            <span style={{ flex: 1, textAlign: 'center', fontSize: 11, fontWeight: 600 }}>Ch {n}</span>
+                                                                            <span style={{ flex: 1, textAlign: 'center', fontSize: 11, fontWeight: 600 }}>{option.label}</span>
 
                                                                             <svg
-                                                                                data-widgetid={`channel-${n}`}
+                                                                                data-widgetid={id}
                                                                                 data-handle="output"
                                                                                 width={svgSize}
                                                                                 height={svgSize}
                                                                                 style={{ cursor: 'crosshair', marginLeft: 6, marginRight: 0 }}
                                                                                 onMouseDown={e => {
                                                                                     e.stopPropagation();
-                                                                                    const center = getCircleCenter(`channel-${n}`, 'output');
+                                                                                    const center = getCircleCenter(id, 'output');
                                                                                     if (center) {
-                                                                                        setDrawingConnection({ from: `channel-${n}`, startX: center.x, startY: center.y });
+                                                                                        setDrawingConnection({ from: id, startX: center.x, startY: center.y });
                                                                                         setMousePos({ x: center.x, y: center.y });
                                                                                     } else {
                                                                                             // approximate start positions for left/right columns; convert viewport -> svg coords
@@ -1368,13 +1617,13 @@ const Widgets: React.FC = () => {
                                                                                                 const viewportY = effectiveTop + headerHeight + rowIdx * rowHeight + Math.floor(rowHeight / 2);
                                                                                                 const startX = viewportX - svgRect.left;
                                                                                                 const startY = viewportY - svgRect.top;
-                                                                                                setDrawingConnection({ from: `channel-${n}`, startX, startY });
+                                                                                                setDrawingConnection({ from: id, startX, startY });
                                                                                                 setMousePos({ x: startX, y: startY });
                                                                                             } catch (err) {
                                                                                                 const colOffset = posIdx === 0 ? 0 : boxWidth / 2;
                                                                                                 const startX = boxPos.left + colOffset + Math.floor(boxWidth / 2);
                                                                                                 const startY = effectiveTop + headerHeight + rowIdx * rowHeight + Math.floor(rowHeight / 2);
-                                                                                                setDrawingConnection({ from: `channel-${n}`, startX, startY });
+                                                                                                setDrawingConnection({ from: id, startX, startY });
                                                                                                 setMousePos({ x: startX, y: startY });
                                                                                             }
                                                                                         }
@@ -1382,6 +1631,13 @@ const Widgets: React.FC = () => {
                                                                             >
                                                                                 <circle cx={svgSize / 2} cy={svgSize / 2} r={circleR} fill="#fff" stroke="#2563eb" strokeWidth={1} />
                                                                             </svg>
+                                                                                    <button
+                                                                                        onClick={e => removeChannelAt(id, e)}
+                                                                                        title={`Remove ${option.label}`}
+                                                                                        style={{ marginRight: 6, background: '#ef4444', color: 'white', border: 'none', borderRadius: 6, padding: '2px 6px', cursor: 'pointer', fontWeight: 600, fontSize: 11 }}
+                                                                                    >
+                                                                                        ×
+                                                                                    </button>
                                                                         </div>
                                                                     );
                                                                 })}
@@ -1472,13 +1728,13 @@ const Widgets: React.FC = () => {
                                                     title="Settings"
                                                     onClick={e => {
                                                         e.stopPropagation();
-                                                        setSettingsModal({ show: true, widgetId });
+                                                        openSettings(widgetId);
                                                     }}
                                                 >
                                                     <svg width="14" height="14" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="7" stroke="white" strokeWidth="1.5" /><path d="M10 7V10L12 12" stroke="white" strokeWidth="1.5" strokeLinecap="round" /></svg>
                                                 </button>
                                                 <svg style={{ marginLeft: 8, marginRight: 0, zIndex: 100 }} width={14} height={14}>
-                                                        <svg
+                                                    <svg
                                                         data-widgetid={widgetId}
                                                         data-handle="output"
                                                         style={{ cursor: 'crosshair', marginLeft: 0, marginRight: 0, zIndex: 100 }}

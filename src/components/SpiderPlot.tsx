@@ -2,6 +2,7 @@
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { WebglPlot, WebglLine, ColorRGBA } from 'webgl-plot';
+import { useChannelData } from '@/lib/channelDataContext';
 
 interface SpiderPlotData {
     label: string;
@@ -53,16 +54,30 @@ const SpiderPlot: React.FC<SpiderPlotProps> = ({
     const [isInitialized, setIsInitialized] = useState(false);
     const [animatedData, setAnimatedData] = useState<SpiderPlotData[]>([]);
 
+    // --- live data worker integration -------------------------------------------------
+    // Configuration: choose channel index (0 = ch0) and FFT parameters
+    const CHANNEL_INDEX = 0; // change to 1 or 2 to select other channel
+    const FFT_SIZE = 256;
+    const SAMPLE_RATE = 500;
+    const SMOOTHER_WINDOW = 64; // worker-side smoother window
+    const POST_RATE_MS = 200; // post to worker at ~5Hz
+
+    const workerRef = useRef<Worker | null>(null);
+    const lastPostRef = useRef<number>(0);
+    const { samples } = useChannelData();
+    const hasLiveData = !!(samples && samples.length >= FFT_SIZE);
+    // -------------------------------------------------------------------------------
+
     // Constants
     const BRAINWAVE_LABELS = ['Alpha', 'Beta', 'Gamma', 'Theta', 'Delta'];
     const WEB_RADIUS = 0.7;
     const LABEL_OFFSET = 0.15;
 
-    // Generate default pentagon data with brainwave labels
+    // Generate default pentagon data with brainwave labels (zeroed when no live data)
     const generateDefaultData = useCallback((): SpiderPlotData[] => {
         return BRAINWAVE_LABELS.map((label) => ({
             label,
-            value: Math.round(30 + Math.random() * 70),
+            value: 0,
             maxValue: 100
         }));
     }, []);
@@ -88,33 +103,70 @@ const SpiderPlot: React.FC<SpiderPlotProps> = ({
             
             setAnimatedData(brainwaveData);
         } else {
+            // No incoming data: keep labels but zero values so the plot remains empty
             setAnimatedData(generateDefaultData());
         }
     }, [data, generateDefaultData]);
+    
+    // Demo animation removed: SpiderPlot will only show live/worker-driven data.
 
-    // Update data periodically for animation
+    // Create worker and wire messages -> update spider data
     useEffect(() => {
-        if (!animated) return;
+        try {
+            workerRef.current = new Worker(new URL('@/workers/bandpower.worker.ts', import.meta.url), { type: 'module' });
+        } catch (err) {
+            // If bundler doesn't support new URL, developer should copy worker to public and use new Worker('/workers/bandpower.worker.js')
+            console.error('Failed to create bandpower worker via URL import:', err);
+            workerRef.current = null;
+            return;
+        }
 
-        const updateData = () => {
-            setAnimatedData(prev => prev.map(item => ({
-                ...item,
-                value: Math.max(10, Math.min(100, 
-                    item.value + (Math.random() - 0.5) * 10 // Smooth random changes
-                ))
-            })));
+        const w = workerRef.current as Worker;
+        const handleMessage = (ev: MessageEvent<any>) => {
+            if (!ev?.data) return;
+            const smooth: Record<string, number> = ev.data.smooth || ev.data.relative || {};
+            const order = ['alpha', 'beta', 'gamma', 'theta', 'delta'];
+            const labels = ['Alpha', 'Beta', 'Gamma', 'Theta', 'Delta'];
+            const newData = order.map((band, idx) => ({
+                label: labels[idx],
+                value: Math.round((smooth[band] ?? 0) * 100),
+                maxValue: 100
+            }));
+            setAnimatedData(newData);
         };
 
-        dataUpdateRef.current = setInterval(updateData, 2000); // Update every 2 seconds
-
+        w.addEventListener('message', handleMessage);
         return () => {
-            if (dataUpdateRef.current) {
-                clearInterval(dataUpdateRef.current);
-            }
+            w.removeEventListener('message', handleMessage);
+            try { w.terminate(); } catch (e) { /* ignore */ }
+            workerRef.current = null;
         };
-    }, [animated]);
+    }, []);
 
-    const plotData = animatedData.length > 0 ? animatedData : generateDefaultData();
+    // Post recent samples buffer to worker at a throttled rate
+    useEffect(() => {
+        if (!workerRef.current) return;
+        if (!samples || samples.length < FFT_SIZE) return;
+
+        const now = Date.now();
+        if (now - lastPostRef.current < POST_RATE_MS) return;
+
+        const start = Math.max(0, samples.length - FFT_SIZE);
+        const slice = samples.slice(start, start + FFT_SIZE);
+        const eeg = slice.map(s => {
+            const val = (CHANNEL_INDEX === 0 ? s.ch0 : (CHANNEL_INDEX === 1 ? s.ch1 : s.ch2));
+            return typeof val === 'number' ? val : 0;
+        });
+
+        try {
+            workerRef.current.postMessage({ eeg, sampleRate: SAMPLE_RATE, fftSize: FFT_SIZE, smootherWindow: SMOOTHER_WINDOW });
+            lastPostRef.current = now;
+        } catch (err) {
+            console.error('Failed to post to bandpower worker', err);
+        }
+    }, [samples]);
+
+    const plotData = animatedData;
 
     // Convert hex color to ColorRGBA
     const hexToColorRGBA = (hex: string, alpha: number = 1.0): ColorRGBA => {

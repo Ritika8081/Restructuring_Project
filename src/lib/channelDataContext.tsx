@@ -1,6 +1,7 @@
 
 'use client';
 import React, { createContext, useContext, useState, useCallback } from 'react';
+import filterRegistry from '@/lib/filterRegistry';
 
 export type ChannelSample = {
   ch0: number;
@@ -22,6 +23,12 @@ export const ChannelDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
   const addSample = useCallback((sample: ChannelSample) => {
     setSamples(prev => [...prev.slice(-511), sample]); // keep last 512 samples
+    try {
+      // Notify filter registry so any registered filters can process this raw sample
+      filterRegistry.onRawSample(sample as any);
+    } catch (err) {
+      // swallow
+    }
   }, []);
 
   const clearSamples = useCallback(() => {
