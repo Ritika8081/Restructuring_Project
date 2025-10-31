@@ -12,7 +12,6 @@ interface WidgetPaletteProps {
 }
 
 const widgetTypes = [
-    { type: 'basic', icon: '📈', name: 'Signal', description: 'Real-time data' },
     { type: 'spiderplot', icon: '🎯', name: 'Radar', description: 'Multi-axis view' },
     { type: 'FFTGraph', icon: '〰️', name: 'FFT', description: 'Frequency analysis' },
     { type: 'bargraph', icon: '📊', name: 'Chart', description: 'Statistics' },

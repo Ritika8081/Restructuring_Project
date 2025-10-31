@@ -52,7 +52,7 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
         } catch (err) {
             // fallthrough
         }
-        return [{ id: 'ch1', name: 'CH 1', color: '#10B981', visible: true }];
+    return [{ id: 'ch0', name: 'CH 1', color: '#10B981', visible: true }];
     });
 
     // If the widget prop changes (for example arranger sets widget.channelIndex), update
@@ -65,7 +65,8 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
                 if (typeof propIndex === 'number' && propIndex >= 1) {
                     const idx = Math.max(1, Math.floor(propIndex));
                     const color = colors[(idx - 1) % colors.length];
-                    setWidgetChannels([{ id: `ch${idx}`, name: `CH ${idx}`, color, visible: true }]);
+                    // zero-based channel id (ch0, ch1, ...)
+                    setWidgetChannels([{ id: `ch${idx - 1}`, name: `CH ${idx}`, color, visible: true }]);
                     return;
                 }
                 // Fallback to parse id
@@ -73,7 +74,8 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
                     const m = widget.id.match(/channel-(\d+)/i);
                     const idx = m ? Math.max(1, parseInt(m[1], 10)) : 1;
                     const color = colors[(idx - 1) % colors.length];
-                    setWidgetChannels([{ id: `ch${idx}`, name: `CH ${idx}`, color, visible: true }]);
+                    // zero-based channel id (ch0, ch1, ...)
+                    setWidgetChannels([{ id: `ch${idx - 1}`, name: `CH ${idx}`, color, visible: true }]);
                     return;
                 }
             }
@@ -177,7 +179,7 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
      */
     const getWidgetTitle = useCallback((type: string, width: number) => {
         const titles = {
-            basic: width >= 3 ? 'Real-time Signal' : 'Signal',
+            basic: 'Plot',
             spiderplot: width >= 4 ? 'Spider Plot' : 'Radar',
             FFTGraph: width >= 3 ? 'FFT Spectrum' : 'FFT',
             bargraph: width >= 3 ? 'Statistics' : 'Stats',
@@ -196,6 +198,50 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
         return '';
     }, [widget.type, widgetChannels]);
 
+    // Consider this a channel-sourced widget when it either has an explicit channelIndex
+    // (created by the arranger) or its id is a channel id like 'channel-1'. For those we
+    // want the header and graph controls to match Channel widgets.
+    const isChannelWidget = useMemo(() => {
+        if ((widget as any).channelIndex && typeof (widget as any).channelIndex === 'number') return true;
+        if (typeof widget.id === 'string' && widget.id.startsWith('channel-')) return true;
+        return false;
+    }, [widget]);
+
+    // Hide the small header input/output circles for 'basic' (Plot) widgets in the
+    // dashboard — those circles are only visual markers for channel-sourced widgets
+    // (e.g., channel-#). Keep isChannelWidget logic for internal behavior (controls,
+    // legend, and data binding) but don't render the header circles for 'basic'.
+    const showHeaderCircles = useMemo(() => {
+        return isChannelWidget && widget.type !== 'basic';
+    }, [isChannelWidget, widget.type]);
+
+    // Auto-expand widget size when multiple channels are assigned so the UI has room.
+    useEffect(() => {
+        if (!onUpdateWidget) return;
+        const chCount = widgetChannels.length;
+        if (chCount <= 1) return;
+        // Compute desired minimum grid width/height for multi-channel plots
+        const extraPerChannel = 1; // grid cells per extra channel
+        const baseMinWidth = 6;
+        const desiredWidth = Math.max(widget.width, baseMinWidth + (chCount - 1) * extraPerChannel);
+        const desiredHeight = Math.max(widget.height, 5);
+        if (desiredWidth !== widget.width || desiredHeight !== widget.height) {
+            // Try to update widget size, avoid collisions
+            const wouldCollide = checkCollisionAtPosition(
+                widgets.filter(w => w.id !== widget.id),
+                widget.id,
+                widget.x,
+                widget.y,
+                desiredWidth,
+                desiredHeight,
+                gridSettings
+            );
+            if (!wouldCollide) {
+                onUpdateWidget(widget.id, { width: desiredWidth, height: desiredHeight });
+            }
+        }
+    }, [widgetChannels.length]);
+
     // Calculate available space for widget content
     const availableWidth = widget.width * gridSettings.cellWidth - 4;
     const availableHeight = widget.height * gridSettings.cellHeight - 52;
@@ -209,17 +255,38 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
             {/* Widget Header */}
             <div className="flex items-center justify-between p-3 border-b border-gray-100 relative z-20">
                 <div className="flex items-center gap-2 flex-1">
+                    {/* Input circle (visual only) */}
+                    {showHeaderCircles && (
+                        <svg width={14} height={14} style={{ marginRight: 6 }}>
+                            <circle cx={7} cy={7} r={5} fill="#fff" stroke={widgetChannels[0]?.color || '#10B981'} strokeWidth={1.5} />
+                        </svg>
+                    )}
+
                     <h3 className="text-sm font-medium text-gray-700 flex items-center gap-2">
-                        {getWidgetTitle(widget.type, widget.width)}
-                        <span className="text-xs text-gray-500">
-                            {getChannelInfo()}
-                        </span>
+                        {isChannelWidget ? (
+                            <>
+                                <span style={{ width: 10, height: 10, borderRadius: 6, background: widgetChannels[0]?.color || '#10B981', display: 'inline-block', boxShadow: '0 0 0 2px rgba(0,0,0,0.03)' }} />
+                                <span>{widgetChannels[0]?.name || getWidgetTitle(widget.type, widget.width)}</span>
+                            </>
+                        ) : (
+                            <>
+                                {getWidgetTitle(widget.type, widget.width)}
+                                <span className="text-xs text-gray-500">{getChannelInfo()}</span>
+                            </>
+                        )}
                     </h3>
 
                     {/* Channel controls removed: channel configuration is managed from Flow modal only */}
                 </div>
 
-                <div className="flex items-center gap-1 relative z-30">
+                <div className="flex items-center gap-2 relative z-30">
+                    {/* Output circle (visual only) */}
+                    {showHeaderCircles && (
+                        <svg width={14} height={14} style={{ marginRight: 6 }}>
+                            <circle cx={7} cy={7} r={5} fill="#fff" stroke="#2563eb" strokeWidth={1.5} />
+                        </svg>
+                    )}
+
                     <span className="text-xs text-gray-400">{`${widget.width}×${widget.height}`}</span>
                     <button
                         onClick={handleRemove}
@@ -361,8 +428,8 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
                                 sampleRate={60}
                                 timeWindow={8}
                                 onSizeRequest={handleSizeRequest}
-                                showChannelControls={false}
-                                showLegend={false}
+                                showChannelControls={isChannelWidget}
+                                showLegend={isChannelWidget}
                             />
                         </div>
                     ) : children ? (
