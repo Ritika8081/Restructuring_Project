@@ -272,18 +272,20 @@ const BasicGraphRealtime: React.FC<BasicGraphRealtimeProps> = (props) => {
     };
 
     samples.slice(-bufferSize).forEach(sample => {
-      if (channels.length > 0) {
-        // Using raw samples (no preprocessing)
-        if (channels[0] && channels[0].visible && (sample as any).ch0 !== undefined) {
-          pushData(channels[0].id, normalize((sample as any).ch0));
-        }
-
-        if (channels[1] && channels[1].visible && (sample as any).ch1 !== undefined) {
-          pushData(channels[1].id, normalize((sample as any).ch1));
-        }
-
-        if (channels[2] && channels[2].visible && (sample as any).ch2 !== undefined) {
-          pushData(channels[2].id, normalize((sample as any).ch2));
+      // For robustness, map channels by their `id` (ch0, ch1, ...) instead of
+      // assuming channels[0] -> ch0 etc. This prevents multiple widgets from
+      // accidentally plotting the same channel when order or contents vary.
+      for (const ch of channels) {
+        try {
+          if (!ch || !ch.visible) continue;
+          const m = String(ch.id).match(/ch(\d+)/i);
+          if (!m) continue;
+          const idx = parseInt(m[1], 10);
+          const key = `ch${idx}`;
+          if ((sample as any)[key] === undefined) continue;
+          pushData(ch.id, normalize((sample as any)[key] as number));
+        } catch (err) {
+          // ignore per-channel errors
         }
       }
     });

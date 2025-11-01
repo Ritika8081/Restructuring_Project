@@ -1,5 +1,5 @@
  'use client';
-import React, { createContext, useContext, useState, useCallback, useRef } from 'react';
+import React, { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react';
 
 /**
  * src/lib/channelDataContext.tsx
@@ -38,6 +38,10 @@ export const ChannelDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
   // Track which channel indices (0-based) are currently present in the flowchart.
   // We keep this in a ref for cheap lookups inside addSample.
   const registeredChannelIndices = useRef<Set<number>>(new Set());
+  // Batch incoming samples to avoid rapid setState loops when device sends
+  // many samples quickly. We collect samples in a ref and flush on rAF.
+  const pendingSamplesRef = useRef<any[]>([]);
+  const rafHandleRef = useRef<number | null>(null);
 
   const setRegisteredChannels = useCallback((ids: string[]) => {
     const s = new Set<number>();
@@ -56,28 +60,43 @@ export const ChannelDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
   }, []);
 
   const addSample = useCallback((sample: ChannelSample) => {
-    // Only keep channel values for indices that are registered in the flowchart.
-    // This routes device data only to channel nodes that exist in the flow.
     try {
       const processed: any = {};
-      // We expect ch0..chN keys. Normalize for first 16 channels conservatively.
       for (let i = 0; i < 16; i++) {
-        const key = `ch${i}` as keyof ChannelSample;
+        const key = `ch${i}`;
         if ((sample as any)[key] === undefined) break;
         processed[key] = registeredChannelIndices.current.has(i) ? (sample as any)[key] : 0;
       }
-      // Keep timestamp if present
       if ((sample as any).timestamp) processed.timestamp = (sample as any).timestamp;
 
-      // Debug: show which channel indices are registered and what will be stored
+      // Queue sample for batched flush on the next animation frame
+      pendingSamplesRef.current.push(processed as ChannelSample);
+
+      // Debug: lightweight log
       try {
         const regs = Array.from(registeredChannelIndices.current).sort((a,b) => a-b);
-        console.debug('[ChannelData] addSample', { registeredIndices: regs, incoming: sample, stored: processed });
-      } catch (err) {
-        // swallow debug errors
-      }
+        console.debug('[ChannelData] queueSample', { registeredIndices: regs, incoming: sample });
+      } catch (err) {}
 
-      setSamples(prev => [...prev.slice(-511), processed as ChannelSample]); // keep last 512 samples
+      if (rafHandleRef.current == null) {
+        rafHandleRef.current = requestAnimationFrame(() => {
+          try {
+            const toFlush = pendingSamplesRef.current.splice(0);
+            if (toFlush.length === 0) return;
+            setSamples(prev => {
+              const sliced = prev.slice(-511);
+              const merged = [...sliced, ...toFlush];
+              return merged.slice(-512);
+            });
+          } catch (err) {
+            // swallow
+          } finally {
+            if (rafHandleRef.current) {
+              rafHandleRef.current = null;
+            }
+          }
+        });
+      }
     } catch (err) {
       // swallow
     }
@@ -87,12 +106,25 @@ export const ChannelDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
     setSamples([]);
   }, []);
 
+  // Cleanup pending RAF when provider unmounts
+  useEffect(() => {
+    return () => {
+      try {
+        if (rafHandleRef.current) cancelAnimationFrame(rafHandleRef.current);
+      } catch (err) {}
+    };
+  }, []);
+
   return (
     <ChannelDataContext.Provider value={{ samples, addSample, clearSamples, setRegisteredChannels }}>
       {children}
     </ChannelDataContext.Provider>
   );
 };
+
+// Cleanup any pending rAF on unmount — (not strictly required but tidy)
+// Note: the provider is long-lived in our app, but add for completeness.
+// (We can't use hooks outside component, so nothing else required.)
 
 export const useChannelData = () => {
   const ctx = useContext(ChannelDataContext);
