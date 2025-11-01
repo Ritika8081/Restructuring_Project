@@ -37,6 +37,11 @@ export default function BleConnection() {
   // Refs for functionality
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  // Buffer parsed samples to avoid updating React state on every notification.
+  const rawBufferRef = useRef<{ch0: number, ch1: number, ch2: number, counter?: number}[]>([])
+  const flushBufferTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const lastPacketOkRef = useRef<number>(0)
+  const lastPacketVerboseRef = useRef<number>(0)
   const sampleIndex = useRef(0)
   const totalSamples = useRef(0)
   // Track sample counters for drop-detection and ordering
@@ -102,14 +107,14 @@ export default function BleConnection() {
         }
         prevSampleCounter.current = counter
 
-        // Bookkeeping
-        samplesReceived.current += 1
-        sampleIndex.current = (sampleIndex.current + 1) % 1000
-        totalSamples.current += 1
+  // Bookkeeping
+  samplesReceived.current += 1
+  sampleIndex.current = (sampleIndex.current + 1) % 1000
+  totalSamples.current += 1
 
-        // Forward to channel context and local displays
-        addSample({ ch0, ch1, ch2, timestamp: Date.now() });
-        return { ch0, ch1, ch2, counter }
+  // Forward to channel context and local displays (include counter)
+  addSample({ ch0, ch1, ch2, timestamp: Date.now(), counter });
+  return { ch0, ch1, ch2, counter }
       } catch (err) {
         console.error('Error parsing BLE DataView', err)
         return null
@@ -121,12 +126,15 @@ export default function BleConnection() {
     if (len === NEW_PACKET_LEN || (len % SINGLE_SAMPLE_LEN) === 0) {
       // Parse as one or more full samples
       for (let i = 0; i < len; i += SINGLE_SAMPLE_LEN) {
-        const view = new DataView(value.buffer.slice(i, i + SINGLE_SAMPLE_LEN))
+        // Use the DataView's byteOffset to avoid misalignment when the
+        // underlying ArrayBuffer is shared or when the DataView does not
+        // start at offset 0.
+        const view = new DataView(value.buffer, (value.byteOffset || 0) + i, SINGLE_SAMPLE_LEN)
         const parsed = processView(view)
         if (parsed) newRawValues.push({ ch0: parsed.ch0, ch1: parsed.ch1, ch2: parsed.ch2, counter: parsed.counter })
       }
     } else if (len === SINGLE_SAMPLE_LEN) {
-      const view = new DataView(value.buffer.slice(0, SINGLE_SAMPLE_LEN))
+      const view = new DataView(value.buffer, value.byteOffset || 0, SINGLE_SAMPLE_LEN)
       const parsed = processView(view)
       if (parsed) newRawValues.push({ ch0: parsed.ch0, ch1: parsed.ch1, ch2: parsed.ch2, counter: parsed.counter })
     } else {
@@ -134,26 +142,92 @@ export default function BleConnection() {
     }
 
     if (newRawValues.length > 0) {
-      // Update raw data display
-      setRawData(prev => [...prev, ...newRawValues.map(v => ({ ch0: v.ch0, ch1: v.ch1, ch2: v.ch2 }))])
-
-      // Update received data log (brief entry)
-      const timestamp = new Date().toLocaleTimeString()
-      setReceivedData(prev => {
-        const newEntry = `${timestamp}: Packet parsed (${newRawValues.length} samples) - Total: ${totalSamples.current}`
-        return [...prev, newEntry]
-      })
-
-      // Optionally log per-packet counters for debugging (less noisy)
-      if (newRawValues.length > 0) {
-        try {
-          // Log every parsed sample in this packet so you can see the
-          // counter and channel values for each sample (verbose).
-          const lines = newRawValues.map(v => `cnt=${v.counter} CH0=${v.ch0} CH1=${v.ch1} CH2=${v.ch2}`)
-          // console.log(`BLE packet samples (${newRawValues.length}):\n` + lines.join('\n'))
-        } catch (err) {
-          // ignore logging errors
+      // Rate-limited verbose dump of parsed packet contents (useful for debugging)
+      try {
+        const now = Date.now()
+        if (now - lastPacketVerboseRef.current > 1000) { // at most once per second
+          lastPacketVerboseRef.current = now
+          // Print a concise sample of the packet: counter and channel values
+          const samplePreview = newRawValues.slice(0, 8).map(v => ({ cnt: v.counter, ch0: v.ch0, ch1: v.ch1, ch2: v.ch2 }))
+          console.info('BLE parsed packet samples (preview):', samplePreview, 'totalSamplesInPacket=', newRawValues.length)
         }
+      } catch (err) {}
+      // Buffer parsed samples and flush to React state at a lower rate to
+      // avoid render storms when notifications arrive rapidly.
+      rawBufferRef.current.push(...newRawValues)
+
+      // Schedule a flush (coalesced) if not already scheduled.
+      if (flushBufferTimeoutRef.current == null) {
+        flushBufferTimeoutRef.current = setTimeout(() => {
+          try {
+            const buf = rawBufferRef.current.splice(0)
+            if (buf.length > 0) {
+              // Update raw data display (trim older entries)
+              setRawData(prev => {
+                const merged = [...prev, ...buf.map(v => ({ ch0: v.ch0, ch1: v.ch1, ch2: v.ch2 }))]
+                return merged.slice(-1000)
+              })
+
+              // Update received data log with a brief summary
+              const timestamp = new Date().toLocaleTimeString()
+              setReceivedData(prev => {
+                const newEntry = `${timestamp}: Packet parsed (buffered ${buf.length} samples) - Total: ${totalSamples.current}`
+                return [...prev, newEntry].slice(-200)
+              })
+            }
+          } finally {
+            if (flushBufferTimeoutRef.current) {
+              clearTimeout(flushBufferTimeoutRef.current)
+              flushBufferTimeoutRef.current = null
+            }
+          }
+        }, 200)
+      }
+
+      // Per-packet counter diagnostics: compute counters array and check
+      // whether counters inside the packet are sequential. This helps
+      // detect whether counter jumps are due to lost packets or parsing
+      // misalignment.
+      try {
+        const counters = newRawValues.map(v => (v.counter === undefined ? null : v.counter as number))
+        const first = counters[0]
+        const last = counters[counters.length - 1]
+        if (first !== null && last !== null) {
+          // Log a concise packet summary when packet contains multiple samples
+            if (counters.length > 1) {
+            // Check sequentiality within the packet
+            const nonSeq: number[] = []
+            for (let i = 1; i < counters.length; i++) {
+              const prev = counters[i - 1] as number
+              const cur = counters[i] as number
+              const d = (cur - prev + 256) % 256
+              if (d !== 1) nonSeq.push(i)
+            }
+              if (nonSeq.length > 0) {
+                console.warn(`BLE packet counter non-sequential at indices: ${nonSeq.join(', ')}; packetCnts=[${counters.join(',')}]`)
+              } else {
+                // Rate-limit positive packet confirmation to reduce noise
+                const now = Date.now()
+                if (now - lastPacketOkRef.current > 5000) {
+                  console.info(`BLE packet parsed OK: samples=${counters.length} first=${first} last=${last}`)
+                  lastPacketOkRef.current = now
+                } else {
+                  console.debug(`BLE packet parsed: samples=${counters.length} first=${first} last=${last}`)
+                }
+              }
+          } else {
+            // Single-sample packet — lightweight debug
+            const now = Date.now()
+            if (now - lastPacketOkRef.current > 5000) {
+              console.info(`BLE single sample cnt=${first}`)
+              lastPacketOkRef.current = now
+            } else {
+              console.debug(`BLE single sample cnt=${first}`)
+            }
+          }
+        }
+      } catch (err) {
+        // ignore logging/diagnostic errors
       }
     }
   }

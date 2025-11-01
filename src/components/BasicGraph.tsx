@@ -1,5 +1,6 @@
 "use client";
 import React, { useEffect, useRef, useState, useCallback } from 'react';
+import { useChannelData } from '@/lib/channelDataContext';
 /**
  * src/components/BasicGraph.tsx
  *
@@ -43,6 +44,8 @@ interface BasicGraphRealtimeProps {
   deviceSamples?: Array<{ [key: string]: number | undefined; timestamp?: number }>;
   // Optional instance id for runtime debugging (widget id)
   instanceId?: string;
+  /** Number of samples to apply to buffers each animation frame (per channel). */
+  samplesPerFrame?: number;
 }
 
 const DEFAULT_COLORS = [
@@ -64,6 +67,7 @@ const BasicGraphRealtime: React.FC<BasicGraphRealtimeProps> = (props) => {
     showLegend = false,
     sampleRate = 60,
     timeWindow = 8,
+  samplesPerFrame = bufferSize,
     onChannelsChange,
     showChannelControls = false,
     onSizeRequest,
@@ -75,6 +79,8 @@ const BasicGraphRealtime: React.FC<BasicGraphRealtimeProps> = (props) => {
   const linesRef = useRef<Map<string, WebglLine>>(new Map());
   const animationRef = useRef<number | null>(null);
   const dataBuffers = useRef<Map<string, number[]>>(new Map());
+  // Pending per-channel sample queues (filled by subscribe callback)
+  const pendingPerChannel = useRef<Map<string, number[]>>(new Map());
   
   // Update internal channels when external channels change
   useEffect(() => {
@@ -205,7 +211,32 @@ const BasicGraphRealtime: React.FC<BasicGraphRealtimeProps> = (props) => {
     // Start animation loop
     const render = () => {
       animationRef.current = requestAnimationFrame(render);
-      
+
+      // Drain pending samples per channel up to samplesPerFrame and update buffers
+      visibleChannels.forEach((channel) => {
+        try {
+          const pending = pendingPerChannel.current.get(channel.id) || [];
+          if (pending.length > 0) {
+            const take = Math.min(pending.length, samplesPerFrame);
+            const toApply = pending.splice(0, take);
+
+            const buffer = dataBuffers.current.get(channel.id) || new Array(bufferSize).fill(0);
+            buffer.push(...toApply);
+            if (buffer.length > bufferSize) buffer.splice(0, buffer.length - bufferSize);
+            dataBuffers.current.set(channel.id, buffer);
+
+            const line = linesRef.current.get(channel.id);
+            if (line) {
+              for (let i = 0; i < line.numPoints; i++) {
+                line.setY(i, buffer[i] || 0);
+              }
+            }
+          }
+        } catch (err) {
+          // swallow per-channel errors
+        }
+      });
+
       // Render each visible channel's plot
       visibleChannels.forEach((channel) => {
         const plot = plotRefs.current.get(channel.id);
@@ -249,47 +280,64 @@ const BasicGraphRealtime: React.FC<BasicGraphRealtimeProps> = (props) => {
     }
   };
 
-  // Simulated multi-channel data stream 
-  // Live device data stream from context
+  // Subscribe to ChannelDataProvider flushed batches when allowed.
+  const { subscribe } = useChannelData();
   useEffect(() => {
-    try {
-      console.debug(`[BasicGraph${instanceId ? `:${instanceId}` : ''}] deviceSamples effect`, {
-        allowDeviceSamples,
-        deviceSamplesLength: deviceSamples ? deviceSamples.length : 0,
-        channelsCount: channels.length,
-      });
-    } catch (err) {}
-    // Do not read from any global context here. Device samples must be passed
-    // in via the `deviceSamples` prop by the parent. If not present, do nothing.
     if (!allowDeviceSamples) return;
-    const samples = deviceSamples;
-    if (!samples || samples.length === 0) return;
 
-    // Normalize device data before plotting
+    // Normalizer
     const normalize = (value: number) => {
       if (value === undefined || value === null) return 0;
-      return Math.max(-1, Math.min(1, value));
+      let v = Number(value);
+      // Heuristic: if incoming samples are large integers (ADC-like),
+      // convert to normalized -1..1 assuming a 12-bit center at 2048.
+      // Otherwise assume already normalized.
+      if (Math.abs(v) > 2) {
+        // try center at 2048 (device may send unsigned-like values)
+        v = (v - 2048) / 2048;
+      }
+      // clamp
+      if (!isFinite(v) || isNaN(v)) v = 0;
+      return Math.max(-1, Math.min(1, v));
+    };
+    // Enqueue flushed samples into per-channel pending queues. The animation
+    // loop will drain up to `samplesPerFrame` items per channel each frame.
+    const cb = (flushedSamples: Array<{ [key: string]: number | undefined; timestamp?: number }>) => {
+      try {
+        for (const sample of flushedSamples) {
+          for (const ch of channels) {
+            try {
+              if (!ch || !ch.visible) continue;
+              const m = String(ch.id).match(/ch(\d+)/i);
+              if (!m) continue;
+              const parsed = parseInt(m[1], 10);
+              // Try both 0-based and 1-based channel id conventions.
+              const candidates = [`ch${parsed}`, `ch${Math.max(0, parsed - 1)}`, `ch${parsed + 1}`];
+              let selectedKey: string | null = null;
+              for (const k of candidates) {
+                if ((sample as any)[k] !== undefined) { selectedKey = k; break; }
+              }
+              if (!selectedKey) continue;
+              const v = normalize((sample as any)[selectedKey] as number);
+              const q = pendingPerChannel.current.get(ch.id) || [];
+              q.push(v);
+              // Keep the queue bounded to avoid unbounded memory growth
+              if (q.length > bufferSize * 4) q.splice(0, q.length - bufferSize * 4);
+              pendingPerChannel.current.set(ch.id, q);
+            } catch (err) {
+              // ignore per-sample errors
+            }
+          }
+        }
+      } catch (err) {
+        // swallow
+      }
     };
 
-    samples.slice(-bufferSize).forEach(sample => {
-      // For robustness, map channels by their `id` (ch0, ch1, ...) instead of
-      // assuming channels[0] -> ch0 etc. This prevents multiple widgets from
-      // accidentally plotting the same channel when order or contents vary.
-      for (const ch of channels) {
-        try {
-          if (!ch || !ch.visible) continue;
-          const m = String(ch.id).match(/ch(\d+)/i);
-          if (!m) continue;
-          const idx = parseInt(m[1], 10);
-          const key = `ch${idx}`;
-          if ((sample as any)[key] === undefined) continue;
-          pushData(ch.id, normalize((sample as any)[key] as number));
-        } catch (err) {
-          // ignore per-channel errors
-        }
-      }
-    });
-  }, [deviceSamples, channels, bufferSize, allowDeviceSamples]);
+    if (!subscribe) return () => {};
+    const unsub = subscribe(cb);
+    return () => { unsub(); };
+  }, [allowDeviceSamples, subscribe, channels, bufferSize]);
 
   // If device samples are disabled for this instance, clear any existing
   // buffers so the plot goes blank instead of showing stale data.

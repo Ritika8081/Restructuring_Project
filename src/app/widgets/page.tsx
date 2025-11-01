@@ -408,9 +408,8 @@ const Widgets: React.FC = () => {
     const [flowOptions, setFlowOptions] = useState(initialFlowOptions);
 
     // Register which channel flow nodes are present so the channel data context
-    // will route incoming samples only to the active channels. Also grab the
-    // samples buffer here for debug/inspection when connections change.
-    const { setRegisteredChannels, samples } = useChannelData();
+    // will route incoming samples only to the active channels.
+    const { setRegisteredChannels } = useChannelData();
     useEffect(() => {
         const channelIds = flowOptions.filter(o => typeof o.id === 'string' && o.id.startsWith('channel-')).map(o => o.id as string);
         try {
@@ -480,24 +479,9 @@ const Widgets: React.FC = () => {
             console.debug('[FlowDebug] plotInstanceIds', plotInstanceIds);
             console.debug('[FlowDebug] channel->plot mappings', channelToPlot);
 
-            // For each channel->plot mapping, print recent samples for the mapped channel
-            try {
-                channelToPlot.forEach(mapping => {
-                    try {
-                        const from = String(mapping.from);
-                        const m = from.match(/channel-(\d+)/i);
-                        if (!m) return;
-                        const idx = Math.max(1, parseInt(m[1], 10));
-                        const chKey = `ch${idx - 1}`;
-                        const recent = (samples || []).slice(-8).map(s => ({ ts: s.timestamp, v: (s as any)[chKey] }));
-                        console.debug('[FlowDebug] mapped-samples', { mapping, chKey, recent });
-                    } catch (err) {
-                        // ignore per-mapping errors
-                    }
-                });
-            } catch (err) {
-                // swallow
-            }
+            // (mapped-samples logging removed to avoid re-rendering the Flow
+            // component on every incoming device sample; use ChannelData logs
+            // instead to inspect live sample values)
         } catch (err) {
             // swallow
         }
