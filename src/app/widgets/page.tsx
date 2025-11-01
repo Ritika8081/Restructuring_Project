@@ -87,25 +87,17 @@ const Widgets: React.FC = () => {
     };
 
     // Settings modal content (render per-node-type)
+    const samplingRateHelp = 'Sampling rate used to interpret FFT data; choose the rate that matches your device input (e.g. 250, 500, 1000 Hz).';
     const renderSettingsModal = () => {
         if (!settingsModal.show || !settingsModal.widgetId) return null;
         const opt = flowOptions.find(o => o.id === settingsModal.widgetId);
         if (!opt) return null;
-        const type = opt.type || (opt.id && String(opt.id).startsWith('filter-') ? 'filter' : 'unknown');
+        const type = opt.type || 'unknown';
         const isSpiderPlot = type === 'spiderplot';
         const isChannel = type === 'channel';
-    const isFFT = type === 'fft' || String(opt.id).startsWith('fft-');
-        const isFilter = type === 'filter' || String(opt.id).startsWith('filter-') || String(type).includes('filter');
+        const isFFT = type === 'fft' || String(opt.id).startsWith('fft-');
 
-        // Short help text for each EXG preset to show a concise explanation in the modal
-        const exgHelpMapShort: Record<number, string> = {
-            1: 'ECG — tuned for cardiac signals. Typical useful band: ~0.5–150 Hz (diagnostic content often 0.5–40 Hz); preserves QRS energy.',
-            2: 'EOG — tuned for eye-movement signals. Dominant energy is very low frequency: ~0.1–10 Hz; emphasizes slow drifts and blinks.',
-            3: 'EEG — tuned for brainwave signals; preserves common EEG bands (≈0.5–45 Hz).',
-            4: 'EMG — tuned for muscle activity. Broadband, typically ~20–500 Hz; preserves high-frequency bursts and spikes.'
-        };
-        const notchHelpShort = 'Notch removes mains interference at the selected frequency (50 Hz or 60 Hz).';
-        const samplingRateHelp = 'Set this to match your device sampling rate so filters work correctly.';
+        
         return (
             <div style={{
                 position: 'fixed',
@@ -142,21 +134,11 @@ const Widgets: React.FC = () => {
                         const existing = (opt as any).config || {};
                         const draft = settingsDraft || {};
                         const dirty = JSON.stringify(existing) !== JSON.stringify(draft);
-                        const kind = draft.kind || existing.kind || (isFilter ? 'filter' : opt.type || 'item');
-                        const exgKindMap: Record<number, string> = { 1: 'ECG', 2: 'EOG', 3: 'EEG', 4: 'EMG' };
-                        const notchMap: Record<number, string> = { 1: '50 Hz', 2: '60 Hz' };
+                    const kind = draft.kind || existing.kind || opt.type || 'item';
+                        
                         let description = '';
-                        if (isFilter) {
-                            description = `This ${kind} node will process incoming channel samples and output the filtered result. After saving, connect a channel to this node's input and then connect this node's output to a dashboard widget to visualize the filtered data.`;
-                            if ((draft.kind || existing.kind) === 'notch') {
-                                description += ' Notch removes mains interference; choose 50 Hz or 60 Hz depending on your power grid.';
-                            }
-                            if ((draft.kind || existing.kind) === 'exg') {
-                                const t = (draft.exgType || existing.exgType) || 1;
-                                description += ` EXG presets select a processing chain tuned for ${exgKindMap[t] || 'ECG'} signals.`;
-                            }
-                        } else if (isSpiderPlot) {
-                            description = 'SpiderPlot aggregates multiple channel inputs into a radial plot. You can optionally apply a filter here which will be applied to every connected axis.';
+                        if (isSpiderPlot) {
+                            description = 'SpiderPlot aggregates multiple channel inputs into a radial plot.';
                         } else if (isChannel) {
                             description = 'Channel settings allow renaming the channel and similar metadata. Channel data itself comes from the device input stream.';
                         } else {
@@ -171,8 +153,7 @@ const Widgets: React.FC = () => {
                                     <div style={{ background: '#f3f4f6', padding: '6px 10px', borderRadius: 6, fontSize: 13, color: '#111827' }}>
                                         {kind && <span style={{ marginRight: 10 }}><strong>kind:</strong> {String(kind)}</span>}
                                         {((draft.samplingRate || existing.samplingRate) && <span style={{ marginRight: 10 }}><strong>sr:</strong> {draft.samplingRate || existing.samplingRate}</span>)}
-                                        {((draft.exgType || existing.exgType) && <span style={{ marginRight: 10 }}><strong>exg:</strong> {exgKindMap[(draft.exgType || existing.exgType) as number]}</span>)}
-                                        {((draft.notchType || existing.notchType) && <span style={{ marginRight: 10 }}><strong>notch:</strong> {notchMap[(draft.notchType || existing.notchType) as number]}</span>)}
+                                        
                                     </div>
                                     {dirty ? <span style={{ marginLeft: 8, color: '#b91c1c', fontWeight: 600 }}>Unsaved changes</span> : <span style={{ marginLeft: 8, color: '#059669', fontWeight: 600 }}>Saved</span>}
                                 </div>
@@ -180,18 +161,7 @@ const Widgets: React.FC = () => {
                         );
                     })()}
 
-                    {isSpiderPlot && (
-                        <div>
-                            <div style={{ marginBottom: 12 }}>
-                                <label style={{ fontWeight: 500 }}>Apply Filter:</label>
-                                <select value={(settingsDraft && settingsDraft.kind) || ''} onChange={e => setSettingsDraft(prev => ({ ...(prev || {}), kind: e.target.value }))} style={{ marginLeft: 8 }}>
-                                    <option value="">None</option>
-                                    <option value="highpass">Highpass</option>
-                                    <option value="exg">EXG</option>
-                                </select>
-                            </div>
-                        </div>
-                    )}
+                    
 
                     {isFFT && (
                         <div>
@@ -238,43 +208,9 @@ const Widgets: React.FC = () => {
                         </div>
                     )}
 
-                    {isFilter && (
-                        <div>
-                            <div style={{ marginBottom: 12 }}>
-                                <label style={{ fontWeight: 500 }}>Filter Type:</label>
-                                <select value={(settingsDraft && settingsDraft.exgType) || 1} onChange={e => setSettingsDraft(prev => ({ ...(prev || {}), kind: 'exg', exgType: parseInt(e.target.value, 10) }))} style={{ marginLeft: 8 }}>
-                                    <option value={1}>ECG</option>
-                                    <option value={2}>EOG</option>
-                                    <option value={3}>EEG</option>
-                                    <option value={4}>EMG</option>
-                                </select>
-                                <div style={{ marginTop: 6, fontSize: 12, color: '#6b7280' }}>
-                                    {exgHelpMapShort[(settingsDraft && settingsDraft.exgType) || (opt && (opt as any).config && (opt as any).config.exgType) || 1]}
-                                </div>
-                            </div>
-                            <div style={{ marginBottom: 12 }}>
-                                <label style={{ fontWeight: 500 }}>Sampling Rate:</label>
-                                <select value={(settingsDraft && settingsDraft.samplingRate) || 250} onChange={e => setSettingsDraft(prev => ({ ...(prev || {}), samplingRate: parseInt(e.target.value, 10) }))} style={{ marginLeft: 8 }}>
-                                    <option value={250}>250</option>
-                                    <option value={500}>500</option>
-                                </select>
-                                <div style={{ marginTop: 6, fontSize: 12, color: '#6b7280' }}>{samplingRateHelp}</div>
-                            </div>
+                    
 
-                            <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
-                                <label style={{ fontWeight: 500, marginRight: 8 }}>Notch Frequency:</label>
-                                <select value={(settingsDraft && settingsDraft.notchType) || 1} onChange={e => setSettingsDraft(prev => ({ ...(prev || {}), notchType: parseInt(e.target.value, 10) }))} style={{ marginLeft: 8 }}>
-                                    <option value={1}>50 Hz</option>
-                                    <option value={2}>60 Hz</option>
-                                </select>
-                                <div style={{ marginLeft: 10, fontSize: 12, color: '#6b7280' }}>{notchHelpShort}</div>
-                            </div>
-
-                            {/* Notch frequency is shown only for explicit Notch nodes (isNotch) - not selectable from Filter Kind */}
-                        </div>
-                    )}
-
-                    {!isSpiderPlot && !isChannel && !isFilter && (
+                    {!isSpiderPlot && !isChannel && (
                         <div>
                             <div style={{ marginBottom: 12 }}>
                                 <label style={{ fontWeight: 500 }}>Generic Option 1:</label>
@@ -470,34 +406,7 @@ const Widgets: React.FC = () => {
     // using the drag-and-drop Applications palette into the flow modal.
     const [flowOptions, setFlowOptions] = useState(initialFlowOptions);
 
-    // Register/unregister filter nodes when flowOptions change
-    const prevFilterIdsRef = useRef<Set<string>>(new Set());
-    useEffect(() => {
-        try {
-            const currentFilters = new Set<string>();
-            for (const opt of flowOptions) {
-                const isFilter = opt.type === 'filter' || (typeof opt.id === 'string' && (opt.id as string).startsWith('filter-'));
-                if (isFilter) {
-                    currentFilters.add(opt.id);
-                    const cfg = (opt as any).config;
-                    if (cfg) {
-                        // register or update filter in registry
-                        try { filterRegistry.registerFilter(opt.id, cfg); } catch (e) { /* ignore */ }
-                    }
-                }
-            }
-            // unregister removed filters
-            const prev = prevFilterIdsRef.current;
-            for (const id of prev) {
-                if (!currentFilters.has(id)) {
-                    try { filterRegistry.unregisterFilter(id); } catch (e) { }
-                }
-            }
-            prevFilterIdsRef.current = currentFilters;
-        } catch (err) {
-            // ignore
-        }
-    }, [flowOptions]);
+    
 
     // Handlers to increase/decrease visible channels in the combined widget
     const increaseChannels = useCallback(() => {
@@ -540,15 +449,7 @@ const Widgets: React.FC = () => {
     }, []);
     // Connections between widgets (user-created)
     const [connections, setConnections] = useState<Array<{ from: string, to: string }>>([]);
-    // Keep filter registry connections in sync
-    const filterRegistry = require('@/lib/filterRegistry').default;
-    useEffect(() => {
-        try {
-            filterRegistry.syncConnections(connections);
-        } catch (err) {
-            // ignore
-        }
-    }, [connections]);
+    
     // Widget collection state with default basic widget (no make-connection widget)
     const [widgets, setWidgets] = useState<Widget[]>([
         {
@@ -840,13 +741,12 @@ const Widgets: React.FC = () => {
         if (lower === 'spiderplot' || lower === 'spider') canonical = 'spiderplot';
         if (lower === 'basic' || lower === 'realtime' || lower === 'real-time signal') canonical = 'basic';
 
-        const labelMap: Record<string, string> = {
+            const labelMap: Record<string, string> = {
             spiderplot: 'Spider Plot',
             fft: 'FFT',
             channel: 'Channel',
             envelope: 'Envelope',
             candle: 'Candle',
-            filter: 'Filter',
             game: 'Game',
             bandpower: 'Bandpower',
             basic: 'Plot'
@@ -1290,7 +1190,6 @@ const Widgets: React.FC = () => {
                                         { id: 'FFTGraph', label: 'FFT' },
                                         { id: 'envelope', label: 'Envelope' },
                                         { id: 'candle', label: 'Candle' },
-                                        { id: 'filter', label: 'Filter' },
                                         { id: 'bandpower', label: 'Bandpower' },
                                     ].map(item => (
                                         <div

@@ -1,9 +1,21 @@
+/**
+ * src/utils/widget.utils.ts
+ *
+ * Purpose: Utility helpers for widget grid layout, collision detection and
+ * validation. These are pure helper functions used by the dashboard layout
+ * and import/validation code.
+ *
+ * Exports:
+ *  - hasCollision(widget1, widget2)
+ *  - checkCollisionAtPosition(widgets, activeId, x, y, width, height, gridSettings)
+ *  - validateWidget(w)
+ */
 import { Widget, GridSettings } from '@/types/widget.types';
 
 /**
  * Enhanced collision detection between two widgets
  * Includes small margin to prevent edge overlap due to rounding
- * 
+ *
  * @param widget1 - First widget to check
  * @param widget2 - Second widget to check
  * @returns true if widgets collide, false otherwise

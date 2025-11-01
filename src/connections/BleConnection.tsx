@@ -1,5 +1,14 @@
 'use client'
 
+/**
+ * src/connections/BleConnection.tsx
+ *
+ * Purpose: React component to manage a Web Bluetooth connection to the
+ * NPG device. Parses incoming binary packets, extracts channel samples,
+ * and forwards samples into the ChannelData context via `addSample`.
+ *
+ * Exports: default React component BleConnection
+ */
 import { useState, useRef, useEffect } from 'react'
 import { useChannelData } from '@/lib/channelDataContext';
 

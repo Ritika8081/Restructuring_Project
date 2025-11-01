@@ -1,5 +1,14 @@
-'use client';
+"use client";
 
+/**
+ * src/components/SpiderPlot.tsx
+ *
+ * Purpose: Radial/spider plot visualization that aggregates multiple
+ * channel-derived values (e.g. brainwave band powers) into a single
+ * radar-like view. Integrates with a bandpower worker for live data.
+ *
+ * Exports: default SpiderPlot React component
+ */
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { WebglPlot, WebglLine, ColorRGBA } from 'webgl-plot';
 import { useChannelData } from '@/lib/channelDataContext';

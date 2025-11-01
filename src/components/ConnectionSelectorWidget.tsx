@@ -1,3 +1,11 @@
+/**
+ * src/components/ConnectionSelectorWidget.tsx
+ *
+ * Purpose: Small UI widget allowing the user to choose between available
+ * connection types (Serial, BLE, WiFi) and trigger the connection flow.
+ *
+ * Exports: default ConnectionSelectorWidget
+ */
 import React, { useState } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 

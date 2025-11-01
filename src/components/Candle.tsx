@@ -1,5 +1,15 @@
-'use client';
+"use client";
 import React, { useEffect, useState } from 'react';
+
+/**
+ * src/components/Candle.tsx
+ *
+ * Purpose: Decorative candle visualization that maps a numeric `betaPower`
+ * value (0-100) to a smooth flame brightness. Used by the dashboard to
+ * provide a visually-appealing indicator of signal strength.
+ *
+ * Exports: default CandleChart component
+ */
 
 type CandleChartProps = {
   width?: number | string;

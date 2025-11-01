@@ -1,5 +1,14 @@
 'use client'
 
+/**
+ * src/connections/WifiConnection.tsx
+ *
+ * Purpose: Manage a WebSocket connection to a networked device that streams
+ * binary ADC samples. Parses binary blocks, extracts channels and forwards
+ * them to the ChannelData context.
+ *
+ * Exports: default React component WifiConnection
+ */
 import { useState, useRef, useEffect } from 'react'
 import { useChannelData } from '@/lib/channelDataContext';
 

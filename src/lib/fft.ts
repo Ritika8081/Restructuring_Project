@@ -1,3 +1,13 @@
+/**
+ * src/lib/fft.ts
+ *
+ * Purpose: Minimal Fast Fourier Transform implementation used by spectral
+ * analysis utilities (bandpower calculations, workers). This implementation
+ * expects sizes that are powers-of-two and exposes fft(...) and
+ * computeMagnitudes(...).
+ *
+ * Exports: FFT class
+ */
 export class FFT {
   size: number;
   cosTable: Float32Array;

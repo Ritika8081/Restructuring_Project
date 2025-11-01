@@ -1,9 +1,13 @@
-import React, { Component, ReactNode } from 'react';
-
 /**
- * Custom ErrorBoundary component to catch and handle widget rendering errors
- * Prevents entire application crashes when individual widgets fail
+ * src/components/ErrorBoundary.tsx
+ *
+ * Purpose: React ErrorBoundary wrapper that prevents rendering errors in a
+ * single widget from crashing the entire app. Catches errors and displays a
+ * compact fallback UI with an optional retry.
+ *
+ * Exports: default ErrorBoundary class component
  */
+import React, { Component, ReactNode } from 'react';
 interface ErrorBoundaryState {
     hasError: boolean;
     error?: Error;

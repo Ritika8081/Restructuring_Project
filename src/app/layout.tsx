@@ -1,3 +1,10 @@
+/**
+ * src/app/layout.tsx
+ *
+ * Purpose: Root layout for Next.js app. Wraps the application with global
+ * providers including ChannelDataProvider and FlowModalProvider and renders
+ * the `Header` component.
+ */
 import type { Metadata } from "next";
 import Header from "@/components/Header";
 import "./globals.css";

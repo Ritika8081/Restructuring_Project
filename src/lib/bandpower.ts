@@ -1,3 +1,12 @@
+/**
+ * src/lib/bandpower.ts
+ *
+ * Purpose: Helper utilities to compute band power from FFT magnitudes.
+ * Exports band definitions, a simple BandSmoother, and helpers to compute
+ * raw and relative band power values for a given signal.
+ *
+ * Exports: BANDS, BandSmoother, calculateBandPower, computeBandPowers
+ */
 import { FFT } from '@/lib/fft';
 
 // Frequency band definitions (Hz)

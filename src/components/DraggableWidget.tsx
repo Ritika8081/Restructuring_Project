@@ -1,3 +1,13 @@
+/**
+ * src/components/DraggableWidget.tsx
+ *
+ * Purpose: Core draggable widget wrapper used by the dashboard grid. Handles
+ * rendering of different widget types (basic plot, FFT, spiderplot, candle,
+ * statistics), drag/resize interactions, incoming connections and contextual
+ * controls. This component is memoized for performance.
+ *
+ * Exports: default memoized DraggableWidget
+ */
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import SpiderPlot from '@/components/SpiderPlot';
 import CandleChart from '@/components/Candle';
@@ -6,7 +16,6 @@ import FFTPlotRealtime from '@/components/FFTPlot';
 import BasicGraphRealtime from '@/components/BasicGraph';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import { useChannelData } from '@/lib/channelDataContext';
-import filterRegistry from '@/lib/filterRegistry';
 import { Widget, GridSettings, DragState } from '@/types/widget.types';
 import { checkCollisionAtPosition } from '@/utils/widget.utils';
 
@@ -318,18 +327,11 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
                     {/* Widget content rendering */}
                     {widget.type === 'spiderplot' ? (
                             (() => {
-                            // Compute SpiderPlot axis values from live channel samples when available
+                                // Compute SpiderPlot axis values from live channel samples when available
                             const axisData = incomingConnections.length > 0 ? incomingConnections.map((id, idx) => {
-                                // parse channel index from ids like 'channel-1' -> 0
+                                // Ignore unknown/non-channel ids and treat them as zero-valued.
                                 if (String(id).startsWith('filter-')) {
-                                    // Read processed buffer from registry
-                                    const buf = filterRegistry.getFilterBuffer(id);
-                                    const N = Math.min(128, buf.length);
-                                    if (N === 0) return { label: id, value: 0, maxValue: 100 };
-                                    const recent = buf.slice(-N);
-                                    const rms = Math.sqrt(recent.reduce((acc, v) => acc + (v * v), 0) / recent.length);
-                                    const value = Math.min(100, Math.abs(rms) * 100);
-                                    return { label: id, value, maxValue: 100 };
+                                    return { label: id, value: 0, maxValue: 100 };
                                 }
                                 const m = String(id).match(/channel-(\d+)/i);
                                 const chIndex = m ? Math.max(0, parseInt(m[1], 10) - 1) : idx;
@@ -389,17 +391,13 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
                     ) : widget.type === 'candle' ? (
                         <div className="w-full h-full overflow-hidden flex items-center justify-center p-0.5">
                             {(() => {
-                                // Determine betaPower from incoming connection (prefer filter outputs)
+                                // Determine betaPower from incoming connection
                                 let betaValue = 0;
                                 if (incomingConnections && incomingConnections.length > 0) {
                                     const src = incomingConnections[0];
                                     if (String(src).startsWith('filter-')) {
-                                        const buf = filterRegistry.getFilterBuffer(src);
-                                        if (buf && buf.length > 0) {
-                                            const recent = buf.slice(-128);
-                                            const mean = recent.reduce((a, b) => a + Math.abs(b), 0) / recent.length;
-                                            betaValue = Math.min(100, mean * 100);
-                                        }
+                                        // Unknown/non-channel source: treat as zero
+                                        betaValue = 0;
                                     } else {
                                         // assume channel-x
                                         const m = String(src).match(/channel-(\d+)/i);
@@ -407,8 +405,8 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
                                         const key = `ch${chIndex}`;
                                         const recent = samples.slice(-128);
                                         if (recent.length > 0) {
-                                            const vals = recent.map(s => (s as any)[key] ?? 0);
-                                            const rms = Math.sqrt(vals.reduce((acc, v) => acc + v * v, 0) / vals.length);
+                                            const vals = recent.map(s => (s as any)[key] ?? 0) as number[];
+                                            const rms = Math.sqrt(vals.reduce((acc: number, v: number) => acc + v * v, 0) / vals.length);
                                             betaValue = Math.min(100, rms * 100);
                                         }
                                     }

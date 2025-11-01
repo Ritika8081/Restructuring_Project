@@ -1,10 +1,11 @@
+/**
+ * src/components/ui/Toast.tsx
+ *
+ * Purpose: Small UI component that displays temporary toast notifications.
+ * Exports: default Toast component which accepts a `toast` state and `onClose`.
+ */
 import React, { useEffect } from 'react';
 import { ToastState } from '@/types/widget.types';
-
-/**
- * Toast notification component for user feedback
- * Auto-dismisses after 4 seconds with smooth animations
- */
 const Toast: React.FC<{ toast: ToastState; onClose: () => void }> = ({ toast, onClose }) => {
     // Auto-dismiss timer
     useEffect(() => {

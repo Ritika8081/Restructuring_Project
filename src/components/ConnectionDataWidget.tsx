@@ -1,4 +1,14 @@
 
+/**
+ * src/components/ConnectionDataWidget.tsx
+ *
+ * Purpose: Small dashboard widget that lets the user pick a connection
+ * type (Serial, BLE, WiFi) and mounts the corresponding connection
+ * component which handles raw device communication and forwards samples
+ * into the global ChannelData context.
+ *
+ * Exports: default ConnectionDataWidget component
+ */
 import React, { useState } from 'react';
 import BleConnection from '@/connections/BleConnection';
 import SerialConnection from '@/connections/SerialConnection';

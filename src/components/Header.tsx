@@ -1,5 +1,13 @@
-'use client';
+"use client";
 
+/**
+ * src/components/Header.tsx
+ *
+ * Purpose: Top navigation header used across the app. Provides a button to
+ * open the flow configuration modal and displays branding.
+ *
+ * Exports: default Header component
+ */
 import React from 'react';
 import { useRouter } from 'next/navigation';
 

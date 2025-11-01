@@ -1,3 +1,12 @@
+/**
+ * src/workers/bandpower.worker.ts
+ *
+ * Purpose: Web Worker that receives EEG samples and computes band powers
+ * (raw and smoothed) using FFT and the BandSmoother utility.
+ *
+ * Exports: Worker message handler (posts { raw, relative, smooth } back to caller)
+ * Side effects: Creates a persistent `smoother` instance across messages.
+ */
 import { FFT } from '@/lib/fft';
 import { BANDS, BandSmoother, calculateBandPower } from '@/lib/bandpower';
 

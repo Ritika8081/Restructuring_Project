@@ -1,3 +1,11 @@
+/**
+ * src/components/WidgetPalette.tsx
+ *
+ * Purpose: Sidebar palette providing quick access to add widgets to the
+ * dashboard, export/import layouts, and perform bulk operations (clear all).
+ *
+ * Exports: WidgetPalette React component
+ */
 import React, { useRef, useCallback, useState } from 'react';
 import { Widget, GridSettings } from '@/types/widget.types';
 import { validateWidget } from '@/utils/widget.utils';

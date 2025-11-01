@@ -1,5 +1,14 @@
 'use client';
 
+/**
+ * src/components/FFTPlot.tsx
+ *
+ * Purpose: WebGL-based FFT visualization used for frequency-domain widgets.
+ * Produces a simulated FFT stream when `enableSimulation` is true and exposes
+ * a reusable React component for embedding in dashboard widgets.
+ *
+ * Exports: default FFTPlotRealtime component
+ */
 import React, { useRef, useEffect } from 'react';
 import { WebglPlot, WebglLine, ColorRGBA } from 'webgl-plot';
 

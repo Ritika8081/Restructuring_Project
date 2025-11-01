@@ -1,5 +1,14 @@
 'use client'
 
+/**
+ * src/connections/SerialConnection.tsx
+ *
+ * Purpose: Manage a native-serial (Web Serial API) connection to the device.
+ * Reads incoming bytes, parses packets, forwards channel samples into the
+ * ChannelData context and provides a simple UI for connect/disconnect.
+ *
+ * Exports: default React component SerialConnection
+ */
 import { useState, useRef, useEffect } from 'react'
 import { useChannelData } from '@/lib/channelDataContext';
 

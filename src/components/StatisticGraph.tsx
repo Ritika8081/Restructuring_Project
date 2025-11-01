@@ -1,5 +1,14 @@
-'use client';
+"use client";
 
+/**
+ * src/components/StatisticGraph.tsx
+ *
+ * Purpose: Small canvas-based chart component (bar or line) used for
+ * displaying summary statistics in dashboard widgets. The component is
+ * intentionally lightweight and does not depend on external chart libs.
+ *
+ * Exports: default StatisticGraph component
+ */
 import React, { useEffect, useRef } from 'react';
 
 interface StatisticData {

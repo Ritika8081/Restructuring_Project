@@ -1,6 +1,16 @@
 "use client";
 import React, { createContext, useContext, useState, ReactNode } from 'react';
 
+/**
+ * src/context/FlowModalContext.tsx
+ *
+ * Purpose: Provides a small React context to control visibility of the
+ * flow configuration modal. Intended to be wrapped around the app so any
+ * component can open/close the flow modal.
+ *
+ * Exports: FlowModalProvider, useFlowModal()
+ */
+
 interface FlowModalContextType {
   showFlowModal: boolean;
   setShowFlowModal: (show: boolean) => void;

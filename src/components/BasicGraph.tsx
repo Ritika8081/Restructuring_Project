@@ -1,5 +1,16 @@
-'use client';
+"use client";
 import React, { useEffect, useRef, useState, useCallback } from 'react';
+/**
+ * src/components/BasicGraph.tsx
+ *
+ * Purpose: Low-level WebGL-based real-time plotting component. Renders one
+ * or more channels using webgl-plot and maintains small ring buffers for
+ * each visible channel. Used by dashboard `basic`/Plot widgets.
+ *
+ * Exports: BasicGraphRealtime React component (default export under a different name)
+ *
+ * Notes: Uses `useChannelData()` to subscribe to live samples.
+ */
 import { useChannelData } from '@/lib/channelDataContext';
 import { WebglPlot, WebglLine, ColorRGBA } from 'webgl-plot';
 
@@ -231,14 +242,14 @@ const BasicGraphRealtime: React.FC<BasicGraphRealtimeProps> = (props) => {
   // Live device data stream from context
   useEffect(() => {
     if (!samples || samples.length === 0) return;
-    // Filter and normalize device data before plotting
+  // Normalize device data before plotting
     const normalize = (value: number) => {
       if (value === undefined || value === null) return 0;
       return Math.max(-1, Math.min(1, value));
     };
     samples.slice(-bufferSize).forEach(sample => {
       if (channels.length > 0) {
-        // Using raw samples (no EXG/Notch filtering)
+  // Using raw samples (no preprocessing)
         if (channels[0] && channels[0].visible && sample.ch0 !== undefined) {
           pushData(channels[0].id, normalize(sample.ch0));
         }

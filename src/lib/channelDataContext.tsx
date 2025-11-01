@@ -1,7 +1,19 @@
-
-'use client';
+ 'use client';
 import React, { createContext, useContext, useState, useCallback } from 'react';
-import filterRegistry from '@/lib/filterRegistry';
+
+/**
+ * src/lib/channelDataContext.tsx
+ *
+ * Purpose: React context provider that holds recent channel samples coming
+ * from the device connection layer. Components can subscribe via
+ * `useChannelData()` to get the live sample buffer and helper methods.
+ *
+ * Exports:
+ *  - ChannelDataProvider React component (wrap at app root)
+ *  - useChannelData() hook
+ *
+ * Notes: Keeps a bounded buffer (last ~512 samples) to limit memory use.
+ */
 
 export type ChannelSample = {
   ch0: number;
@@ -24,8 +36,7 @@ export const ChannelDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
   const addSample = useCallback((sample: ChannelSample) => {
     setSamples(prev => [...prev.slice(-511), sample]); // keep last 512 samples
     try {
-      // Notify filter registry so any registered filters can process this raw sample
-      filterRegistry.onRawSample(sample as any);
+     
     } catch (err) {
       // swallow
     }

@@ -1,10 +1,14 @@
+/**
+ * src/components/ui/ConfirmModal.tsx
+ *
+ * Purpose: Reusable confirmation modal used for destructive or critical
+ * user actions. The modal accepts a ConfirmState and provides confirm/cancel
+ * callbacks.
+ *
+ * Exports: default ConfirmModal component
+ */
 import React from 'react';
 import { ConfirmState } from '@/types/widget.types';
-
-/**
- * Confirmation modal for destructive actions
- * Replaces native browser alerts with custom styled modal
- */
 const ConfirmModal: React.FC<{ confirm: ConfirmState }> = ({ confirm }) => {
     if (!confirm.show) return null;
 

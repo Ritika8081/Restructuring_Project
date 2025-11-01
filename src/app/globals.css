@@ -1,3 +1,9 @@
+/*
+ * src/app/globals.css
+ *
+ * Purpose: Global stylesheet for the application. Uses Tailwind and contains
+ * general page / layout resets required for the dashboard UI.
+ */
 @import "tailwindcss";
 
 /* Ensure full viewport utilization without scrolling */
