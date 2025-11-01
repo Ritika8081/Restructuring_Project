@@ -211,8 +211,13 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
     // (created by the arranger) or its id is a channel id like 'channel-1'. For those we
     // want the header and graph controls to match Channel widgets.
     const isChannelWidget = useMemo(() => {
-        if ((widget as any).channelIndex && typeof (widget as any).channelIndex === 'number') return true;
+        // Treat as a true "channel widget" only when the widget id is a channel id
+        // (explicit channel widget) or when it has an explicit channelIndex AND
+        // it is NOT a 'basic' (Plot) widget. This avoids treating arranged Plot
+        // widgets (which receive a channelIndex for layout) as channel-sourced
+        // for live device data unless they are actually a channel widget.
         if (typeof widget.id === 'string' && widget.id.startsWith('channel-')) return true;
+        if ((widget as any).channelIndex && typeof (widget as any).channelIndex === 'number' && widget.type !== 'basic') return true;
         return false;
     }, [widget]);
 
@@ -415,21 +420,86 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
                             })()}
                         </div>
                     ) : widget.type === 'basic' ? (
-                        <div className="w-full h-full overflow-hidden flex items-center justify-center p-0.5">
-                            <BasicGraphRealtime
-                                channels={widgetChannels}
-                                width={availableWidth - 4}
-                                height={availableHeight - 4}
-                                bufferSize={512}
-                                showGrid={widget.width >= 3}
-                                backgroundColor="rgba(16, 185, 129, 0.02)"
-                                sampleRate={60}
-                                timeWindow={8}
-                                onSizeRequest={handleSizeRequest}
-                                showChannelControls={isChannelWidget}
-                                showLegend={isChannelWidget}
-                            />
-                        </div>
+                        (() => {
+                            // Determine channels for this basic widget from incoming flow connections.
+                            // Only channel-* sources provide live device samples. If there are no
+                            // channel connections and this widget is not explicitly a channel-sourced
+                            // widget (arranger-assigned), then do not pass device samples.
+                            const connChannels: any[] = [];
+                            if (incomingConnections && incomingConnections.length > 0) {
+                                incomingConnections.forEach((src) => {
+                                    try {
+                                        const s = String(src);
+                                        if (s.startsWith('channel-')) {
+                                            const m = s.match(/channel-(\d+)/i);
+                                            const idx = m ? Math.max(1, parseInt(m[1], 10)) : 1;
+                                            // If this dashboard widget is a Plot (`basic`) and the arranger
+                                            // assigned a channelIndex, only accept connections that map
+                                            // to the same channel index. This enforces channel1 -> plot-1,
+                                            // channel2 -> plot-2, etc.
+                                            const assignedIdx = (widget as any).channelIndex;
+                                            if (widget.type === 'basic' && typeof assignedIdx === 'number') {
+                                                if (idx !== assignedIdx) {
+                                                    // skip channels that don't match this plot instance
+                                                    return;
+                                                }
+                                            }
+                                            const color = ['#10B981', '#3B82F6', '#F59E0B', '#EF4444', '#8B5CF6', '#06B6D4'][(idx - 1) % 6];
+                                            connChannels.push({ id: `ch${idx - 1}`, name: `CH ${idx}`, color, visible: true });
+                                        }
+                                    } catch (err) {
+                                        // ignore malformed connection ids
+                                    }
+                                });
+                            }
+
+                            // If there are no incoming channel connections, but the widget itself
+                            // is channel-sourced (arranger assigned) AND it's not a Plot
+                            // (basic) widget, fall back to widgetChannels.
+                            const finalChannels = connChannels.length > 0 ? connChannels : (isChannelWidget && widget.type !== 'basic' ? widgetChannels : []);
+                            // Allow device samples only when the widget has an incoming
+                            // channel connection or when it is an actual channel widget
+                            // (not when it's a Plot arranged with a channelIndex).
+                            const allowDevice = connChannels.length > 0 || (isChannelWidget && widget.type !== 'basic');
+
+                            // Debug: log why this BasicGraph is allowed to consume device data
+                            // (temporary; remove after troubleshooting)
+                            try {
+                                // use console.debug so normal logs stay clean
+                                console.debug('[DraggableWidget] BasicGraph render', {
+                                    widgetId: widget.id,
+                                    allowDevice,
+                                    finalChannels,
+                                    incomingConnections,
+                                    isChannelWidget,
+                                });
+                            } catch (err) {}
+
+                            return (
+                                <div className="w-full h-full overflow-hidden flex items-center justify-center p-0.5">
+                                    <BasicGraphRealtime
+                                        channels={finalChannels}
+                                        // Inject device samples from context only when allowed
+                                        deviceSamples={allowDevice ? samples : undefined}
+                                        // Pass widget id so BasicGraph logs are traceable
+                                        instanceId={widget.id}
+                                        width={availableWidth - 4}
+                                        height={availableHeight - 4}
+                                        bufferSize={512}
+                                        showGrid={widget.width >= 3}
+                                        backgroundColor="rgba(16, 185, 129, 0.02)"
+                                        // Only allow live device samples when there is a channel connection
+                                        // or when this widget is explicitly channel-sourced by the arranger.
+                                        allowDeviceSamples={allowDevice}
+                                        sampleRate={60}
+                                        timeWindow={8}
+                                        onSizeRequest={handleSizeRequest}
+                                        showChannelControls={isChannelWidget}
+                                        showLegend={isChannelWidget}
+                                    />
+                                </div>
+                            );
+                        })()
                     ) : children ? (
                         <div className="w-full h-full flex items-center justify-center p-2">
                             {children}

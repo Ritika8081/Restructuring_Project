@@ -11,7 +11,7 @@ import React, { useEffect, useRef, useState, useCallback } from 'react';
  *
  * Notes: Uses `useChannelData()` to subscribe to live samples.
  */
-import { useChannelData } from '@/lib/channelDataContext';
+// Device samples are injected by parent components (do not read context directly)
 import { WebglPlot, WebglLine, ColorRGBA } from 'webgl-plot';
 
 interface Channel {
@@ -31,11 +31,18 @@ interface BasicGraphRealtimeProps {
   showGrid?: boolean;
   backgroundColor?: string;
   showLegend?: boolean;
+  /** When false, the component will ignore live device samples from context */
+  allowDeviceSamples?: boolean;
   sampleRate?: number;
   timeWindow?: number;
   onChannelsChange?: (channels: Channel[]) => void;
   showChannelControls?: boolean;
   onSizeRequest?: (minWidth: number, minHeight: number) => void;
+  // Device samples are provided by the parent (draggable widget) when the
+  // plot is connected to a channel. If not provided, no live data will be plotted.
+  deviceSamples?: Array<{ [key: string]: number | undefined; timestamp?: number }>;
+  // Optional instance id for runtime debugging (widget id)
+  instanceId?: string;
 }
 
 const DEFAULT_COLORS = [
@@ -45,7 +52,6 @@ const DEFAULT_COLORS = [
 ];
 
 const BasicGraphRealtime: React.FC<BasicGraphRealtimeProps> = (props) => {
-  const { samples } = useChannelData();
   const {
     channels: initialChannels = [
       { id: 'ch1', name: 'CH 1', color: '#10B981', visible: true },
@@ -62,6 +68,7 @@ const BasicGraphRealtime: React.FC<BasicGraphRealtimeProps> = (props) => {
     showChannelControls = false,
     onSizeRequest,
   } = props;
+  const { allowDeviceSamples = false, deviceSamples, instanceId } = props;
   const [channels, setChannels] = useState<Channel[]>(initialChannels);
   const canvasRefs = useRef<Map<string, HTMLCanvasElement>>(new Map());
   const plotRefs = useRef<Map<string, WebglPlot>>(new Map());
@@ -228,6 +235,10 @@ const BasicGraphRealtime: React.FC<BasicGraphRealtimeProps> = (props) => {
     
     if (!line || !buffer) return;
 
+    try {
+      console.debug(`[BasicGraph${instanceId ? `:${instanceId}` : ''}] pushData`, { channelId, newValue });
+    } catch (err) {}
+
     // Shift buffer
     buffer.shift();
     buffer.push(newValue);
@@ -241,29 +252,63 @@ const BasicGraphRealtime: React.FC<BasicGraphRealtimeProps> = (props) => {
   // Simulated multi-channel data stream 
   // Live device data stream from context
   useEffect(() => {
+    try {
+      console.debug(`[BasicGraph${instanceId ? `:${instanceId}` : ''}] deviceSamples effect`, {
+        allowDeviceSamples,
+        deviceSamplesLength: deviceSamples ? deviceSamples.length : 0,
+        channelsCount: channels.length,
+      });
+    } catch (err) {}
+    // Do not read from any global context here. Device samples must be passed
+    // in via the `deviceSamples` prop by the parent. If not present, do nothing.
+    if (!allowDeviceSamples) return;
+    const samples = deviceSamples;
     if (!samples || samples.length === 0) return;
-  // Normalize device data before plotting
+
+    // Normalize device data before plotting
     const normalize = (value: number) => {
       if (value === undefined || value === null) return 0;
       return Math.max(-1, Math.min(1, value));
     };
+
     samples.slice(-bufferSize).forEach(sample => {
       if (channels.length > 0) {
-  // Using raw samples (no preprocessing)
-        if (channels[0] && channels[0].visible && sample.ch0 !== undefined) {
-          pushData(channels[0].id, normalize(sample.ch0));
+        // Using raw samples (no preprocessing)
+        if (channels[0] && channels[0].visible && (sample as any).ch0 !== undefined) {
+          pushData(channels[0].id, normalize((sample as any).ch0));
         }
 
-        if (channels[1] && channels[1].visible && sample.ch1 !== undefined) {
-          pushData(channels[1].id, normalize(sample.ch1));
+        if (channels[1] && channels[1].visible && (sample as any).ch1 !== undefined) {
+          pushData(channels[1].id, normalize((sample as any).ch1));
         }
 
-        if (channels[2] && channels[2].visible && sample.ch2 !== undefined) {
-          pushData(channels[2].id, normalize(sample.ch2));
+        if (channels[2] && channels[2].visible && (sample as any).ch2 !== undefined) {
+          pushData(channels[2].id, normalize((sample as any).ch2));
         }
       }
     });
-  }, [samples, channels, bufferSize]);
+  }, [deviceSamples, channels, bufferSize, allowDeviceSamples]);
+
+  // If device samples are disabled for this instance, clear any existing
+  // buffers so the plot goes blank instead of showing stale data.
+  useEffect(() => {
+    if (allowDeviceSamples) return;
+
+    try {
+      visibleChannels.forEach((channel) => {
+        const buffer = dataBuffers.current.get(channel.id);
+        const line = linesRef.current.get(channel.id);
+        if (buffer) {
+          for (let i = 0; i < buffer.length; i++) buffer[i] = 0;
+        }
+        if (line) {
+          for (let i = 0; i < line.numPoints; i++) line.setY(i, 0);
+        }
+      });
+    } catch (err) {
+      // swallow
+    }
+  }, [allowDeviceSamples, visibleChannels]);
 
   return (
     <div

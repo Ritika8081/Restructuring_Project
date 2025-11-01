@@ -39,6 +39,9 @@ export default function BleConnection() {
   const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const sampleIndex = useRef(0)
   const totalSamples = useRef(0)
+  // Track sample counters for drop-detection and ordering
+  const prevSampleCounter = useRef<number | null>(null)
+  const samplesReceived = useRef(0)
 
   // Device constants
   const SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
@@ -78,30 +81,80 @@ export default function BleConnection() {
 
   const handleDataReceived = (event: any) => {
     const value = event.target.value
-    if (value.byteLength === NEW_PACKET_LEN) {
-      const newRawValues: {ch0: number, ch1: number, ch2: number}[] = []
-      for (let i = 0; i < NEW_PACKET_LEN; i += SINGLE_SAMPLE_LEN) {
-        const view = new DataView(value.buffer.slice(i, i + SINGLE_SAMPLE_LEN))
+    const len = value?.byteLength || 0
+
+    const processView = (view: DataView) => {
+      try {
+        const counter = view.getUint8(0)
         const ch0 = view.getInt16(1, false)
         const ch1 = view.getInt16(3, false)
         const ch2 = view.getInt16(5, false)
-        console.log(`BLE Sample: CH0=${ch0}, CH1=${ch1}, CH2=${ch2}`)
-        newRawValues.push({ ch0, ch1, ch2 });
-        // Push to global channel data context
-        addSample({ ch0, ch1, ch2, timestamp: Date.now() });
+
+        // Detect unusually large jumps in the 8-bit counter (wrap-aware).
+        // Note: the device often sends multi-sample packets (e.g. 10 samples),
+        // so a counter jump equal to the packet size is expected between
+        // packets. We only warn on large unexpected jumps.
+        if (prevSampleCounter.current !== null) {
+          const diff = (counter - prevSampleCounter.current + 256) % 256
+          if (diff > 50) {
+            console.warn(`BLE large packet counter jump: prev=${prevSampleCounter.current} now=${counter} (+${diff})`)
+          }
+        }
+        prevSampleCounter.current = counter
+
+        // Bookkeeping
+        samplesReceived.current += 1
         sampleIndex.current = (sampleIndex.current + 1) % 1000
         totalSamples.current += 1
+
+        // Forward to channel context and local displays
+        addSample({ ch0, ch1, ch2, timestamp: Date.now() });
+        return { ch0, ch1, ch2, counter }
+      } catch (err) {
+        console.error('Error parsing BLE DataView', err)
+        return null
       }
+    }
 
+    const newRawValues: {ch0: number, ch1: number, ch2: number, counter?: number}[] = []
+
+    if (len === NEW_PACKET_LEN || (len % SINGLE_SAMPLE_LEN) === 0) {
+      // Parse as one or more full samples
+      for (let i = 0; i < len; i += SINGLE_SAMPLE_LEN) {
+        const view = new DataView(value.buffer.slice(i, i + SINGLE_SAMPLE_LEN))
+        const parsed = processView(view)
+        if (parsed) newRawValues.push({ ch0: parsed.ch0, ch1: parsed.ch1, ch2: parsed.ch2, counter: parsed.counter })
+      }
+    } else if (len === SINGLE_SAMPLE_LEN) {
+      const view = new DataView(value.buffer.slice(0, SINGLE_SAMPLE_LEN))
+      const parsed = processView(view)
+      if (parsed) newRawValues.push({ ch0: parsed.ch0, ch1: parsed.ch1, ch2: parsed.ch2, counter: parsed.counter })
+    } else {
+      console.warn(`Unexpected BLE packet length: ${len}`)
+    }
+
+    if (newRawValues.length > 0) {
       // Update raw data display
-      setRawData(prev => [...prev, ...newRawValues])
+      setRawData(prev => [...prev, ...newRawValues.map(v => ({ ch0: v.ch0, ch1: v.ch1, ch2: v.ch2 }))])
 
-      // Update received data log
+      // Update received data log (brief entry)
       const timestamp = new Date().toLocaleTimeString()
       setReceivedData(prev => {
-        const newEntry = `${timestamp}: Packet received (${newRawValues.length} samples) - Total: ${totalSamples.current}`
+        const newEntry = `${timestamp}: Packet parsed (${newRawValues.length} samples) - Total: ${totalSamples.current}`
         return [...prev, newEntry]
       })
+
+      // Optionally log per-packet counters for debugging (less noisy)
+      if (newRawValues.length > 0) {
+        try {
+          // Log every parsed sample in this packet so you can see the
+          // counter and channel values for each sample (verbose).
+          const lines = newRawValues.map(v => `cnt=${v.counter} CH0=${v.ch0} CH1=${v.ch1} CH2=${v.ch2}`)
+          // console.log(`BLE packet samples (${newRawValues.length}):\n` + lines.join('\n'))
+        } catch (err) {
+          // ignore logging errors
+        }
+      }
     }
   }
 

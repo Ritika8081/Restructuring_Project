@@ -7,6 +7,7 @@ import ConfirmModal from '@/components/ui/ConfirmModal';
 import { Widget, GridSettings, DragState, ToastState, ConfirmState } from '@/types/widget.types';
 import { checkCollisionAtPosition } from '@/utils/widget.utils';
 import ConnectionDataWidget from '@/components/ConnectionDataWidget';
+import { useChannelData } from '@/lib/channelDataContext';
 
 /**
  * Main Widgets component - Orchestrates the entire widget dashboard
@@ -406,8 +407,18 @@ const Widgets: React.FC = () => {
     // using the drag-and-drop Applications palette into the flow modal.
     const [flowOptions, setFlowOptions] = useState(initialFlowOptions);
 
-    
-
+    // Register which channel flow nodes are present so the channel data context
+    // will route incoming samples only to the active channels. Also grab the
+    // samples buffer here for debug/inspection when connections change.
+    const { setRegisteredChannels, samples } = useChannelData();
+    useEffect(() => {
+        const channelIds = flowOptions.filter(o => typeof o.id === 'string' && o.id.startsWith('channel-')).map(o => o.id as string);
+        try {
+            setRegisteredChannels(channelIds);
+        } catch (err) {
+            // ignore: context may be undefined during SSR or early render
+        }
+    }, [flowOptions, setRegisteredChannels]);
     // Handlers to increase/decrease visible channels in the combined widget
     const increaseChannels = useCallback(() => {
         // Find max existing channel number and add next
@@ -449,20 +460,52 @@ const Widgets: React.FC = () => {
     }, []);
     // Connections between widgets (user-created)
     const [connections, setConnections] = useState<Array<{ from: string, to: string }>>([]);
+
+    // Debug: Log connections and channel->plot mappings so we can confirm
+    // whether Plot instances (in the Plots box) have incoming channel links.
+    useEffect(() => {
+        try {
+            // list all plot instance ids derived from flowOptions
+            const plotOptions = flowOptions.filter(o => o.type === 'basic');
+            const plotInstanceIds: string[] = [];
+            for (const opt of plotOptions) {
+                const insts = (opt as any).instances || Array.from({ length: (opt.count || 1) }, (_, i) => ({ id: `${opt.id}-${i + 1}` }));
+                for (const ins of insts) plotInstanceIds.push(ins.id);
+            }
+
+            // Find all channel -> plot connections
+            const channelToPlot = connections.filter(c => typeof c.from === 'string' && String(c.from).startsWith('channel-') && typeof c.to === 'string' && plotInstanceIds.includes(String(c.to)));
+
+            console.debug('[FlowDebug] connections', { total: connections.length, connections });
+            console.debug('[FlowDebug] plotInstanceIds', plotInstanceIds);
+            console.debug('[FlowDebug] channel->plot mappings', channelToPlot);
+
+            // For each channel->plot mapping, print recent samples for the mapped channel
+            try {
+                channelToPlot.forEach(mapping => {
+                    try {
+                        const from = String(mapping.from);
+                        const m = from.match(/channel-(\d+)/i);
+                        if (!m) return;
+                        const idx = Math.max(1, parseInt(m[1], 10));
+                        const chKey = `ch${idx - 1}`;
+                        const recent = (samples || []).slice(-8).map(s => ({ ts: s.timestamp, v: (s as any)[chKey] }));
+                        console.debug('[FlowDebug] mapped-samples', { mapping, chKey, recent });
+                    } catch (err) {
+                        // ignore per-mapping errors
+                    }
+                });
+            } catch (err) {
+                // swallow
+            }
+        } catch (err) {
+            // swallow
+        }
+    }, [connections, flowOptions]);
     
-    // Widget collection state with default basic widget (no make-connection widget)
-    const [widgets, setWidgets] = useState<Widget[]>([
-        {
-            id: 'basic-channel',
-            x: 10,
-            y: 7,
-            width: 5,
-            height: 4,
-            minWidth: 5,
-            minHeight: 4,
-            type: 'basic',
-        },
-    ]);
+    // Widget collection state. Start empty — dashboard widgets are created
+    // by the arranger when the user clicks Play (or by explicit Add Widget).
+    const [widgets, setWidgets] = useState<Widget[]>([]);
     // Modal state for connection UI
     const [showConnectionModal, setShowConnectionModal] = useState(false);
 
@@ -2315,8 +2358,11 @@ const Widgets: React.FC = () => {
                                             // Prevent overflow
                                             const safeX = Math.min(x, cols - dynamicWidgetWidth);
                                             const safeY = Math.min(y, rows - dynamicWidgetHeight);
-                                            // Use the instance's own id (stable) when present
-                                            const instanceId = instancesArr.length > 1 ? instancesArr[inst].id : opt.id;
+                                            // Use the instance's own id (stable) so flow connections
+                                            // that target plot instance ids (e.g. `${opt.id}-1`) match
+                                            // the dashboard widget id. Always prefer the instance id
+                                            // generated from the flow option to avoid mismatches.
+                                            const instanceId = instancesArr[inst].id;
                                             const widgetObj: Widget = {
                                                 id: instanceId,
                                                 x: safeX,
