@@ -387,11 +387,12 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
                                         const s = String(src);
                                         if (s.startsWith('channel-')) {
                                             const m = s.match(/channel-(\d+)/i);
-                                            const idx = m ? Math.max(1, parseInt(m[1], 10)) : 1;
+                                            // Parse zero-based channel index from id: 'channel-0' -> 0
+                                            const idx = m ? Math.max(0, parseInt(m[1], 10)) : 0;
                                             // If this dashboard widget is a Plot (`basic`) and the arranger
                                             // assigned a channelIndex, only accept connections that map
-                                            // to the same channel index. This enforces channel1 -> plot-1,
-                                            // channel2 -> plot-2, etc.
+                                            // to the same channel index. This enforces channel0 -> plot-0,
+                                            // channel1 -> plot-1, etc.
                                             const assignedIdx = (widget as any).channelIndex;
                                             if (widget.type === 'basic' && typeof assignedIdx === 'number') {
                                                 if (idx !== assignedIdx) {
@@ -399,8 +400,8 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
                                                     return;
                                                 }
                                             }
-                                            const color = ['#10B981', '#3B82F6', '#F59E0B', '#EF4444', '#8B5CF6', '#06B6D4'][(idx - 1) % 6];
-                                            connChannels.push({ id: `ch${idx - 1}`, name: `CH ${idx}`, color, visible: true });
+                                            const color = ['#10B981', '#3B82F6', '#F59E0B', '#EF4444', '#8B5CF6', '#06B6D4'][idx % 6];
+                                            connChannels.push({ id: `ch${idx}`, name: `CH ${idx + 1}`, color, visible: true });
                                         }
                                     } catch (err) {
                                         // ignore malformed connection ids

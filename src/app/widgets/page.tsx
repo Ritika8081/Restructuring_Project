@@ -391,7 +391,8 @@ const Widgets: React.FC = () => {
     // Use FlowModalContext for modal state
     const { showFlowModal, setShowFlowModal } = require('@/context/FlowModalContext').useFlowModal();
     // List of all possible widgets in the flow (initially based on flowchart)
-    // Channel configuration: default show 3 channels, up to MAX_CHANNELS
+    // Channel configuration: default show DEFAULT_CHANNEL_COUNT channels, up to MAX_CHANNELS
+    // Channel ids are zero-based: 'channel-0', 'channel-1', ...
     const MAX_CHANNELS = 16;
     const DEFAULT_CHANNEL_COUNT = 1;
     const [channelCount, setChannelCount] = useState<number>(DEFAULT_CHANNEL_COUNT);
@@ -399,7 +400,8 @@ const Widgets: React.FC = () => {
     // Generate initial flow options with default channelCount
     // flow option objects may optionally include a `count` property for types that support multiple instances (e.g. 'basic')
     const initialFlowOptions: Array<{ id: string, label: string, type: string, selected: boolean, count?: number }> = [];
-    for (let ch = 1; ch <= DEFAULT_CHANNEL_COUNT; ch++) {
+    // create channel-0 .. channel-(N-1)
+    for (let ch = 0; ch < DEFAULT_CHANNEL_COUNT; ch++) {
         initialFlowOptions.push({ id: `channel-${ch}`, label: `Channel ${ch}`, type: 'channel', selected: true });
     }
     // By default we only include the configured channels in the flowchart.
@@ -444,7 +446,8 @@ const Widgets: React.FC = () => {
                 return m ? parseInt(m[1], 10) : 0;
             });
             const maxExisting = nums.length > 0 ? Math.max(...nums) : 0;
-            if (maxExisting <= 1) return prevOpts;
+            // don't remove if only channel-0 remains
+            if (maxExisting <= 0) return prevOpts;
             const removeId = `channel-${maxExisting}`;
             // remove the highest-numbered channel and any connections to it
             setConnections(prevConn => prevConn.filter(c => c.from !== removeId && c.to !== removeId));
@@ -468,7 +471,7 @@ const Widgets: React.FC = () => {
             const plotOptions = flowOptions.filter(o => o.type === 'basic');
             const plotInstanceIds: string[] = [];
             for (const opt of plotOptions) {
-                const insts = (opt as any).instances || Array.from({ length: (opt.count || 1) }, (_, i) => ({ id: `${opt.id}-${i + 1}` }));
+                const insts = (opt as any).instances || Array.from({ length: (opt.count || 1) }, (_, i) => ({ id: `${opt.id}-${i}` }));
                 for (const ins of insts) plotInstanceIds.push(ins.id);
             }
 
@@ -784,7 +787,7 @@ const Widgets: React.FC = () => {
         const id = `${canonical}-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
 
         // Add to flowOptions so it's rendered in the flow modal
-    setFlowOptions(prev => [...prev, { id, label, type: canonical, selected: true, ...(canonical === 'basic' ? { instances: [{ id: `${id}-1`, label: `${label} 1` }] } : {}) }]);
+    setFlowOptions(prev => [...prev, { id, label, type: canonical, selected: true, ...(canonical === 'basic' ? { instances: [{ id: `${id}-0`, label: `${label} 0` }] } : {}) }]);
 
         // Clamp left/top to reasonable bounds inside the flow modal container
         const containerWidth = 1200; // default used elsewhere
@@ -806,7 +809,8 @@ const Widgets: React.FC = () => {
         setFlowOptions(prev => prev.map(o => {
             if (o.id !== optId) return o;
             const existing = (o as any).instances || [];
-            const nextIndex = existing.length + 1;
+            // nextIndex is zero-based
+            const nextIndex = existing.length;
             const newId = `${o.id}-${Date.now().toString(36).substr(2,6)}-${nextIndex}`;
             const newLabel = `${o.label} ${nextIndex}`;
             return { ...o, instances: [...existing, { id: newId, label: newLabel }] };
@@ -834,10 +838,10 @@ const Widgets: React.FC = () => {
             addBasicInstance(selectedBasic.id);
             return;
         }
-        // Create a new basic flow option with one instance
-        const id = `basic-${Date.now()}-${Math.random().toString(36).substr(2,6)}`;
-        const label = 'Plot';
-        setFlowOptions(prev => [...prev, { id, label, type: 'basic', selected: true, instances: [{ id: `${id}-1`, label: `${label} 1` }] }]);
+    // Create a new basic flow option with one instance (zero-based instance id/label)
+    const id = `basic-${Date.now()}-${Math.random().toString(36).substr(2,6)}`;
+    const label = 'Plot';
+    setFlowOptions(prev => [...prev, { id, label, type: 'basic', selected: true, instances: [{ id: `${id}-0`, label: `${label} 0` }] }]);
         setModalPositions(prev => ({ ...prev, [id]: { left: 200, top: 100 } }));
     }, [flowOptions, addBasicInstance]);
 
@@ -1686,7 +1690,7 @@ const Widgets: React.FC = () => {
                                 const plotOptions = flowOptions.filter(o => o.type === 'basic');
                                 const plotInstances: Array<{ id: string, label: string }> = [];
                                 for (const opt of plotOptions) {
-                                    const insts = (opt as any).instances || Array.from({ length: (opt.count || 1) }, (_, i) => ({ id: `${opt.id}-${i + 1}`, label: `${opt.label} ${i + 1}` }));
+                                    const insts = (opt as any).instances || Array.from({ length: (opt.count || 1) }, (_, i) => ({ id: `${opt.id}-${i}`, label: `${opt.label} ${i}` }));
                                     for (const ins of insts) plotInstances.push({ id: ins.id, label: ins.label });
                                 }
                                 const plotsCount = plotInstances.length;
@@ -1978,7 +1982,7 @@ const Widgets: React.FC = () => {
                                 const defaultTop = 100 + Math.floor(idx / 3) * 120;
                                 const widgetLeft = modalPositions[widgetId]?.left ?? defaultLeft;
                                 const widgetTop = modalPositions[widgetId]?.top ?? defaultTop;
-                                const instancesList = (opt as any).instances || Array.from({ length: (opt.count || 1) }, (_, i) => ({ id: `${opt.id}-${i + 1}`, label: `${opt.label} ${i + 1}` }));
+                                const instancesList = (opt as any).instances || Array.from({ length: (opt.count || 1) }, (_, i) => ({ id: `${opt.id}-${i}`, label: `${opt.label} ${i}` }));
                                 // Make Plot boxes larger in the flow modal so input/output handles fit inside
                                 const widgetWidth = opt.type === 'bandpower' ? 220 : (opt.type === 'basic' ? 240 : 180);
                                 // Make Plot boxes grow vertically as instances are added so handles remain visible
@@ -2304,8 +2308,8 @@ const Widgets: React.FC = () => {
                                     const allInstanceIds = new Set<string>();
                                     for (const opt of widgetTypes) {
                                         if (opt.type === 'basic') {
-                                            const insts = (opt as any).instances || Array.from({ length: (opt.count || 1) }, (_, i) => ({ id: `${opt.id}-${i + 1}` }));
-                                            for (const ins of insts) allInstanceIds.add(ins.id);
+                            const insts = (opt as any).instances || Array.from({ length: (opt.count || 1) }, (_, i) => ({ id: `${opt.id}-${i}` }));
+                                for (const ins of insts) allInstanceIds.add(ins.id);
                                         }
                                     }
                                     // Find channels that are already routed into instances via connections
@@ -2314,15 +2318,15 @@ const Widgets: React.FC = () => {
                                         try {
                                             if (typeof c.from === 'string' && typeof c.to === 'string' && c.from.startsWith('channel-') && allInstanceIds.has(c.to)) {
                                                 const m = c.from.match(/channel-(\d+)/i);
-                                                const idxVal = m ? Math.max(1, parseInt(m[1], 10)) : null;
-                                                if (idxVal) channelsRouted.add(idxVal);
+                                                const idxVal = m ? parseInt(m[1], 10) : null;
+                                                if (idxVal !== null && !isNaN(idxVal)) channelsRouted.add(idxVal);
                                             }
                                         } catch (err) { /* ignore */ }
                                     }
 
                                     // Expand selected flow options into dashboard widgets.
                                     // For 'basic' flow items we support an optional `count` property which
-                                    // will create multiple dashboard widgets (with channelIndex 1..count).
+                                    // will create multiple dashboard widgets (with zero-based channelIndex 0..count-1).
                                     let placeIndex = 0;
                                     widgetTypes.forEach((opt, optIdx) => {
                                         // If this option is a channel and it's already routed into a
@@ -2330,10 +2334,10 @@ const Widgets: React.FC = () => {
                                         // avoid duplicate widgets for the same channel index.
                                         if (typeof opt.id === 'string' && opt.id.startsWith('channel-')) {
                                             const m = opt.id.match(/channel-(\d+)/i);
-                                            const idxVal = m ? Math.max(1, parseInt(m[1], 10)) : null;
-                                            if (idxVal && channelsRouted.has(idxVal)) return;
+                                            const idxVal = m ? parseInt(m[1], 10) : null;
+                                            if (idxVal !== null && !isNaN(idxVal) && channelsRouted.has(idxVal)) return;
                                         }
-                                        const instancesArr: Array<{ id: string, label?: string }> = (opt as any).instances || Array.from({ length: (opt.count || 1) }, (_, i) => ({ id: `${opt.id}-${i + 1}`, label: `${opt.label} ${i + 1}` }));
+                                        const instancesArr: Array<{ id: string, label?: string }> = (opt as any).instances || Array.from({ length: (opt.count || 1) }, (_, i) => ({ id: `${opt.id}-${i}`, label: `${opt.label} ${i}` }));
                                         for (let inst = 0; inst < instancesArr.length; inst++) {
                                             const rowIdx = placeIndex % gridRows;
                                             const colIdx = Math.floor(placeIndex / gridRows);
@@ -2361,13 +2365,14 @@ const Widgets: React.FC = () => {
                                             // If this flow option corresponds to a channel (channel-#), record the channel index
                                             if (typeof opt.id === 'string' && opt.id.startsWith('channel-')) {
                                                 const m = opt.id.match(/channel-(\d+)/i);
-                                                const idxVal = m ? Math.max(1, parseInt(m[1], 10)) : 1;
+                                                // treat parsed id as zero-based index
+                                                const idxVal = m ? Math.max(0, parseInt(m[1], 10)) : 0;
                                                 (widgetObj as any).channelIndex = idxVal;
                                             }
                                             // If this is a basic flow option with instances, assign channelIndex sequentially
                                             if (opt.type === 'basic') {
-                                                // channelIndex is 1-based (used by DraggableWidget to map ch{index-1})
-                                                (widgetObj as any).channelIndex = inst + 1;
+                                                // channelIndex is zero-based (used by DraggableWidget to map ch{index})
+                                                (widgetObj as any).channelIndex = inst;
                                             }
 
                                             newWidgets.push(widgetObj);
