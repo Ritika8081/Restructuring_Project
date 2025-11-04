@@ -44,18 +44,18 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
                 // Prefer explicit channelIndex property when present
                 const propIndex = (widget as any).channelIndex;
                 const colors = ['#10B981', '#3B82F6', '#F59E0B', '#EF4444', '#8B5CF6', '#06B6D4'];
-                if (typeof propIndex === 'number' && propIndex >= 1) {
-                    const idx = Math.max(1, Math.floor(propIndex));
-                    const color = colors[(idx - 1) % colors.length];
-                    // channel data keys are zero-based (ch0, ch1, ...). Use ch{idx-1} as id.
-                    return [{ id: `ch${idx - 1}`, name: `CH ${idx}`, color, visible: true }];
+                if (typeof propIndex === 'number' && propIndex >= 0) {
+                    const idx = Math.max(0, Math.floor(propIndex));
+                    const color = colors[idx % colors.length];
+                    // channel data keys are zero-based (ch0, ch1, ...). Use ch{idx} as id.
+                    return [{ id: `ch${idx}`, name: `CH ${idx + 1}`, color, visible: true }];
                 }
                 // Fallback to parsing id (legacy behavior)
                 if (typeof widget.id === 'string' && widget.id.startsWith('channel-')) {
                     const m = widget.id.match(/channel-(\d+)/i);
-                    const idx = m ? Math.max(1, parseInt(m[1], 10)) : 1;
-                    const color = colors[(idx - 1) % colors.length];
-                    return [{ id: `ch${idx - 1}`, name: `CH ${idx}`, color, visible: true }];
+                    const idx = m ? Math.max(0, parseInt(m[1], 10)) : 0;
+                    const color = colors[idx % colors.length];
+                    return [{ id: `ch${idx}`, name: `CH ${idx + 1}`, color, visible: true }];
                 }
             }
         } catch (err) {
@@ -71,20 +71,20 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
             if (widget && widget.type === 'basic') {
                 const propIndex = (widget as any).channelIndex;
                 const colors = ['#10B981', '#3B82F6', '#F59E0B', '#EF4444', '#8B5CF6', '#06B6D4'];
-                if (typeof propIndex === 'number' && propIndex >= 1) {
-                    const idx = Math.max(1, Math.floor(propIndex));
-                    const color = colors[(idx - 1) % colors.length];
+                if (typeof propIndex === 'number' && propIndex >= 0) {
+                    const idx = Math.max(0, Math.floor(propIndex));
+                    const color = colors[idx % colors.length];
                     // zero-based channel id (ch0, ch1, ...)
-                    setWidgetChannels([{ id: `ch${idx - 1}`, name: `CH ${idx}`, color, visible: true }]);
+                    setWidgetChannels([{ id: `ch${idx}`, name: `CH ${idx + 1}`, color, visible: true }]);
                     return;
                 }
                 // Fallback to parse id
                 if (typeof widget.id === 'string' && widget.id.startsWith('channel-')) {
                     const m = widget.id.match(/channel-(\d+)/i);
-                    const idx = m ? Math.max(1, parseInt(m[1], 10)) : 1;
-                    const color = colors[(idx - 1) % colors.length];
+                    const idx = m ? Math.max(0, parseInt(m[1], 10)) : 0;
+                    const color = colors[idx % colors.length];
                     // zero-based channel id (ch0, ch1, ...)
-                    setWidgetChannels([{ id: `ch${idx - 1}`, name: `CH ${idx}`, color, visible: true }]);
+                    setWidgetChannels([{ id: `ch${idx}`, name: `CH ${idx + 1}`, color, visible: true }]);
                     return;
                 }
             }
@@ -208,7 +208,7 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
     }, [widget.type, widgetChannels]);
 
     // Consider this a channel-sourced widget when it either has an explicit channelIndex
-    // (created by the arranger) or its id is a channel id like 'channel-1'. For those we
+    // (created by the arranger) or its id is a channel id like 'channel-0'. For those we
     // want the header and graph controls to match Channel widgets.
     const isChannelWidget = useMemo(() => {
         // Treat as a true "channel widget" only when the widget id is a channel id
@@ -266,51 +266,6 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
                 ${isDragging ? ' ring-2 ring-blue-300' : ''}`}
             style={style}
         >
-            {/* Widget Header */}
-            <div className="flex items-center justify-between p-3 border-b border-gray-100 relative z-20">
-                <div className="flex items-center gap-2 flex-1">
-                    {/* Input circle (visual only) */}
-                    {showHeaderCircles && (
-                        <svg width={14} height={14} style={{ marginRight: 6 }}>
-                            <circle cx={7} cy={7} r={5} fill="#fff" stroke={widgetChannels[0]?.color || '#10B981'} strokeWidth={1.5} />
-                        </svg>
-                    )}
-
-                    <h3 className="text-sm font-medium text-gray-700 flex items-center gap-2">
-                        {isChannelWidget ? (
-                            <>
-                                <span style={{ width: 10, height: 10, borderRadius: 6, background: widgetChannels[0]?.color || '#10B981', display: 'inline-block', boxShadow: '0 0 0 2px rgba(0,0,0,0.03)' }} />
-                                <span>{widgetChannels[0]?.name || getWidgetTitle(widget.type, widget.width)}</span>
-                            </>
-                        ) : (
-                            <>
-                                {getWidgetTitle(widget.type, widget.width)}
-                                <span className="text-xs text-gray-500">{getChannelInfo()}</span>
-                            </>
-                        )}
-                    </h3>
-
-                    {/* Channel controls removed: channel configuration is managed from Flow modal only */}
-                </div>
-
-                <div className="flex items-center gap-2 relative z-30">
-                    {/* Output circle (visual only) */}
-                    {showHeaderCircles && (
-                        <svg width={14} height={14} style={{ marginRight: 6 }}>
-                            <circle cx={7} cy={7} r={5} fill="#fff" stroke="#2563eb" strokeWidth={1.5} />
-                        </svg>
-                    )}
-
-                    <span className="text-xs text-gray-400">{`${widget.width}×${widget.height}`}</span>
-                    <button
-                        onClick={handleRemove}
-                        className="w-6 h-6 text-gray-400 hover:text-red-500 hover:bg-red-50 opacity-60 group-hover:opacity-100 transition-all duration-200 flex items-center justify-center rounded text-sm font-bold border border-transparent hover:border-red-200"
-                        title="Remove widget"
-                    >
-                        ×
-                    </button>
-                </div>
-            </div>
 
             {/* Widget Content Area */}
             <div

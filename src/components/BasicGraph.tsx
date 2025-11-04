@@ -70,7 +70,10 @@ interface BasicGraphRealtimeProps {
 const BasicGraphRealtime = forwardRef((props: BasicGraphRealtimeProps, ref) => {
   const {
     channels: initialChannels = [
-      { id: 'ch1', name: 'CH 1', color: '#10B981', visible: true },
+      // Default channel id uses 0-based numbering (ch0) to match the
+      // project's canonical 0-based channel indexing. UI label remains
+      // 1-based for human readability ("CH 1").
+      { id: 'ch0', name: 'CH 1', color: '#10B981', visible: true },
     ],
   bufferSize = 2000,
     width = 400,
@@ -97,6 +100,8 @@ const BasicGraphRealtime = forwardRef((props: BasicGraphRealtimeProps, ref) => {
   // rendering work bounded and avoid UI freezes when bursts arrive.
   const pendingPerChannel = useRef<Map<string, number[]>>(new Map());
   const previousCounterRef = useRef<number | null>(null);
+  // Rate-limit missing-sample warnings from this component to avoid console spam
+  const lastMissingWarnRef = useRef<number>(0);
   
   // Update internal channels when external channels change
   useEffect(() => {
@@ -371,6 +376,40 @@ const BasicGraphRealtime = forwardRef((props: BasicGraphRealtimeProps, ref) => {
           try {
             const seqs = sampleBatch.map(s => (s as any)._seq ?? null);
             const counters = sampleBatch.map(s => (s as any).counter ?? (s as any).cnt ?? null);
+            // Plot-level missing-sample detection: look for gaps in the 8-bit
+            // device counter. We check continuity with the last seen counter
+            // (possibly observed in previous batches or via imperative updates)
+            try {
+              if (counters.length > 0) {
+                let prev = previousCounterRef.current;
+                let totalMissing = 0;
+                const nonSeqIndices: number[] = [];
+                for (let i = 0; i < counters.length; i++) {
+                  const cur = counters[i];
+                  if (cur === null || cur === undefined) continue;
+                  if (prev !== null) {
+                    const d = (cur - prev + 256) % 256;
+                    if (d > 1) {
+                      totalMissing += (d - 1);
+                      nonSeqIndices.push(i);
+                    }
+                  }
+                  prev = cur as number;
+                }
+                // Also check the first element against previousCounterRef
+                const now = Date.now();
+                if (totalMissing > 0 && now - lastMissingWarnRef.current > 1000) {
+                  lastMissingWarnRef.current = now;
+                  try {
+                    console.warn(`[BasicGraph${instanceId ? `:${instanceId}` : ''}] detected missing samples in sampleBatch`, { batchSize: sampleBatch.length, seqs, counters, totalMissing, nonSeqIndices });
+                  } catch (err) { /* swallow */ }
+                }
+                // Update previousCounterRef to last seen counter in this batch
+                previousCounterRef.current = prev as number | null;
+              }
+            } catch (err) {
+              // swallow detection errors
+            }
             const first = sampleBatch[0] as any;
             const firstPreview: Record<string, number | null> = {};
             for (const ch of channels) {
@@ -402,7 +441,7 @@ const BasicGraphRealtime = forwardRef((props: BasicGraphRealtimeProps, ref) => {
       }
 
   // Enqueue sample values into per-channel pending queues. Note that we
-  // match channel IDs by heuristics (e.g., `ch1` -> sample[`ch1`]) to
+  // match channel IDs by heuristics (e.g., `ch0` -> sample[`ch0`]) to
   // support multiple naming conventions; this logic is intentionally
   // defensive to avoid crashes on unexpected packet shapes.
       try {
@@ -533,6 +572,19 @@ const BasicGraphRealtime = forwardRef((props: BasicGraphRealtimeProps, ref) => {
     }
   }, [allowDeviceSamples, visibleChannels]);
 
+  // Derive a display label from the internal channel id (e.g., `ch0`).
+  // This ensures the UI reflects the repository-wide 0-based indexing
+  // while still allowing `channel.name` to be used as a fallback.
+  const getChannelDisplayLabel = (channel: Channel) => {
+    try {
+      const m = String(channel.id).match(/ch(\d+)/i);
+      if (m) return `CH ${parseInt(m[1], 10)}`; // show zero-based label: CH 0
+    } catch (err) {
+      // ignore and fallback
+    }
+    return channel.name;
+  };
+
   return (
     <div
       style={{
@@ -555,10 +607,10 @@ const BasicGraphRealtime = forwardRef((props: BasicGraphRealtimeProps, ref) => {
             flex: 'none'
           }}>
             {/* Channel Label */}
-            <div className="absolute top-1 left-2 z-10 text-xs font-medium px-2 py-1 bg-white bg-opacity-90 rounded "
-                 style={{ color: channel.color }}>
-              {channel.name}
-            </div>
+          <div className="absolute top-1 left-2 z-10 text-xs font-medium px-2 py-1 bg-white bg-opacity-90 rounded "
+            style={{ color: channel.color }}>
+          {getChannelDisplayLabel(channel)}
+        </div>
             
             {/* Channel Canvas */}
             <canvas

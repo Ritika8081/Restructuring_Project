@@ -30,7 +30,8 @@ export type ChannelDataContextType = {
   addSampleRef?: React.MutableRefObject<((sample: ChannelSample) => void) | null>;
   clearSamples: () => void;
   // Register which flowchart channel nodes should receive data.
-  // Provide list of flow node ids (e.g. ['channel-1','channel-2']).
+  // Provide list of flow node ids (e.g. ['channel-0','channel-1']).
+  // NOTE: channel ids are zero-based (channel-0 -> index 0).
   setRegisteredChannels: (ids: string[]) => void;
   // Subscribe to incoming sample BATCHES. The callback receives an array of
   // ChannelSample objects flushed in the most recent animation frame.
@@ -70,7 +71,8 @@ export const ChannelDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
       try {
         const m = String(id).match(/channel-(\d+)/i);
         if (m) {
-          const idx = Math.max(0, parseInt(m[1], 10) - 1);
+          // Now treating channel ids as 0-based: 'channel-0' -> index 0
+          const idx = Math.max(0, parseInt(m[1], 10));
           s.add(idx);
         }
       } catch (err) {
