@@ -20,7 +20,8 @@ declare global {
 }
 
 export default function SerialConnection() {
-  const { addSample } = useChannelData();
+  const channelData = useChannelData();
+  const providerAddSampleRef = channelData.addSampleRef;
   const [isConnected, setIsConnected] = useState(false)
   const [device, setDevice] = useState<any | null>(null)
   const [receivedData, setReceivedData] = useState<string[]>([])
@@ -154,8 +155,13 @@ export default function SerialConnection() {
           const ch2 = (packet[7] << 8) | packet[8] // Channel 2
           
           const newSample = { ch0, ch1, ch2 }
-          // Push to global channel data context
-          addSample({ ch0, ch1, ch2, timestamp: Date.now() });
+          // Push to global channel data context (use provider ref when available)
+          try {
+            const dispatchSample = providerAddSampleRef?.current ?? channelData.addSample;
+            dispatchSample && dispatchSample({ ch0, ch1, ch2, timestamp: Date.now() });
+          } catch (err) {
+            console.error('addSample error', err);
+          }
           // Update current data (real-time display)
           setCurrentData(newSample)
           // Update recent samples (keep only last MAX_DISPLAY_SAMPLES)

@@ -13,7 +13,8 @@ import { useState, useRef, useEffect } from 'react'
 import { useChannelData } from '@/lib/channelDataContext';
 
 export default function WifiConnection() {
-  const { addSample } = useChannelData();
+  const channelData = useChannelData();
+  const providerAddSampleRef = channelData.addSampleRef;
   const [isConnected, setIsConnected] = useState(false)
   const [device, setDevice] = useState<WebSocket | null>(null)
   const [receivedData, setReceivedData] = useState<string[]>([])
@@ -26,7 +27,6 @@ export default function WifiConnection() {
   const sampleIndex = useRef(0)
   const totalSamples = useRef(0)
   const wsRef = useRef<WebSocket | null>(null)
-
   // Device constants
   const SAMPLE_RATE = 500
   const FPS = 25
@@ -101,8 +101,13 @@ export default function WifiConnection() {
             
             // Add all 3 channels to raw data display
             newRawValues.push({ ch0, ch1, ch2 });
-            // Push to global channel data context
-            addSample({ ch0, ch1, ch2, timestamp: Date.now() });
+            // Push to global channel data context (use provider ref when available)
+            try {
+              const dispatchSample = providerAddSampleRef?.current ?? channelData.addSample;
+              dispatchSample && dispatchSample({ ch0, ch1, ch2, timestamp: Date.now(), counter });
+            } catch (err) {
+              console.error('addSample error', err);
+            }
             sampleIndex.current = (sampleIndex.current + 1) % 1000
             totalSamples.current += 1
           }
@@ -136,11 +141,14 @@ export default function WifiConnection() {
               const ch1 = (block[3] << 8) | block[4]
               const ch2 = (block[5] << 8) | block[6]
               
-              newRawValues.push({
-                ch0: ch0,
-                ch1: ch1,
-                ch2: ch2
-              })
+              newRawValues.push({ ch0: ch0, ch1: ch1, ch2: ch2 })
+              // Push to global channel data context (use provider ref when available)
+              try {
+                const dispatchSample = providerAddSampleRef?.current ?? channelData.addSample;
+                dispatchSample && dispatchSample({ ch0, ch1, ch2, timestamp: Date.now(), counter });
+              } catch (err) {
+                console.error('addSample error', err);
+              }
               
               sampleIndex.current = (sampleIndex.current + 1) % 1000
               totalSamples.current += 1

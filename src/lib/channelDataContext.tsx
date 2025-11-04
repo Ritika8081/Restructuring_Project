@@ -26,13 +26,17 @@ export type ChannelSample = {
 export type ChannelDataContextType = {
   samples: ChannelSample[];
   addSample: (sample: ChannelSample) => void;
+  // Optional ref exposing the addSample function for high-frequency producers
+  addSampleRef?: React.MutableRefObject<((sample: ChannelSample) => void) | null>;
   clearSamples: () => void;
   // Register which flowchart channel nodes should receive data.
   // Provide list of flow node ids (e.g. ['channel-1','channel-2']).
   setRegisteredChannels: (ids: string[]) => void;
-  // Subscribe to incoming samples. The callback receives an array of
+  // Subscribe to incoming sample BATCHES. The callback receives an array of
   // ChannelSample objects flushed in the most recent animation frame.
-  subscribe?: (cb: (samples: ChannelSample[]) => void) => () => void;
+  // This is a subscription to sample "batches" that the provider emits
+  // on each rAF flush. Use the returned function to unsubscribe.
+  subscribeToSampleBatches?: (onSampleBatch: (samples: ChannelSample[]) => void) => () => void;
 };
 
 const ChannelDataContext = createContext<ChannelDataContextType | undefined>(undefined);
@@ -47,13 +51,18 @@ export const ChannelDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
   // Track which channel indices (0-based) are currently present in the flowchart.
   // We keep this in a ref for cheap lookups inside addSample.
   const registeredChannelIndices = useRef<Set<number>>(new Set());
-  // Batch incoming samples to avoid rapid setState loops when device sends
-  // many samples quickly. We collect samples in a ref and flush on rAF.
-  const pendingSamplesRef = useRef<any[]>([]);
+  // Queue of incoming samples to be flushed on the next animation frame.
+  // This batches high-frequency producers to avoid React render storms.
+  const incomingSampleQueueRef = useRef<any[]>([]);
   const rafHandleRef = useRef<number | null>(null);
   const lastCounterRef = useRef<number | null>(null);
   const lastOkFlushTimeRef = useRef<number>(0);
+  const lastAddLogRef = useRef<number>(0);
+  const sampleSeqRef = useRef<number>(0);
   const subscribersRef = useRef<Set<(s: ChannelSample[]) => void>>(new Set());
+  // Expose addSample via a ref for high-frequency consumers that run
+  // outside React lifecycles (e.g. BLE notification handlers).
+  const addSampleRef = useRef<((sample: ChannelSample) => void) | null>(null);
 
   const setRegisteredChannels = useCallback((ids: string[]) => {
     const s = new Set<number>();
@@ -69,11 +78,14 @@ export const ChannelDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
       }
     });
     registeredChannelIndices.current = s;
+    try { console.info('[ChannelData] setRegisteredChannels', { ids, registeredIndices: Array.from(s).sort((a,b)=>a-b) }); } catch (e) {}
   }, []);
 
   const addSample = useCallback((sample: ChannelSample) => {
     try {
       const processed: any = {};
+      // Keep a copy of the raw incoming sample for debugging/tracing.
+      try { (processed as any)._raw = { ...(sample as any) }; } catch (e) {}
       for (let i = 0; i < 16; i++) {
         const key = `ch${i}`;
         if ((sample as any)[key] === undefined) break;
@@ -82,8 +94,21 @@ export const ChannelDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
   if ((sample as any).timestamp) processed.timestamp = (sample as any).timestamp;
   if ((sample as any).counter !== undefined) processed.counter = (sample as any).counter;
 
-      // Queue sample for batched flush on the next animation frame
-      pendingSamplesRef.current.push(processed as ChannelSample);
+        // Queue sample for batched flush on the next animation frame
+        // Attach a monotonic sequence id to help trace ordering across layers
+        sampleSeqRef.current = (sampleSeqRef.current + 1) % 1000000;
+        (processed as any)._seq = sampleSeqRef.current;
+        incomingSampleQueueRef.current.push(processed as ChannelSample);
+
+      // Rate-limited incoming-sample debug to help trace counters end-to-end
+      try {
+        const now = Date.now();
+        if (now - lastAddLogRef.current > 200) {
+          lastAddLogRef.current = now;
+          const cnt = (sample as any).counter;
+          try { console.debug('[ChannelData] queued sample counter', { counter: cnt, registered: Array.from(registeredChannelIndices.current).sort((a,b)=>a-b) }); } catch (e) {}
+        }
+      } catch (err) {}
 
       // Debug: lightweight log
       try {
@@ -94,12 +119,12 @@ export const ChannelDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
       if (rafHandleRef.current == null) {
         rafHandleRef.current = requestAnimationFrame(() => {
           try {
-            const toFlush = pendingSamplesRef.current.splice(0);
-            if (toFlush.length === 0) return;
-              // detect dropped counters across the flushed batch
+            const sampleBatch = incomingSampleQueueRef.current.splice(0);
+            if (sampleBatch.length === 0) return;
+              // detect dropped counters across the emitted sample batch
               try {
                 const counters: number[] = []
-                for (const s of toFlush) {
+                for (const s of sampleBatch) {
                   if ((s as any).counter !== undefined) {
                     const cur = (s as any).counter as number;
                     counters.push(cur);
@@ -128,19 +153,19 @@ export const ChannelDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
                     }
                     // Always emit a debug-level summary; escalate to warn if gaps exist
                     if (totalMissing > 0) {
-                      console.warn('[ChannelData] flush detected missing samples in batch', { flushed: toFlush.length, first, last, missing: totalMissing })
+                      console.warn('[ChannelData] batch detected missing samples', { batchSize: sampleBatch.length, first, last, missing: totalMissing })
                     } else {
                       // Rate-limit positive confirmation to avoid noisy logs
                       try {
                         const now = Date.now()
                         if (now - lastOkFlushTimeRef.current > 5000) {
-                          console.info('[ChannelData] flush OK: no missing samples', { flushed: toFlush.length, first, last })
+                          console.info('[ChannelData] batch OK: no missing samples', { batchSize: sampleBatch.length, first, last })
                           lastOkFlushTimeRef.current = now
                         } else {
-                          console.debug('[ChannelData] flush', { flushed: toFlush.length, first, last })
+                          console.debug('[ChannelData] batch', { batchSize: sampleBatch.length, first, last })
                         }
                       } catch (err) {
-                        console.debug('[ChannelData] flush', { flushed: toFlush.length, first, last })
+                        console.debug('[ChannelData] batch', { batchSize: sampleBatch.length, first, last })
                       }
                     }
                   } catch (err) { }
@@ -152,7 +177,7 @@ export const ChannelDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
             // Merge flushed samples into the live ref buffer (bounded)
             try {
               const sliced = samplesRef.current.slice(-511);
-              const merged = [...sliced, ...toFlush];
+              const merged = [...sliced, ...sampleBatch];
               samplesRef.current = merged.slice(-512);
             } catch (err) {
               // ignore
@@ -169,10 +194,10 @@ export const ChannelDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
             } catch (err) {
               // ignore
             }
-            // Notify subscribers with the flushed samples
+            // Notify subscribers with the emitted sample batch
             try {
-              subscribersRef.current.forEach(cb => {
-                try { cb(toFlush.slice()); } catch (err) { /* ignore per-cb errors */ }
+              subscribersRef.current.forEach(subscriber => {
+                try { subscriber(sampleBatch.slice()); } catch (err) { /* ignore per-subscriber errors */ }
               });
             } catch (err) { /* swallow */ }
           } catch (err) {
@@ -189,15 +214,20 @@ export const ChannelDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
     }
   }, []);
 
+  // Keep the exported ref up-to-date with the latest addSample implementation
+  useEffect(() => {
+    addSampleRef.current = addSample;
+  }, [addSample]);
+
   const clearSamples = useCallback(() => {
     samplesRef.current = [];
     try { setSnapshot([]); } catch (err) {}
     lastCounterRef.current = null;
   }, []);
 
-  const subscribe = useCallback((cb: (s: ChannelSample[]) => void) => {
-    subscribersRef.current.add(cb);
-    return () => { subscribersRef.current.delete(cb); };
+  const subscribeToSampleBatches = useCallback((onSampleBatch: (s: ChannelSample[]) => void) => {
+    subscribersRef.current.add(onSampleBatch);
+    return () => { subscribersRef.current.delete(onSampleBatch); };
   }, []);
 
   // Cleanup pending RAF when provider unmounts
@@ -210,7 +240,7 @@ export const ChannelDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
   }, []);
 
   return (
-    <ChannelDataContext.Provider value={{ samples: snapshot, addSample, clearSamples, setRegisteredChannels, subscribe }}>
+    <ChannelDataContext.Provider value={{ samples: snapshot, addSample, addSampleRef, clearSamples, setRegisteredChannels, subscribeToSampleBatches }}>
       {children}
     </ChannelDataContext.Provider>
   );

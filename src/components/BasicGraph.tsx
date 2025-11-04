@@ -1,18 +1,35 @@
 "use client";
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useImperativeHandle, forwardRef } from 'react';
 import { useChannelData } from '@/lib/channelDataContext';
 /**
  * src/components/BasicGraph.tsx
  *
  * Purpose: Low-level WebGL-based real-time plotting component. Renders one
- * or more channels using webgl-plot and maintains small ring buffers for
- * each visible channel. Used by dashboard `basic`/Plot widgets.
+ * or more channels using the `webgl-plot` library and maintains per-channel
+ * ring buffers in memory. This component is intended for high-throughput
+ * streaming data where samples are provided in batches by the
+ * ChannelDataProvider (see `useChannelData()`).
+ *
+ * Key responsibilities / invariants:
+ * - Subscribe to batch-flushed samples (the provider emits an array of
+ *   samples on each animation-frame flush). The consumer callback must be
+ *   read-only (do not call `addSample` from within the callback).
+ * - Buffer incoming values per-channel (pending queues) and drain up to
+ *   `samplesPerFrame` each animation frame so rendering work is bounded.
+ * - Keep a fixed-size circular buffer (`bufferSize`) per plotted channel
+ *   and update the WebGL line from that buffer each frame.
+ * - Preserve `_raw` and `_seq` fields when present (these are attached by
+ *   the provider for tracing and continuity checks) and prefer raw values
+ *   when available so the plotted values reflect device measurements even
+ *   when the provider zeroes unregistered channels.
  *
  * Exports: BasicGraphRealtime React component (default export under a different name)
- *
- * Notes: Uses `useChannelData()` to subscribe to live samples.
  */
-// Device samples are injected by parent components (do not read context directly)
+// Device samples are typically injected by the parent widget when this
+// plot instance is connected to flow channels. In addition this component
+// subscribes to the ChannelData provider's `subscribeToSampleBatches` API
+// to receive live sample batches. Do NOT read provider state directly here
+// (use the subscription) unless you understand the performance implications.
 import { WebglPlot, WebglLine, ColorRGBA } from 'webgl-plot';
 
 interface Channel {
@@ -48,44 +65,61 @@ interface BasicGraphRealtimeProps {
   samplesPerFrame?: number;
 }
 
-const DEFAULT_COLORS = [
-  '#10B981', '#3B82F6', '#F59E0B', '#EF4444', 
-  '#8B5CF6', '#06B6D4', '#F97316', '#84CC16',
-  '#EC4899', '#6366F1', '#14B8A6', '#F43F5E'
-];
+// DEFAULT_COLORS removed (not used in this component)
 
-const BasicGraphRealtime: React.FC<BasicGraphRealtimeProps> = (props) => {
+const BasicGraphRealtime = forwardRef((props: BasicGraphRealtimeProps, ref) => {
   const {
     channels: initialChannels = [
       { id: 'ch1', name: 'CH 1', color: '#10B981', visible: true },
     ],
-  bufferSize = 1000,
+  bufferSize = 2000,
     width = 400,
     height = 200,
     showGrid = true,
     backgroundColor = 'rgba(0, 0, 0, 0.1)',
-    showLegend = false,
-    sampleRate = 60,
-    timeWindow = 8,
   samplesPerFrame = bufferSize,
     onChannelsChange,
-    showChannelControls = false,
     onSizeRequest,
   } = props;
   const { allowDeviceSamples = false, deviceSamples, instanceId } = props;
+  // Optional external controls: keep selectedChannels for the imperative API
+  const { selectedChannels: propSelectedChannels } = props as any;
   const [channels, setChannels] = useState<Channel[]>(initialChannels);
   const canvasRefs = useRef<Map<string, HTMLCanvasElement>>(new Map());
   const plotRefs = useRef<Map<string, WebglPlot>>(new Map());
   const linesRef = useRef<Map<string, WebglLine>>(new Map());
   const animationRef = useRef<number | null>(null);
   const dataBuffers = useRef<Map<string, number[]>>(new Map());
-  // Pending per-channel sample queues (filled by subscribe callback)
+  // Pending per-channel sample queues (filled by the provider subscription
+  // callback). Each queue contains normalized numeric values in the range
+  // approximately -1..1 (see `normalize` below). These queues are drained
+  // by the animation loop up to `samplesPerFrame` values per frame to keep
+  // rendering work bounded and avoid UI freezes when bursts arrive.
   const pendingPerChannel = useRef<Map<string, number[]>>(new Map());
+  const previousCounterRef = useRef<number | null>(null);
   
   // Update internal channels when external channels change
   useEffect(() => {
-    setChannels(initialChannels);
-  }, [initialChannels]);
+    // Only update internal channels when something meaningful changed.
+    // Parent components sometimes pass a freshly-allocated array each render,
+    // causing an infinite setState -> rerender loop. Do a shallow structural
+    // equality check (id, visible, name, color) to avoid that.
+    const same = ((): boolean => {
+      if (initialChannels.length !== channels.length) return false;
+      for (let i = 0; i < initialChannels.length; i++) {
+        const a = initialChannels[i];
+        const b = channels[i];
+        if (!b) return false;
+        if (a.id !== b.id) return false;
+        if (a.visible !== b.visible) return false;
+        if (a.name !== b.name) return false;
+        if (a.color !== b.color) return false;
+      }
+      return true;
+    })();
+
+    if (!same) setChannels(initialChannels);
+  }, [initialChannels, channels]);
 
   // Calculate dynamic channel height
   const visibleChannels = channels.filter(ch => ch.visible);
@@ -138,7 +172,11 @@ const BasicGraphRealtime: React.FC<BasicGraphRealtimeProps> = (props) => {
     return new ColorRGBA(r, g, b, a);
   };
 
-  // Initialize canvases and plots for visible channels - responds to height changes
+  // Initialize canvases and plots for visible channels - responds to height changes.
+  // Each visible channel uses its own canvas/WebglPlot instance. We size the
+  // canvas using the devicePixelRatio to keep the rendering crisp on HiDPI
+  // displays. `bufferSize` controls how many historical samples are retained
+  // per channel (this is also the WebglLine point count).
   useEffect(() => {
     // Clean up removed channels
     const currentChannelIds = new Set(visibleChannels.map(ch => ch.id));
@@ -208,7 +246,13 @@ const BasicGraphRealtime: React.FC<BasicGraphRealtimeProps> = (props) => {
       }
     });
 
-    // Start animation loop
+  // Start animation loop. The render loop does two things:
+  // 1) Drain up to `samplesPerFrame` samples from each per-channel pending
+  //    queue and append them into the fixed-size `dataBuffers`.
+  // 2) Push the buffer contents into the `WebglLine` instance and redraw.
+  // This separation keeps parsing (incoming batches) and rendering decoupled
+  // and lets the provider coalesce high-frequency packets without causing
+  // a render storm.
     const render = () => {
       animationRef.current = requestAnimationFrame(render);
 
@@ -220,6 +264,9 @@ const BasicGraphRealtime: React.FC<BasicGraphRealtimeProps> = (props) => {
             const take = Math.min(pending.length, samplesPerFrame);
             const toApply = pending.splice(0, take);
 
+            // `buffer` is the ring buffer storing historical values for this
+            // channel. If it's missing (new channel) create and initialize it
+            // with zeros to avoid rendering garbage.
             const buffer = dataBuffers.current.get(channel.id) || new Array(bufferSize).fill(0);
             buffer.push(...toApply);
             if (buffer.length > bufferSize) buffer.splice(0, buffer.length - bufferSize);
@@ -237,7 +284,8 @@ const BasicGraphRealtime: React.FC<BasicGraphRealtimeProps> = (props) => {
         }
       });
 
-      // Render each visible channel's plot
+  // Render each visible channel's plot. We call `plot.update()` before
+  // `plot.draw()` to ensure the WebGL buffers are in sync with line data.
       visibleChannels.forEach((channel) => {
         const plot = plotRefs.current.get(channel.id);
         if (plot) {
@@ -259,7 +307,10 @@ const BasicGraphRealtime: React.FC<BasicGraphRealtimeProps> = (props) => {
     };
   }, [channels, visibleChannels, bufferSize, width, height, dynamicChannelHeight]); // Added height dependency
 
-  // Update function for new samples
+  // Push a single normalized value into the visible buffer and update the
+  // WebGL line immediately. This is used by the imperative `updateData`
+  // API for manual/array-based updates (and is not the primary path for
+  // provider-driven batches).
   const pushData = (channelId: string, newValue: number) => {
     const line = linesRef.current.get(channelId);
     const buffer = dataBuffers.current.get(channelId);
@@ -280,48 +331,99 @@ const BasicGraphRealtime: React.FC<BasicGraphRealtimeProps> = (props) => {
     }
   };
 
-  // Subscribe to ChannelDataProvider flushed batches when allowed.
-  const { subscribe } = useChannelData();
+  // Subscribe to ChannelDataProvider's sample-batch stream when allowed.
+  // The provider emits arrays of sample objects (a "batch") on each
+  // requestAnimationFrame-based flush. The callback receives an array of
+  // ChannelSample objects; it MUST NOT call `addSample` back into the
+  // provider (that would create a feedback loop). The subscription returns
+  // an unsubscribe function which we call on cleanup.
+  const { subscribeToSampleBatches } = useChannelData();
   useEffect(() => {
     if (!allowDeviceSamples) return;
 
-    // Normalizer
+  // Normalizer: convert device integer ADC-like values into a roughly
+  // -1..1 floating range for plotting. This is a heuristic that assumes
+  // the device sends values centered at ~4096 (12-bit-like). If your
+  // device uses a different scale adjust this function accordingly.
     const normalize = (value: number) => {
       if (value === undefined || value === null) return 0;
       let v = Number(value);
       // Heuristic: if incoming samples are large integers (ADC-like),
-      // convert to normalized -1..1 assuming a 12-bit center at 2048.
+      // convert to normalized -1..1 assuming a 12-bit center at 4096.
       // Otherwise assume already normalized.
-      if (Math.abs(v) > 2) {
-        // try center at 2048 (device may send unsigned-like values)
-        v = (v - 2048) / 2048;
-      }
+        // try center at 4096 (device may send unsigned-like values)
+        v = (v - 4096) / 4096;
       // clamp
       if (!isFinite(v) || isNaN(v)) v = 0;
       return Math.max(-1, Math.min(1, v));
     };
-    // Enqueue flushed samples into per-channel pending queues. The animation
+    // Enqueue sample batches into per-channel pending queues. The animation
     // loop will drain up to `samplesPerFrame` items per channel each frame.
-    const cb = (flushedSamples: Array<{ [key: string]: number | undefined; timestamp?: number }>) => {
+    // We preserve `(sample as any)._raw` when present so developers can
+    // inspect original device values even if the provider zeroes unregistered
+    // channels.
+  const handleSampleBatch = (sampleBatch: Array<{ [key: string]: number | undefined; timestamp?: number }>) => {
+      // Logging of the full sample batch (seqs + counters), rate-limited.
       try {
-        for (const sample of flushedSamples) {
+        // Always log every flushed batch to the console (no rate-limit) so
+        // you can inspect seqs, counters and a small preview of values.
+        if (sampleBatch.length > 0) {
+          try {
+            const seqs = sampleBatch.map(s => (s as any)._seq ?? null);
+            const counters = sampleBatch.map(s => (s as any).counter ?? (s as any).cnt ?? null);
+            const first = sampleBatch[0] as any;
+            const firstPreview: Record<string, number | null> = {};
+            for (const ch of channels) {
+              try {
+                const m = String(ch.id).match(/ch(\d+)/i);
+                if (!m) { firstPreview[ch.id] = null; continue; }
+                const parsed = parseInt(m[1], 10);
+                const candidates = [`ch${parsed}`, `ch${Math.max(0, parsed - 1)}`, `ch${parsed + 1}`];
+                let selectedKey: string | null = null;
+                for (const k of candidates) {
+                  if ((first as any)[k] !== undefined) { selectedKey = k; break; }
+                }
+                const raw = (first as any)._raw as Record<string, any> | undefined;
+                const valSource = (selectedKey && raw && raw[selectedKey as string] !== undefined) ? raw[selectedKey as string] : (selectedKey ? (first as any)[selectedKey as string] : undefined);
+                firstPreview[ch.id] = selectedKey && valSource !== undefined ? Number(valSource) : null;
+              } catch (err) {
+                firstPreview[ch.id] = null;
+              }
+            }
+            // Print the concise summary and the full batch (if you need to inspect values)
+            console.info(`[BasicGraph${instanceId ? `:${instanceId}` : ''}] batch=${sampleBatch.length} seqs=`, seqs, 'counters=', counters, 'firstPreview=', firstPreview);
+            console.debug(`[BasicGraph${instanceId ? `:${instanceId}` : ''}] fullSampleBatch=`, sampleBatch);
+          } catch (err) {
+            // swallow logging errors
+          }
+        }
+      } catch (err) {
+        // swallow logging errors
+      }
+
+  // Enqueue sample values into per-channel pending queues. Note that we
+  // match channel IDs by heuristics (e.g., `ch1` -> sample[`ch1`]) to
+  // support multiple naming conventions; this logic is intentionally
+  // defensive to avoid crashes on unexpected packet shapes.
+      try {
+        for (const sample of sampleBatch) {
           for (const ch of channels) {
             try {
               if (!ch || !ch.visible) continue;
               const m = String(ch.id).match(/ch(\d+)/i);
               if (!m) continue;
               const parsed = parseInt(m[1], 10);
-              // Try both 0-based and 1-based channel id conventions.
               const candidates = [`ch${parsed}`, `ch${Math.max(0, parsed - 1)}`, `ch${parsed + 1}`];
               let selectedKey: string | null = null;
               for (const k of candidates) {
                 if ((sample as any)[k] !== undefined) { selectedKey = k; break; }
               }
               if (!selectedKey) continue;
-              const v = normalize((sample as any)[selectedKey] as number);
+              const raw = (sample as any)._raw as Record<string, any> | undefined;
+              const valSource = (selectedKey && raw && raw[selectedKey as string] !== undefined) ? raw[selectedKey as string] : (sample as any)[selectedKey as string];
+              const v = normalize(valSource as number);
               const q = pendingPerChannel.current.get(ch.id) || [];
               q.push(v);
-              // Keep the queue bounded to avoid unbounded memory growth
               if (q.length > bufferSize * 4) q.splice(0, q.length - bufferSize * 4);
               pendingPerChannel.current.set(ch.id, q);
             } catch (err) {
@@ -334,10 +436,81 @@ const BasicGraphRealtime: React.FC<BasicGraphRealtimeProps> = (props) => {
       }
     };
 
-    if (!subscribe) return () => {};
-    const unsub = subscribe(cb);
-    return () => { unsub(); };
-  }, [allowDeviceSamples, subscribe, channels, bufferSize]);
+  if (!subscribeToSampleBatches) return () => {};
+  const unsub = subscribeToSampleBatches(handleSampleBatch);
+  return () => { unsub(); };
+  }, [allowDeviceSamples, subscribeToSampleBatches, channels, bufferSize]);
+
+  // Expose an imperative `updateData` API. This allows callers to push a
+  // single sample object or an array of numbers directly into the plot.
+  // - If `data` is an array and the first element looks like a counter, the
+  //   method performs a simple continuity check against previous counter.
+  // - If `data` is an object, it attempts to extract `chN` fields like
+  //   the subscription path. This API is provided for debugging and for
+  //   scenarios where the parent wants to drive the plot imperatively.
+  useImperativeHandle(ref, () => ({
+    updateData(data: number[] | { [key: string]: number | undefined }) {
+      try {
+        // Counter detection when data is an array and first element is a counter
+        if (Array.isArray(data) && data.length > 0) {
+          const cnt = Number(data[0]);
+          if (previousCounterRef.current !== null) {
+            const expected = (previousCounterRef.current + 1) & 0xff;
+            if (cnt !== expected) {
+              console.warn(`[BasicGraph${instanceId ? `:${instanceId}` : ''}] counter jump previous=${previousCounterRef.current} current=${cnt} expected=${expected}`);
+            }
+          }
+          previousCounterRef.current = cnt;
+        }
+
+        // Map incoming array -> per-channel values using propSelectedChannels if provided
+        if (Array.isArray(data)) {
+          const arr = data as number[];
+          const sel = (propSelectedChannels as number[] | undefined) || [];
+          // If selectedChannels provided, map each plotted index to the array index
+          if (sel && sel.length > 0) {
+            sel.forEach((channelNumber, i) => {
+              const ch = channels[i];
+              if (!ch || !ch.visible) return;
+              const value = (channelNumber >= 0 && channelNumber < arr.length) ? arr[channelNumber] : 0;
+              const v = ((): number => {
+                // reuse normalization heuristic from subscription
+                let vv = Number(value);
+                vv = (vv - 4096) / 4096;
+                if (!isFinite(vv) || isNaN(vv)) vv = 0;
+                return Math.max(-1, Math.min(1, vv));
+              })();
+              // push immediate
+              pushData(ch.id, v);
+            });
+            return;
+          }
+        }
+
+        // If a sample object is provided, try to extract chN fields like the subscription
+        if (data && !Array.isArray(data)) {
+          const sample = data as { [key: string]: number | undefined };
+          for (const ch of channels) {
+            if (!ch || !ch.visible) continue;
+            const m = String(ch.id).match(/ch(\d+)/i);
+            if (!m) continue;
+            const parsed = parseInt(m[1], 10);
+            const candidates = [`ch${parsed}`, `ch${Math.max(0, parsed - 1)}`, `ch${parsed + 1}`];
+            let selectedKey: string | null = null;
+            for (const k of candidates) {
+              if ((sample as any)[k] !== undefined) { selectedKey = k; break; }
+            }
+            if (!selectedKey) continue;
+            const val = (sample as any)[selectedKey as string] as number | undefined;
+            const v = val === undefined || val === null ? 0 : Math.max(-1, Math.min(1, (Number(val) - 4096) / 4096));
+            pushData(ch.id, v);
+          }
+        }
+      } catch (err) {
+        // swallow
+      }
+    }
+  }), [channels, propSelectedChannels, instanceId]);
 
   // If device samples are disabled for this instance, clear any existing
   // buffers so the plot goes blank instead of showing stale data.
@@ -423,6 +596,6 @@ const BasicGraphRealtime: React.FC<BasicGraphRealtimeProps> = (props) => {
       </div>
     </div>
   );
-};
+});
 
 export default BasicGraphRealtime;

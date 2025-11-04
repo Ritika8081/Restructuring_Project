@@ -32,7 +32,10 @@ export default function BleConnection() {
   const [device, setDevice] = useState<BluetoothDevice | null>(null)
   const [receivedData, setReceivedData] = useState<string[]>([])
   const [rawData, setRawData] = useState<{ch0: number, ch1: number, ch2: number}[]>([])
-  const { addSample } = useChannelData();
+  const channelData = useChannelData();
+  // Prefer using the provider-exposed ref when available — this avoids
+  // creating local effects in each connection component.
+  const providerAddSampleRef = channelData.addSampleRef;
   
   // Refs for functionality
   const scrollContainerRef = useRef<HTMLDivElement>(null)
@@ -112,8 +115,14 @@ export default function BleConnection() {
   sampleIndex.current = (sampleIndex.current + 1) % 1000
   totalSamples.current += 1
 
-  // Forward to channel context and local displays (include counter)
-  addSample({ ch0, ch1, ch2, timestamp: Date.now(), counter });
+        // Forward to channel context and local displays (include counter)
+  try {
+    const dispatchSample = providerAddSampleRef?.current ?? channelData.addSample;
+    dispatchSample && dispatchSample({ ch0, ch1, ch2, timestamp: Date.now(), counter });
+  } catch (err) {
+    // defensive: don't let provider errors break parsing loop
+    console.error('addSample error', err);
+  }
   return { ch0, ch1, ch2, counter }
       } catch (err) {
         console.error('Error parsing BLE DataView', err)
@@ -149,7 +158,7 @@ export default function BleConnection() {
           lastPacketVerboseRef.current = now
           // Print a concise sample of the packet: counter and channel values
           const samplePreview = newRawValues.slice(0, 8).map(v => ({ cnt: v.counter, ch0: v.ch0, ch1: v.ch1, ch2: v.ch2 }))
-          console.info('BLE parsed packet samples (preview):', samplePreview, 'totalSamplesInPacket=', newRawValues.length)
+          // console.info('BLE parsed packet samples (preview):', samplePreview, 'totalSamplesInPacket=', newRawValues.length)
         }
       } catch (err) {}
       // Buffer parsed samples and flush to React state at a lower rate to
