@@ -1,5 +1,6 @@
  'use client';
 import React, { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react';
+import { Notch } from './filters';
 
 /**
  * src/lib/channelDataContext.tsx
@@ -38,6 +39,11 @@ export type ChannelDataContextType = {
   // This is a subscription to sample "batches" that the provider emits
   // on each rAF flush. Use the returned function to unsubscribe.
   subscribeToSampleBatches?: (onSampleBatch: (samples: ChannelSample[]) => void) => () => void;
+  // Provide a mapping from channel index -> filter config so the provider
+  // can apply filters before emitting samples. The map keys are zero-based
+  // channel indices. The filter config shape is permissive to allow future
+  // filter types.
+  setChannelFilters?: (map: Record<number, { enabled?: boolean, filterType?: string, notchFreq?: number, samplingRate?: number }>) => void;
 };
 
 const ChannelDataContext = createContext<ChannelDataContextType | undefined>(undefined);
@@ -52,6 +58,10 @@ export const ChannelDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
   // Track which channel indices (0-based) are currently present in the flowchart.
   // We keep this in a ref for cheap lookups inside addSample.
   const registeredChannelIndices = useRef<Set<number>>(new Set());
+  // Map of channel index -> active filter config
+  const channelFiltersRef = useRef<Record<number, { enabled?: boolean, filterType?: string, notchFreq?: number, samplingRate?: number }>>({});
+  // Per-channel filter instances (stateful). Lazily created when needed.
+  const filterInstancesRef = useRef<Record<number, Notch | null>>({});
   // Queue of incoming samples to be flushed on the next animation frame.
   // This batches high-frequency producers to avoid React render storms.
   const incomingSampleQueueRef = useRef<any[]>([]);
@@ -91,7 +101,31 @@ export const ChannelDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
       for (let i = 0; i < 16; i++) {
         const key = `ch${i}`;
         if ((sample as any)[key] === undefined) break;
-        processed[key] = registeredChannelIndices.current.has(i) ? (sample as any)[key] : 0;
+        let value = registeredChannelIndices.current.has(i) ? (sample as any)[key] : 0;
+        // Apply filter if configured for this channel
+        try {
+          const cfg = channelFiltersRef.current[i];
+          if (cfg && cfg.enabled) {
+            // Support only notch for now
+            if (cfg.filterType === 'notch') {
+              // Lazily create Notch instance per-channel
+              let inst = filterInstancesRef.current[i];
+              if (!inst) {
+                inst = new Notch();
+                filterInstancesRef.current[i] = inst;
+                try { console.debug(`[ChannelData] created Notch instance (on-sample) for ch${i}`); } catch (e) {}
+              }
+              // Ensure sampling rate is set when available
+              if (cfg.samplingRate) inst.setbits(cfg.samplingRate);
+              try { console.debug(`[ChannelData] applying filter ch${i}: ${cfg.filterType} notch ${cfg.notchFreq}Hz @ ${cfg.samplingRate || 'unknown'}Hz`); } catch (e) {}
+              const type = cfg.notchFreq === 60 ? 2 : 1;
+              value = inst.process(value, type);
+            }
+          }
+        } catch (err) {
+          // If filtering fails for any reason, fall back to raw value
+        }
+        processed[key] = value;
       }
   if ((sample as any).timestamp) processed.timestamp = (sample as any).timestamp;
   if ((sample as any).counter !== undefined) processed.counter = (sample as any).counter;
@@ -232,6 +266,34 @@ export const ChannelDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
     return () => { subscribersRef.current.delete(onSampleBatch); };
   }, []);
 
+    const setChannelFilters = useCallback((map: Record<number, { enabled?: boolean, filterType?: string, notchFreq?: number, samplingRate?: number }>) => {
+    channelFiltersRef.current = map || {};
+    // Update existing filter instances sampling rate where applicable
+    try {
+      Object.keys(map || {}).forEach(k => {
+        const idx = parseInt(k, 10);
+        const cfg = (map as any)[k];
+        if (cfg && cfg.enabled && cfg.filterType === 'notch') {
+          let inst = filterInstancesRef.current[idx];
+          if (!inst) {
+            inst = new Notch();
+            filterInstancesRef.current[idx] = inst;
+            try { console.info(`[ChannelData] created Notch instance for ch${idx}`); } catch (e) {}
+          }
+          if (cfg.samplingRate) {
+            inst.setbits(cfg.samplingRate);
+            try { console.info(`[ChannelData] ch${idx} filter: ${cfg.filterType} (notch ${cfg.notchFreq} Hz) @ ${cfg.samplingRate} Hz`); } catch (e) {}
+          } else {
+            try { console.info(`[ChannelData] ch${idx} filter: ${cfg.filterType} (notch ${cfg.notchFreq} Hz) - sampling rate pending`); } catch (e) {}
+          }
+        } else if (cfg && cfg.enabled) {
+          try { console.info(`[ChannelData] ch${idx} filter configured: ${cfg.filterType || 'unknown'}`); } catch (e) {}
+        }
+      });
+    } catch (err) { /* ignore */ }
+    try { console.info('[ChannelData] setChannelFilters', map); } catch (e) {}
+  }, []);
+
   // Cleanup pending RAF when provider unmounts
   useEffect(() => {
     return () => {
@@ -242,7 +304,7 @@ export const ChannelDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
   }, []);
 
   return (
-    <ChannelDataContext.Provider value={{ samples: snapshot, addSample, addSampleRef, clearSamples, setRegisteredChannels, subscribeToSampleBatches }}>
+    <ChannelDataContext.Provider value={{ samples: snapshot, addSample, addSampleRef, clearSamples, setRegisteredChannels, subscribeToSampleBatches, setChannelFilters }}>
       {children}
     </ChannelDataContext.Provider>
   );

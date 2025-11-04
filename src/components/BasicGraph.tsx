@@ -323,7 +323,7 @@ const BasicGraphRealtime = forwardRef((props: BasicGraphRealtimeProps, ref) => {
     if (!line || !buffer) return;
 
     try {
-      console.debug(`[BasicGraph${instanceId ? `:${instanceId}` : ''}] pushData`, { channelId, newValue });
+      // console.debug(`[BasicGraph${instanceId ? `:${instanceId}` : ''}] pushData`, { channelId, newValue });
     } catch (err) {}
 
     // Shift buffer
@@ -401,7 +401,7 @@ const BasicGraphRealtime = forwardRef((props: BasicGraphRealtimeProps, ref) => {
                 if (totalMissing > 0 && now - lastMissingWarnRef.current > 1000) {
                   lastMissingWarnRef.current = now;
                   try {
-                    console.warn(`[BasicGraph${instanceId ? `:${instanceId}` : ''}] detected missing samples in sampleBatch`, { batchSize: sampleBatch.length, seqs, counters, totalMissing, nonSeqIndices });
+                    // console.warn(`[BasicGraph${instanceId ? `:${instanceId}` : ''}] detected missing samples in sampleBatch`, { batchSize: sampleBatch.length, seqs, counters, totalMissing, nonSeqIndices });
                   } catch (err) { /* swallow */ }
                 }
                 // Update previousCounterRef to last seen counter in this batch
@@ -430,8 +430,8 @@ const BasicGraphRealtime = forwardRef((props: BasicGraphRealtimeProps, ref) => {
               }
             }
             // Print the concise summary and the full batch (if you need to inspect values)
-            console.info(`[BasicGraph${instanceId ? `:${instanceId}` : ''}] batch=${sampleBatch.length} seqs=`, seqs, 'counters=', counters, 'firstPreview=', firstPreview);
-            console.debug(`[BasicGraph${instanceId ? `:${instanceId}` : ''}] fullSampleBatch=`, sampleBatch);
+            // console.info(`[BasicGraph${instanceId ? `:${instanceId}` : ''}] batch=${sampleBatch.length} seqs=`, seqs, 'counters=', counters, 'firstPreview=', firstPreview);
+            // console.debug(`[BasicGraph${instanceId ? `:${instanceId}` : ''}] fullSampleBatch=`, sampleBatch);
           } catch (err) {
             // swallow logging errors
           }
@@ -496,7 +496,7 @@ const BasicGraphRealtime = forwardRef((props: BasicGraphRealtimeProps, ref) => {
           if (previousCounterRef.current !== null) {
             const expected = (previousCounterRef.current + 1) & 0xff;
             if (cnt !== expected) {
-              console.warn(`[BasicGraph${instanceId ? `:${instanceId}` : ''}] counter jump previous=${previousCounterRef.current} current=${cnt} expected=${expected}`);
+              // console.warn(`[BasicGraph${instanceId ? `:${instanceId}` : ''}] counter jump previous=${previousCounterRef.current} current=${cnt} expected=${expected}`);
             }
           }
           previousCounterRef.current = cnt;

@@ -94,9 +94,10 @@ const Widgets: React.FC = () => {
         const opt = flowOptions.find(o => o.id === settingsModal.widgetId);
         if (!opt) return null;
         const type = opt.type || 'unknown';
-        const isSpiderPlot = type === 'spiderplot';
-        const isChannel = type === 'channel';
-        const isFFT = type === 'fft' || String(opt.id).startsWith('fft-');
+    const isSpiderPlot = type === 'spiderplot';
+    const isChannel = type === 'channel';
+    const isFFT = type === 'fft' || String(opt.id).startsWith('fft-');
+    const isFilter = type === 'filter';
 
         
         return (
@@ -200,22 +201,44 @@ const Widgets: React.FC = () => {
                         </div>
                     )}
 
+                    {isFilter && (
+                        <div>
+                           
+                            {/* Notch frequency selection (50Hz / 60Hz) */}
+                            {(((settingsDraft && settingsDraft.filterType) || 'notch') === 'notch') && (
+                                <div style={{ marginBottom: 12 }}>
+                                    <label style={{ fontWeight: 500 }}>Notch Frequency (Hz):</label>
+                                    <select value={(settingsDraft && settingsDraft.notchFreq) || 50} onChange={e => setSettingsDraft(prev => ({ ...(prev || {}), notchFreq: parseInt(e.target.value, 10) }))} style={{ marginLeft: 8 }}>
+                                        <option value={50}>50 Hz</option>
+                                        <option value={60}>60 Hz</option>
+                                    </select>
+                                    <div style={{ marginTop: 6, fontSize: 12, color: '#6b7280' }}>Choose the mains notch frequency to remove from signals.</div>
+                                </div>
+                            )}
+                            <div style={{ marginBottom: 12 }}>
+                                <label style={{ fontWeight: 500 }}>Sampling Rate (Hz):</label>
+                                <select value={(settingsDraft && settingsDraft.samplingRate) || 250} onChange={e => setSettingsDraft(prev => ({ ...(prev || {}), samplingRate: parseInt(e.target.value, 10) }))} style={{ marginLeft: 8 }}>
+                                    <option value={250}>250</option>
+                                    <option value={500}>500</option>
+                                    <option value={1000}>1000</option>
+                                </select>
+                                <div style={{ marginTop: 6, fontSize: 12, color: '#6b7280' }}>Sampling rate used to configure filter coefficients.</div>
+                            </div>
+
+                            <div style={{ marginBottom: 8 }}>
+                                <label style={{ fontWeight: 500 }}>
+                                    <input type="checkbox" checked={(settingsDraft && settingsDraft.enabled) !== false} onChange={e => setSettingsDraft(prev => ({ ...(prev || {}), enabled: e.target.checked }))} style={{ marginRight: 8 }} />
+                                    Enabled
+                                </label>
+                            </div>
+                        </div>
+                    )}
+
                     {isChannel && (
                         <div>
                             <div style={{ marginBottom: 12 }}>
                                 <label style={{ fontWeight: 500 }}>Channel Label:</label>
                                 <input value={(settingsDraft && settingsDraft.label) || opt.label} onChange={e => setSettingsDraft(prev => ({ ...(prev || {}), label: e.target.value }))} style={{ marginLeft: 8, border: '1px solid #ccc', borderRadius: 6, padding: '4px 8px' }} />
-                            </div>
-                        </div>
-                    )}
-
-                    
-
-                    {!isSpiderPlot && !isChannel && (
-                        <div>
-                            <div style={{ marginBottom: 12 }}>
-                                <label style={{ fontWeight: 500 }}>Generic Option 1:</label>
-                                <input value={(settingsDraft && settingsDraft.opt1) || ''} onChange={e => setSettingsDraft(prev => ({ ...(prev || {}), opt1: e.target.value }))} style={{ marginLeft: 8, border: '1px solid #ccc', borderRadius: 6, padding: '4px 8px' }} />
                             </div>
                         </div>
                     )}
@@ -411,7 +434,7 @@ const Widgets: React.FC = () => {
 
     // Register which channel flow nodes are present so the channel data context
     // will route incoming samples only to the active channels.
-    const { setRegisteredChannels } = useChannelData();
+    const { setRegisteredChannels, setChannelFilters } = useChannelData();
     useEffect(() => {
         const channelIds = flowOptions.filter(o => typeof o.id === 'string' && o.id.startsWith('channel-')).map(o => o.id as string);
         try {
@@ -420,6 +443,9 @@ const Widgets: React.FC = () => {
             // ignore: context may be undefined during SSR or early render
         }
     }, [flowOptions, setRegisteredChannels]);
+
+    // (per-channel filter mapping effect moved down so `connections` is
+    // defined before it's referenced)
     // Handlers to increase/decrease visible channels in the combined widget
     const increaseChannels = useCallback(() => {
         // Find max existing channel number and add next
@@ -489,6 +515,40 @@ const Widgets: React.FC = () => {
             // swallow
         }
     }, [connections, flowOptions]);
+
+    // Compute per-channel filter configuration from flow connections and
+    // flowOptions. If a channel flow node is connected to a filter node
+    // (channel-# -> filter-node-id) we register that filter config with
+    // the channel data provider so emitted samples are filtered.
+    useEffect(() => {
+        try {
+            const mapping: Record<number, { enabled?: boolean, filterType?: string, notchFreq?: number, samplingRate?: number }> = {};
+            for (const c of connections) {
+                try {
+                    if (typeof c.from === 'string' && String(c.from).startsWith('channel-') && typeof c.to === 'string') {
+                        const m = String(c.from).match(/channel-(\d+)/i);
+                        if (!m) continue;
+                        const chIdx = Math.max(0, parseInt(m[1], 10));
+                        // find the target flow option
+                        const targetOpt = flowOptions.find(o => o.id === String(c.to));
+                        if (!targetOpt) continue;
+                        if (targetOpt.type === 'filter') {
+                            const cfg = (targetOpt as any).config || {};
+                            mapping[chIdx] = {
+                                enabled: cfg.enabled !== false,
+                                filterType: cfg.filterType || 'notch',
+                                notchFreq: cfg.notchFreq || 50,
+                                samplingRate: cfg.samplingRate || undefined,
+                            };
+                        }
+                    }
+                } catch (err) { /* ignore per-connection errors */ }
+            }
+            try {
+                if (typeof setChannelFilters === 'function') setChannelFilters(mapping);
+            } catch (err) { /* ignore */ }
+        } catch (err) { /* ignore */ }
+    }, [connections, flowOptions, setChannelFilters]);
     
     // Widget collection state. Start empty — dashboard widgets are created
     // by the arranger when the user clicks Play (or by explicit Add Widget).
@@ -779,7 +839,8 @@ const Widgets: React.FC = () => {
             candle: 'Candle',
             game: 'Game',
             bandpower: 'Bandpower',
-            basic: 'Plot'
+                basic: 'Plot',
+                filter: 'Filter'
         };
         const label = labelMap[canonical] || type;
 
@@ -1222,6 +1283,7 @@ const Widgets: React.FC = () => {
                                         { id: 'envelope', label: 'Envelope' },
                                         { id: 'candle', label: 'Candle' },
                                         { id: 'bandpower', label: 'Bandpower' },
+                                        { id: 'filter', label: 'Filter' },
                                     ].map(item => (
                                         <div
                                             key={item.id}
@@ -2302,7 +2364,10 @@ const Widgets: React.FC = () => {
                                     // dashboard widgets. Channels are data sources only and
                                     // should not automatically create 'basic' Plot widgets
                                     // from the Channels box.
-                                    const widgetTypes = selectedWidgets.filter(opt => !(typeof opt.id === 'string' && opt.id.startsWith('channel-')));
+                                    // Exclude flow-only types (channels and filters) from being expanded
+                                    // into dashboard widgets. Filters should only exist inside the
+                                    // flowchart and must not create dashboard widgets.
+                                    const widgetTypes = selectedWidgets.filter(opt => !(typeof opt.id === 'string' && opt.id.startsWith('channel-')) && opt.type !== 'filter');
                                     // Build a set of instance ids from all basic options so we can
                                     // detect connections that target instances.
                                     const allInstanceIds = new Set<string>();
@@ -2394,19 +2459,47 @@ const Widgets: React.FC = () => {
                     {/* dashboard arrows removed: connections still render inside the flow modal only */}
 
                     {/* Render all widgets positioned by grid pixels inside the sized container */}
-                    {widgets.map(widget => (
-                        <DraggableWidget
-                            key={widget.id}
-                            widget={widget}
-                            widgets={widgets}
-                            onRemove={handleRemoveWidget}
-                            gridSettings={gridSettings}
-                            dragState={dragState}
-                            setDragState={setDragState}
-                            onUpdateWidget={handleUpdateWidget}
-                            incomingConnections={connections.filter(c => c.to === widget.id).map(c => c.from)}
-                        />
-                    ))}
+                    {(() => {
+                        // Helper to expand incoming connections so that if a widget
+                        // receives input from a filter node (filter-...), we expose
+                        // the original channel-* sources that feed that filter. This
+                        // ensures dashboard Plot widgets see channel-IDs even when
+                        // a filter node is placed in the path (channel -> filter -> plot).
+                        const getUpstreamSources = (wId: string) => {
+                            const direct = connections.filter(c => c.to === wId).map(c => c.from);
+                            const expanded: string[] = [];
+                            for (const src of direct) {
+                                try {
+                                    const s = String(src);
+                                    if (s.startsWith('channel-')) {
+                                        if (!expanded.includes(s)) expanded.push(s);
+                                    } else if (s.startsWith('filter-')) {
+                                        // find channels that feed this filter
+                                        const feeders = connections.filter(c => c.to === s && String(c.from).startsWith('channel-')).map(c => c.from);
+                                        for (const f of feeders) if (!expanded.includes(String(f))) expanded.push(String(f));
+                                    } else {
+                                        // include other non-channel sources as-is (they will be ignored by plots)
+                                        if (!expanded.includes(s)) expanded.push(s);
+                                    }
+                                } catch (err) { /* ignore */ }
+                            }
+                            return expanded;
+                        };
+
+                        return widgets.map(widget => (
+                            <DraggableWidget
+                                key={widget.id}
+                                widget={widget}
+                                widgets={widgets}
+                                onRemove={handleRemoveWidget}
+                                gridSettings={gridSettings}
+                                dragState={dragState}
+                                setDragState={setDragState}
+                                onUpdateWidget={handleUpdateWidget}
+                                incomingConnections={getUpstreamSources(widget.id)}
+                            />
+                        ));
+                    })()}
 
                     {/* Popover rendered outside the widget, anchored near the connection controls */}
                 </div>
