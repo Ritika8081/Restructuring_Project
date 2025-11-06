@@ -19,9 +19,12 @@ import { useChannelData } from '@/lib/channelDataContext';
  * - Keep a fixed-size circular buffer (`bufferSize`) per plotted channel
  *   and update the WebGL line from that buffer each frame.
  * - Preserve `_raw` and `_seq` fields when present (these are attached by
- *   the provider for tracing and continuity checks) and prefer raw values
- *   when available so the plotted values reflect device measurements even
- *   when the provider zeroes unregistered channels.
+ *   the provider for tracing and continuity checks). The component prefers
+ *   provider-processed values (for example, filtered and/or normalized
+ *   outputs) when present and falls back to `_raw` device values only when
+ *   a processed value is not available. This ensures plots reflect the
+ *   provider's filtering and normalization while still allowing inspection
+ *   of raw device samples for debugging.
  *
  * Exports: BasicGraphRealtime React component (default export under a different name)
  */
