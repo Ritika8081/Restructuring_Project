@@ -243,7 +243,7 @@ const BasicGraphRealtime = forwardRef((props: BasicGraphRealtimeProps, ref) => {
 
         // Set line properties for individual canvas
         line.lineSpaceX(-1, 2 / bufferSize);
-        line.scaleY = 0.4;
+        line.scaleY = 1;
         line.offsetY = 0;
 
         // Initialize a Float32Array buffer and zero the Webgl line points

@@ -85,6 +85,10 @@ export const ChannelDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
   const sampleSeqRef = useRef<number>(0);
   const subscribersRef = useRef<Set<(s: ChannelSample[]) => void>>(new Set());
   const controlSubscribersRef = useRef<Set<(e: { type: string; channelIndex?: number }) => void>>(new Set());
+  // Track observed per-channel raw maximums to infer ADC range (helps when
+  // devices use 10/12/14-bit ADCs packed into 16-bit fields). This lets us
+  // normalize correctly even if the device doesn't use full 16-bit range.
+  const channelObservedMaxRef = useRef<Record<number, number>>({});
   // Expose addSample via a ref for high-frequency consumers that run
   // outside React lifecycles (e.g. BLE notification handlers).
   const addSampleRef = useRef<((sample: ChannelSample) => void) | null>(null);
@@ -112,17 +116,37 @@ export const ChannelDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
       const processed: any = {};
       // Keep a copy of the raw incoming sample for debugging/tracing.
       try { (processed as any)._raw = { ...(sample as any) }; } catch (e) {}
-      // ADC normalization configuration (default to 16-bit ADC)
-      const ADC_BITS = 16;
-      const FULL_SCALE = 2 ** ADC_BITS; // e.g. 65536
-      const Y_SCALE = 2 / FULL_SCALE; // maps centered counts -> approx -1..+1
+  // We'll infer an effective per-channel FULL_SCALE from observed raw
+  // maxima so devices that use 10/12/14-bit ADC ranges (packed into
+  // 16-bit fields) are normalized correctly.
       for (let i = 0; i < 16; i++) {
         const key = `ch${i}`;
         if ((sample as any)[key] === undefined) break;
         // Read raw numeric sample value from device
         const rawVal = Number((sample as any)[key]);
+        // Update observed per-channel max
+        try {
+          const prevMax = channelObservedMaxRef.current[i] || 0;
+          const newMax = Math.max(prevMax, rawVal);
+          channelObservedMaxRef.current = { ...channelObservedMaxRef.current, [i]: newMax };
+        } catch (e) {}
+
+        // Infer an effective FULL_SCALE for this channel based on observed
+        // max. Use the smallest power-of-two >= (observedMax + 1). Fallback
+        // to 2^16 when unknown.
+        let effectiveFullScale = 2 ** 16;
+        try {
+          const obs = channelObservedMaxRef.current[i] || 0;
+          if (obs > 0 && obs < (2 ** 16)) {
+            const bits = Math.ceil(Math.log2(obs + 1));
+            effectiveFullScale = 2 ** bits;
+          }
+        } catch (e) { effectiveFullScale = 2 ** 16; }
+
+        const Y_SCALE = 2 / effectiveFullScale;
+
         // Center raw ADC counts before filtering so filters operate on signed data
-        let value = registeredChannelIndices.current.has(i) ? (rawVal - (FULL_SCALE / 2)) : 0;
+        let value = registeredChannelIndices.current.has(i) ? (rawVal - (effectiveFullScale / 2)) : 0;
         // Apply filter if configured for this channel
         try {
           const cfg = channelFiltersRef.current[i];

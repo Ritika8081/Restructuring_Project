@@ -27,7 +27,7 @@ export default function SerialConnection() {
   const [receivedData, setReceivedData] = useState<string[]>([])
   const [currentData, setCurrentData] = useState<Record<string, number> | null>(null)
   const [recentSamples, setRecentSamples] = useState<Record<string, number>[]>([])
-  // Detected device type for UI badge (e.g. 'CHORDS-TESTER' or 'NPG-Lite')
+  // Detected device type for UI badge (e.g. 'UNO-R4' or 'NPG-Lite')
   const [detectedDeviceType, setDetectedDeviceType] = useState<string | null>(null);
   // Allow user to select device mode: auto-detect (default), R4 (6ch) or 3ch legacy
   const [deviceMode, setDeviceMode] = useState<'auto' | 'r4' | '3ch'>('auto');
@@ -41,6 +41,8 @@ export default function SerialConnection() {
   // Ref for auto-scrolling
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  // Keep last seen text to avoid appending identical messages repeatedly
+  const lastReceivedTextRef = useRef<string | null>(null);
 
   // Device constants matching firmware (use refs so we can adapt dynamically)
   const BAUD_RATE = 230400
@@ -86,8 +88,8 @@ export default function SerialConnection() {
           numChannelsRef.current = 6;
           sampleRateRef.current = 500;
           packetLenRef.current = numChannelsRef.current * 2 + HEADER_LEN + 1;
-          console.info('[Serial] connect(): using CHORDS-TESTER mode (6ch @ 500Hz)');
-          setDetectedDeviceType('CHORDS-TESTER (manual)');
+          console.info('[Serial] connect(): using UNO-R4 mode (6ch @ 500Hz)');
+          setDetectedDeviceType('UNO-R4 (manual)');
           // Inform provider of per-channel sampling rate so pending filters can be created
           try {
             if (channelData.setChannelSamplingRate) {
@@ -145,41 +147,52 @@ export default function SerialConnection() {
           // Check for text responses
           try {
             const textData = new TextDecoder().decode(value)
-            if (textData.trim().length > 0 && !textData.includes('\x00')) {
+            const trimmed = textData.trim();
+            if (trimmed.length > 0 && !textData.includes('\x00')) {
               const timestamp = new Date().toLocaleTimeString()
-              setReceivedData(prev => [...prev.slice(-10), `${timestamp}: ${textData.trim()}`]) // Keep only last 10 log entries
-              // Auto-detect UNO R4 responses (firmware responds with "CHORDS-TESTER") and adjust parsing
+              // Avoid appending the same text repeatedly which can cause
+              // frequent state churn and render storms.
+              if (lastReceivedTextRef.current !== trimmed) {
+                lastReceivedTextRef.current = trimmed;
+                setReceivedData(prev => [...prev.slice(-10), `${timestamp}: ${trimmed}`]) // Keep only last 10 log entries
+              }
+              // Auto-detect UNO R4 responses (firmware responds with "UNO-R4") and adjust parsing
               try {
-                const t = textData.trim().toUpperCase();
-                if (t.includes('CHORDS-TESTER') || t.includes('R4')) {
+                const t = trimmed.toUpperCase();
+                if (t.includes('UNO-R4') || t.includes('R4')) {
                   // UNO R4 uses 6 channels and the same sampling rate defined in firmware
-                  numChannelsRef.current = 4;
-                  sampleRateRef.current = 500;
-                  packetLenRef.current = numChannelsRef.current * 2 + HEADER_LEN + 1;
-                  try { channelData.setSamplingRate && channelData.setSamplingRate(sampleRateRef.current); } catch (e) {}
-                  // Also set per-channel sampling rate so provider can create filter instances per-channel
-                  try {
-                    if (channelData.setChannelSamplingRate) {
-                      for (let i = 0; i < numChannelsRef.current; i++) channelData.setChannelSamplingRate(i, sampleRateRef.current);
-                    }
-                  } catch (e) {}
-                  console.info('[Serial] Detected device: CHORDS-TESTER');
-                  setDetectedDeviceType('CHORDS-TESTER');
-                  setReceivedData(prev => [...prev.slice(-10), `${timestamp}: Detected CHORDS-TESTER, using ${numChannelsRef.current} channels @ ${sampleRateRef.current}Hz`]);
+                  // Only update detection state once (avoid repeating state updates)
+                  if (numChannelsRef.current !== 6) {
+                    numChannelsRef.current = 6;
+                    sampleRateRef.current = 500;
+                    packetLenRef.current = numChannelsRef.current * 2 + HEADER_LEN + 1;
+                    try { channelData.setSamplingRate && channelData.setSamplingRate(sampleRateRef.current); } catch (e) {}
+                    // Also set per-channel sampling rate so provider can create filter instances per-channel
+                    try {
+                      if (channelData.setChannelSamplingRate) {
+                        for (let i = 0; i < numChannelsRef.current; i++) channelData.setChannelSamplingRate(i, sampleRateRef.current);
+                      }
+                    } catch (e) {}
+                    console.info('[Serial] Detected device: UNO-R4');
+                    setDetectedDeviceType('UNO-R4');
+                    setReceivedData(prev => [...prev.slice(-10), `${timestamp}: Detected UNO-R4, using ${numChannelsRef.current} channels @ ${sampleRateRef.current}Hz`]);
+                  }
                 } else if (t.includes('NPG') || t.includes('NPG-LITE') || t.includes('NPG LITE') || t.includes('LITE')) {
                   // NPG Lite (legacy) response - assume 3 channels at 500Hz unless overridden
-                  numChannelsRef.current = 3;
-                  sampleRateRef.current = 500;
-                  packetLenRef.current = numChannelsRef.current * 2 + HEADER_LEN + 1;
-                  try { channelData.setSamplingRate && channelData.setSamplingRate(sampleRateRef.current); } catch (e) {}
-                  try {
-                    if (channelData.setChannelSamplingRate) {
-                      for (let i = 0; i < numChannelsRef.current; i++) channelData.setChannelSamplingRate(i, sampleRateRef.current);
-                    }
-                  } catch (e) {}
-                  console.info('[Serial] Detected device: NPG-Lite');
-                  setDetectedDeviceType('NPG-Lite');
-                  setReceivedData(prev => [...prev.slice(-10), `${timestamp}: Detected NPG-Lite, using ${numChannelsRef.current} channels @ ${sampleRateRef.current}Hz`]);
+                  if (numChannelsRef.current !== 3) {
+                    numChannelsRef.current = 3;
+                    sampleRateRef.current = 500;
+                    packetLenRef.current = numChannelsRef.current * 2 + HEADER_LEN + 1;
+                    try { channelData.setSamplingRate && channelData.setSamplingRate(sampleRateRef.current); } catch (e) {}
+                    try {
+                      if (channelData.setChannelSamplingRate) {
+                        for (let i = 0; i < numChannelsRef.current; i++) channelData.setChannelSamplingRate(i, sampleRateRef.current);
+                      }
+                    } catch (e) {}
+                    console.info('[Serial] Detected device: NPG-Lite');
+                    setDetectedDeviceType('NPG-Lite');
+                    setReceivedData(prev => [...prev.slice(-10), `${timestamp}: Detected NPG-Lite, using ${numChannelsRef.current} channels @ ${sampleRateRef.current}Hz`]);
+                  }
                 }
               } catch (e) {
                 // ignore detection errors
