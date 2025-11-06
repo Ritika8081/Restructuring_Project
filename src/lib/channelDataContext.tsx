@@ -1,4 +1,4 @@
- 'use client';
+'use client';
 import React, { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react';
 import { Notch, createFilterInstance } from './filters';
 
@@ -73,8 +73,8 @@ export const ChannelDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
   // Per-channel filter instances (stateful). Lazily created when needed.
   // We store instances per-channel as a map: channelIndex -> { [filterKey]: instance }
   const filterInstancesRef = useRef<Record<number, Record<string, any>>>({});
-    // Global sampling rate (device-level). We keep a state so components can read it.
-    const [samplingRate, setSamplingRateState] = useState<number | undefined>(undefined);
+  // Global sampling rate (device-level). We keep a state so components can read it.
+  const [samplingRate, setSamplingRateState] = useState<number | undefined>(undefined);
   // Queue of incoming samples to be flushed on the next animation frame.
   // This batches high-frequency producers to avoid React render storms.
   const incomingSampleQueueRef = useRef<any[]>([]);
@@ -108,17 +108,17 @@ export const ChannelDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
       }
     });
     registeredChannelIndices.current = s;
-    try { console.info('[ChannelData] setRegisteredChannels', { ids, registeredIndices: Array.from(s).sort((a,b)=>a-b) }); } catch (e) {}
+    try { console.info('[ChannelData] setRegisteredChannels', { ids, registeredIndices: Array.from(s).sort((a, b) => a - b) }); } catch (e) { }
   }, []);
 
   const addSample = useCallback((sample: ChannelSample) => {
     try {
       const processed: any = {};
       // Keep a copy of the raw incoming sample for debugging/tracing.
-      try { (processed as any)._raw = { ...(sample as any) }; } catch (e) {}
-  // We'll infer an effective per-channel FULL_SCALE from observed raw
-  // maxima so devices that use 10/12/14-bit ADC ranges (packed into
-  // 16-bit fields) are normalized correctly.
+      try { (processed as any)._raw = { ...(sample as any) }; } catch (e) { }
+      // We'll infer an effective per-channel FULL_SCALE from observed raw
+      // maxima so devices that use 10/12/14-bit ADC ranges (packed into
+      // 16-bit fields) are normalized correctly.
       for (let i = 0; i < 16; i++) {
         const key = `ch${i}`;
         if ((sample as any)[key] === undefined) break;
@@ -129,7 +129,7 @@ export const ChannelDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
           const prevMax = channelObservedMaxRef.current[i] || 0;
           const newMax = Math.max(prevMax, rawVal);
           channelObservedMaxRef.current = { ...channelObservedMaxRef.current, [i]: newMax };
-        } catch (e) {}
+        } catch (e) { }
 
         // Infer an effective FULL_SCALE for this channel based on observed
         // max. Use the smallest power-of-two >= (observedMax + 1). Fallback
@@ -170,14 +170,14 @@ export const ChannelDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
                   if (cfg.samplingRate) {
                     inst = createFilterInstance(k, cfg.samplingRate) || null;
                     instMap[k] = inst;
-                    try { console.debug(`[ChannelData] created filter instance (on-sample) for ch${i}: ${k}`); } catch (e) {}
+                    try { console.debug(`[ChannelData] created filter instance (on-sample) for ch${i}: ${k}`); } catch (e) { }
                   } else {
                     // sampling rate not available yet; skip this key for now
                     continue;
                   }
                 }
                 if (inst && typeof inst.process === 'function') {
-                  try { console.debug(`[ChannelData] applying filter ch${i}: ${k} @ ${cfg.samplingRate || 'unknown'}Hz`); } catch (e) {}
+                  try { console.debug(`[ChannelData] applying filter ch${i}: ${k} @ ${cfg.samplingRate || 'unknown'}Hz`); } catch (e) { }
                   // process on centered counts
                   value = inst.process(value);
                 }
@@ -194,14 +194,14 @@ export const ChannelDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
           processed[key] = 0;
         }
       }
-  if ((sample as any).timestamp) processed.timestamp = (sample as any).timestamp;
-  if ((sample as any).counter !== undefined) processed.counter = (sample as any).counter;
+      if ((sample as any).timestamp) processed.timestamp = (sample as any).timestamp;
+      if ((sample as any).counter !== undefined) processed.counter = (sample as any).counter;
 
-        // Queue sample for batched flush on the next animation frame
-        // Attach a monotonic sequence id to help trace ordering across layers
-        sampleSeqRef.current = (sampleSeqRef.current + 1) % 1000000;
-        (processed as any)._seq = sampleSeqRef.current;
-        incomingSampleQueueRef.current.push(processed as ChannelSample);
+      // Queue sample for batched flush on the next animation frame
+      // Attach a monotonic sequence id to help trace ordering across layers
+      sampleSeqRef.current = (sampleSeqRef.current + 1) % 1000000;
+      (processed as any)._seq = sampleSeqRef.current;
+      incomingSampleQueueRef.current.push(processed as ChannelSample);
 
       // Rate-limited incoming-sample debug to help trace counters end-to-end
       try {
@@ -209,73 +209,73 @@ export const ChannelDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
         if (now - lastAddLogRef.current > 200) {
           lastAddLogRef.current = now;
           const cnt = (sample as any).counter;
-          try { console.debug('[ChannelData] queued sample counter', { counter: cnt, registered: Array.from(registeredChannelIndices.current).sort((a,b)=>a-b) }); } catch (e) {}
+          try { console.debug('[ChannelData] queued sample counter', { counter: cnt, registered: Array.from(registeredChannelIndices.current).sort((a, b) => a - b) }); } catch (e) { }
         }
-      } catch (err) {}
+      } catch (err) { }
 
       // Debug: lightweight log
       try {
-        const regs = Array.from(registeredChannelIndices.current).sort((a,b) => a-b);
+        const regs = Array.from(registeredChannelIndices.current).sort((a, b) => a - b);
         console.debug('[ChannelData] queueSample', { registeredIndices: regs, incoming: sample });
-      } catch (err) {}
+      } catch (err) { }
 
       if (rafHandleRef.current == null) {
         rafHandleRef.current = requestAnimationFrame(() => {
           try {
             const sampleBatch = incomingSampleQueueRef.current.splice(0);
             if (sampleBatch.length === 0) return;
-              // detect dropped counters across the emitted sample batch
-              try {
-                const counters: number[] = []
-                for (const s of sampleBatch) {
-                  if ((s as any).counter !== undefined) {
-                    const cur = (s as any).counter as number;
-                    counters.push(cur);
-                    const last = lastCounterRef.current;
-                    if (last !== null) {
-                      const diff = (cur - last + 256) % 256;
-                      if (diff > 1) {
-                        console.warn('[ChannelData] detected sample drop(s)', { last, current: cur, missing: diff - 1 });
-                      }
+            // detect dropped counters across the emitted sample batch
+            try {
+              const counters: number[] = []
+              for (const s of sampleBatch) {
+                if ((s as any).counter !== undefined) {
+                  const cur = (s as any).counter as number;
+                  counters.push(cur);
+                  const last = lastCounterRef.current;
+                  if (last !== null) {
+                    const diff = (cur - last + 256) % 256;
+                    if (diff > 1) {
+                      console.warn('[ChannelData] detected sample drop(s)', { last, current: cur, missing: diff - 1 });
                     }
-                    lastCounterRef.current = cur;
                   }
+                  lastCounterRef.current = cur;
                 }
-                // Summarize the flushed batch counters (lightweight)
-                if (counters.length > 0) {
-                  try {
-                    const first = counters[0]
-                    const last = counters[counters.length - 1]
-                    // Compute total missing inside this flushed batch
-                    let totalMissing = 0
-                    for (let i = 1; i < counters.length; i++) {
-                      const prev = counters[i - 1]
-                      const cur = counters[i]
-                      const d = (cur - prev + 256) % 256
-                      if (d > 1) totalMissing += (d - 1)
-                    }
-                    // Always emit a debug-level summary; escalate to warn if gaps exist
-                    if (totalMissing > 0) {
-                      console.warn('[ChannelData] batch detected missing samples', { batchSize: sampleBatch.length, first, last, missing: totalMissing })
-                    } else {
-                      // Rate-limit positive confirmation to avoid noisy logs
-                      try {
-                        const now = Date.now()
-                        if (now - lastOkFlushTimeRef.current > 5000) {
-                          console.info('[ChannelData] batch OK: no missing samples', { batchSize: sampleBatch.length, first, last })
-                          lastOkFlushTimeRef.current = now
-                        } else {
-                          console.debug('[ChannelData] batch', { batchSize: sampleBatch.length, first, last })
-                        }
-                      } catch (err) {
+              }
+              // Summarize the flushed batch counters (lightweight)
+              if (counters.length > 0) {
+                try {
+                  const first = counters[0]
+                  const last = counters[counters.length - 1]
+                  // Compute total missing inside this flushed batch
+                  let totalMissing = 0
+                  for (let i = 1; i < counters.length; i++) {
+                    const prev = counters[i - 1]
+                    const cur = counters[i]
+                    const d = (cur - prev + 256) % 256
+                    if (d > 1) totalMissing += (d - 1)
+                  }
+                  // Always emit a debug-level summary; escalate to warn if gaps exist
+                  if (totalMissing > 0) {
+                    console.warn('[ChannelData] batch detected missing samples', { batchSize: sampleBatch.length, first, last, missing: totalMissing })
+                  } else {
+                    // Rate-limit positive confirmation to avoid noisy logs
+                    try {
+                      const now = Date.now()
+                      if (now - lastOkFlushTimeRef.current > 5000) {
+                        console.info('[ChannelData] batch OK: no missing samples', { batchSize: sampleBatch.length, first, last })
+                        lastOkFlushTimeRef.current = now
+                      } else {
                         console.debug('[ChannelData] batch', { batchSize: sampleBatch.length, first, last })
                       }
+                    } catch (err) {
+                      console.debug('[ChannelData] batch', { batchSize: sampleBatch.length, first, last })
                     }
-                  } catch (err) { }
-                }
-              } catch (err) {
-                // ignore counter-check errors
+                  }
+                } catch (err) { }
               }
+            } catch (err) {
+              // ignore counter-check errors
+            }
 
             // Merge flushed samples into the live ref buffer (bounded)
             try {
@@ -324,7 +324,7 @@ export const ChannelDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
   const clearSamples = useCallback(() => {
     samplesRef.current = [];
-    try { setSnapshot([]); } catch (err) {}
+    try { setSnapshot([]); } catch (err) { }
     lastCounterRef.current = null;
   }, []);
 
@@ -367,28 +367,28 @@ export const ChannelDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
           if (keys.length > 0) {
             if (!filterInstancesRef.current[idx]) filterInstancesRef.current[idx] = {};
             const instMap = filterInstancesRef.current[idx];
-                for (const key of keys) {
-                  if (cfg.samplingRate) {
-                    const inst = createFilterInstance(key, cfg.samplingRate) || null;
-                    instMap[key] = inst;
-                    try { console.info(`[ChannelData] ch${idx} filter: ${key} @ ${cfg.samplingRate} Hz`); } catch (e) {}
-                  } else {
-                    try { console.info(`[ChannelData] ch${idx} filter configured: ${key} - sampling rate pending`); } catch (e) {}
-                  }
-                }
-                // Notify listeners (e.g., plotting components) that filters for this channel changed
-                try {
-                  controlSubscribersRef.current.forEach(fn => {
-                    try { fn({ type: 'filterChanged', channelIndex: idx }); } catch (e) { /* ignore per-subscriber errors */ }
-                  });
-                } catch (e) { /* ignore */ }
+            for (const key of keys) {
+              if (cfg.samplingRate) {
+                const inst = createFilterInstance(key, cfg.samplingRate) || null;
+                instMap[key] = inst;
+                try { console.info(`[ChannelData] ch${idx} filter: ${key} @ ${cfg.samplingRate} Hz`); } catch (e) { }
+              } else {
+                try { console.info(`[ChannelData] ch${idx} filter configured: ${key} - sampling rate pending`); } catch (e) { }
+              }
+            }
+            // Notify listeners (e.g., plotting components) that filters for this channel changed
+            try {
+              controlSubscribersRef.current.forEach(fn => {
+                try { fn({ type: 'filterChanged', channelIndex: idx }); } catch (e) { /* ignore per-subscriber errors */ }
+              });
+            } catch (e) { /* ignore */ }
           } else if (cfg.filterType) {
-            try { console.info(`[ChannelData] ch${idx} filter configured (legacy): ${cfg.filterType}`); } catch (e) {}
+            try { console.info(`[ChannelData] ch${idx} filter configured (legacy): ${cfg.filterType}`); } catch (e) { }
           }
         }
       });
     } catch (err) { /* ignore */ }
-    try { console.info('[ChannelData] setChannelFilters', map); } catch (e) {}
+    try { console.info('[ChannelData] setChannelFilters', map); } catch (e) { }
   }, [samplingRate]);
 
   // Called when the sampling rate for a specific channel becomes known.
@@ -413,10 +413,10 @@ export const ChannelDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
         if (!instMap[key]) {
           const inst = createFilterInstance(key, samplingRate) || null;
           instMap[key] = inst;
-          try { console.info(`[ChannelData] ch${channelIndex} filter created (on-sr): ${key} @ ${samplingRate} Hz`); } catch (e) {}
+          try { console.info(`[ChannelData] ch${channelIndex} filter created (on-sr): ${key} @ ${samplingRate} Hz`); } catch (e) { }
         }
       }
-      try { console.info('[ChannelData] setChannelSamplingRate', { channelIndex, samplingRate }); } catch (e) {}
+      try { console.info('[ChannelData] setChannelSamplingRate', { channelIndex, samplingRate }); } catch (e) { }
     } catch (err) {
       // swallow
     }
@@ -448,11 +448,11 @@ export const ChannelDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
           if (!instMap[key]) {
             const inst = createFilterInstance(key, sr) || null;
             instMap[key] = inst;
-            try { console.info(`[ChannelData] ch${idx} filter created (on-global-sr): ${key} @ ${sr} Hz`); } catch (e) {}
+            try { console.info(`[ChannelData] ch${idx} filter created (on-global-sr): ${key} @ ${sr} Hz`); } catch (e) { }
           }
         }
       });
-      try { console.info('[ChannelData] setSamplingRate', sr); } catch (e) {}
+      try { console.info('[ChannelData] setSamplingRate', sr); } catch (e) { }
     } catch (err) {
       // swallow
     }
@@ -463,7 +463,7 @@ export const ChannelDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
     return () => {
       try {
         if (rafHandleRef.current) cancelAnimationFrame(rafHandleRef.current);
-      } catch (err) {}
+      } catch (err) { }
     };
   }, []);
 

@@ -37,6 +37,11 @@ export default function SerialConnection() {
   const sampleIndex = useRef(0)
   const totalSamples = useRef(0)
   const readerActiveRef = useRef(false)
+  // Debug helpers: log raw assembly of hi/lo bytes once and optionally
+  // perform a one-time autoscale from 14-bit->16-bit if we see values
+  // that look like 14-bit samples (<= 0x3FFF).
+  const autoScaleLoggedRef = useRef(false);
+  const debugSamplesLoggedRef = useRef(0);
   
   // Ref for auto-scrolling
   const scrollContainerRef = useRef<HTMLDivElement>(null)
@@ -239,9 +244,31 @@ export default function SerialConnection() {
           for (let ch = 0; ch < numChannelsRef.current; ch++) {
             const hi = packet[HEADER_LEN + (2 * ch)];
             const lo = packet[HEADER_LEN + (2 * ch) + 1];
-            const val = (hi << 8) | lo;
+            // Assemble 16-bit word from hi/lo. Some firmwares send 14-bit
+            // ADC values (max ~0x3FFF). Detect that case and scale to
+            // full 16-bit range so downstream code expecting 16-bit sees
+            // values near 65535 for full-scale inputs.
+            let val = (hi << 8) | lo;
+            // Log the raw hi/lo and assembled val for the first few samples
+            if (debugSamplesLoggedRef.current < 8) {
+              try {
+                console.debug(`[Serial] raw bytes ch${ch}: hi=0x${hi.toString(16).padStart(2,'0')} lo=0x${lo.toString(16).padStart(2,'0')} assembled=${val}`);
+              } catch (e) {}
+            }
+            // If the observed value fits within 14 bits, assume device uses 14-bit ADC
+            // and scale to 16-bit. Use multiplication rather than bit-shift for
+            // slightly better accuracy across the range.
+            if (val <= 0x3FFF) {
+              const scaled = Math.round(val * (65535 / 0x3FFF));
+              if (!autoScaleLoggedRef.current) {
+                console.info('[Serial] detected <=14-bit samples; auto-scaling to 16-bit (14->16)');
+                autoScaleLoggedRef.current = true;
+              }
+              val = scaled;
+            }
             sampleObj[`ch${ch}`] = val;
           }
+          debugSamplesLoggedRef.current += 1;
           // include counter if present
           try { sampleObj.counter = packet[2]; } catch (e) {}
 
