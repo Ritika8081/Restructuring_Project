@@ -25,8 +25,12 @@ export default function SerialConnection() {
   const [isConnected, setIsConnected] = useState(false)
   const [device, setDevice] = useState<any | null>(null)
   const [receivedData, setReceivedData] = useState<string[]>([])
-  const [currentData, setCurrentData] = useState<{ch0: number, ch1: number, ch2: number} | null>(null)
-  const [recentSamples, setRecentSamples] = useState<{ch0: number, ch1: number, ch2: number}[]>([])
+  const [currentData, setCurrentData] = useState<Record<string, number> | null>(null)
+  const [recentSamples, setRecentSamples] = useState<Record<string, number>[]>([])
+  // Detected device type for UI badge (e.g. 'CHORDS-TESTER' or 'NPG-Lite')
+  const [detectedDeviceType, setDetectedDeviceType] = useState<string | null>(null);
+  // Allow user to select device mode: auto-detect (default), R4 (6ch) or 3ch legacy
+  const [deviceMode, setDeviceMode] = useState<'auto' | 'r4' | '3ch'>('auto');
   
   const readerRef = useRef<any>(null)
   const bufferRef = useRef<number[]>([])
@@ -38,15 +42,16 @@ export default function SerialConnection() {
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
-  // Device constants matching firmware
+  // Device constants matching firmware (use refs so we can adapt dynamically)
   const BAUD_RATE = 230400
-  const NUM_CHANNELS = 3
   const HEADER_LEN = 3
-  const PACKET_LEN = NUM_CHANNELS * 2 + HEADER_LEN + 1 // 10 bytes total
   const SYNC_BYTE_1 = 0xC7
   const SYNC_BYTE_2 = 0x7C
   const END_BYTE = 0x01
-  const SAMPLE_RATE = 500
+  // Defaults (most boards use 3 channels at 500Hz); UNO R4 uses 6 channels
+  const numChannelsRef = useRef<number>(3);
+  const sampleRateRef = useRef<number>(500);
+  const packetLenRef = useRef<number>(numChannelsRef.current * 2 + HEADER_LEN + 1);
   const MAX_DISPLAY_SAMPLES = 50 // Only keep last 50 samples for display
 
   // Optimized auto-scroll - only for recent samples display
@@ -75,10 +80,40 @@ export default function SerialConnection() {
       
       setDevice(selectedPort)
       setIsConnected(true)
+      // Preconfigure parsing based on selected deviceMode (user can override auto-detect)
+      try {
+        if (deviceMode === 'r4') {
+          numChannelsRef.current = 6;
+          sampleRateRef.current = 500;
+          packetLenRef.current = numChannelsRef.current * 2 + HEADER_LEN + 1;
+          console.info('[Serial] connect(): using CHORDS-TESTER mode (6ch @ 500Hz)');
+          setDetectedDeviceType('CHORDS-TESTER (manual)');
+          // Inform provider of per-channel sampling rate so pending filters can be created
+          try {
+            if (channelData.setChannelSamplingRate) {
+              for (let i = 0; i < numChannelsRef.current; i++) channelData.setChannelSamplingRate(i, sampleRateRef.current);
+            }
+          } catch (e) {}
+        } else if (deviceMode === '3ch') {
+          numChannelsRef.current = 3;
+          sampleRateRef.current = 500;
+          packetLenRef.current = numChannelsRef.current * 2 + HEADER_LEN + 1;
+          console.info('[Serial] connect(): using Legacy 3ch mode (3ch @ 500Hz)');
+          setDetectedDeviceType('NPG-Lite (manual)');
+          try {
+            if (channelData.setChannelSamplingRate) {
+              for (let i = 0; i < numChannelsRef.current; i++) channelData.setChannelSamplingRate(i, sampleRateRef.current);
+            }
+          } catch (e) {}
+        }
+      } catch (e) { }
+  // Let the provider know the device sampling rate so filters can be configured
+  try { channelData.setSamplingRate && channelData.setSamplingRate(sampleRateRef.current); } catch (e) {}
       readerActiveRef.current = true
       
-      // Start reading data
-      startReading(selectedPort)
+
+  // Start reading data (this will also inspect initial text responses like WHORU)
+  startReading(selectedPort)
       
       // Send commands automatically
       setTimeout(async () => {
@@ -89,7 +124,7 @@ export default function SerialConnection() {
         await sendCommand(selectedPort, "START")
       }, 1000)
       
-      setReceivedData(['Connected! Starting data collection...'])
+  setReceivedData(['Connected! Starting data collection...'])
 
     } catch (error) {
       console.error('Serial connection failed:', error)
@@ -113,6 +148,42 @@ export default function SerialConnection() {
             if (textData.trim().length > 0 && !textData.includes('\x00')) {
               const timestamp = new Date().toLocaleTimeString()
               setReceivedData(prev => [...prev.slice(-10), `${timestamp}: ${textData.trim()}`]) // Keep only last 10 log entries
+              // Auto-detect UNO R4 responses (firmware responds with "CHORDS-TESTER") and adjust parsing
+              try {
+                const t = textData.trim().toUpperCase();
+                if (t.includes('CHORDS-TESTER') || t.includes('R4')) {
+                  // UNO R4 uses 6 channels and the same sampling rate defined in firmware
+                  numChannelsRef.current = 4;
+                  sampleRateRef.current = 500;
+                  packetLenRef.current = numChannelsRef.current * 2 + HEADER_LEN + 1;
+                  try { channelData.setSamplingRate && channelData.setSamplingRate(sampleRateRef.current); } catch (e) {}
+                  // Also set per-channel sampling rate so provider can create filter instances per-channel
+                  try {
+                    if (channelData.setChannelSamplingRate) {
+                      for (let i = 0; i < numChannelsRef.current; i++) channelData.setChannelSamplingRate(i, sampleRateRef.current);
+                    }
+                  } catch (e) {}
+                  console.info('[Serial] Detected device: CHORDS-TESTER');
+                  setDetectedDeviceType('CHORDS-TESTER');
+                  setReceivedData(prev => [...prev.slice(-10), `${timestamp}: Detected CHORDS-TESTER, using ${numChannelsRef.current} channels @ ${sampleRateRef.current}Hz`]);
+                } else if (t.includes('NPG') || t.includes('NPG-LITE') || t.includes('NPG LITE') || t.includes('LITE')) {
+                  // NPG Lite (legacy) response - assume 3 channels at 500Hz unless overridden
+                  numChannelsRef.current = 3;
+                  sampleRateRef.current = 500;
+                  packetLenRef.current = numChannelsRef.current * 2 + HEADER_LEN + 1;
+                  try { channelData.setSamplingRate && channelData.setSamplingRate(sampleRateRef.current); } catch (e) {}
+                  try {
+                    if (channelData.setChannelSamplingRate) {
+                      for (let i = 0; i < numChannelsRef.current; i++) channelData.setChannelSamplingRate(i, sampleRateRef.current);
+                    }
+                  } catch (e) {}
+                  console.info('[Serial] Detected device: NPG-Lite');
+                  setDetectedDeviceType('NPG-Lite');
+                  setReceivedData(prev => [...prev.slice(-10), `${timestamp}: Detected NPG-Lite, using ${numChannelsRef.current} channels @ ${sampleRateRef.current}Hz`]);
+                }
+              } catch (e) {
+                // ignore detection errors
+              }
             }
           } catch (decodeError) {
             // Not text data, treat as binary
@@ -121,7 +192,7 @@ export default function SerialConnection() {
           // Add to buffer for packet parsing
           const byteArray = Array.from(value as Uint8Array)
           bufferRef.current = [...bufferRef.current, ...byteArray]
-          
+
           handleDataReceived()
         }
       }
@@ -143,39 +214,46 @@ export default function SerialConnection() {
     
     if (buffer.length === 0) return
     
-    // Look for complete packets
-    for (let i = 0; i <= buffer.length - PACKET_LEN; i++) {
+    // Look for complete packets using dynamic packet length
+    const PACKET_LEN_CUR = packetLenRef.current;
+    for (let i = 0; i <= buffer.length - PACKET_LEN_CUR; i++) {
       if (buffer[i] === SYNC_BYTE_1 && buffer[i + 1] === SYNC_BYTE_2) {
-        const packet = buffer.slice(i, i + PACKET_LEN)
-        
-        if (packet.length === PACKET_LEN && packet[PACKET_LEN - 1] === END_BYTE) {
-          // Valid packet found - extract ALL 3 channels
-          const ch0 = (packet[3] << 8) | packet[4] // Channel 0
-          const ch1 = (packet[5] << 8) | packet[6] // Channel 1
-          const ch2 = (packet[7] << 8) | packet[8] // Channel 2
-          
-          const newSample = { ch0, ch1, ch2 }
+        const packet = buffer.slice(i, i + PACKET_LEN_CUR)
+
+        if (packet.length === PACKET_LEN_CUR && packet[PACKET_LEN_CUR - 1] === END_BYTE) {
+          // Valid packet found - extract channels dynamically
+          const sampleObj: Record<string, number> = {};
+          for (let ch = 0; ch < numChannelsRef.current; ch++) {
+            const hi = packet[HEADER_LEN + (2 * ch)];
+            const lo = packet[HEADER_LEN + (2 * ch) + 1];
+            const val = (hi << 8) | lo;
+            sampleObj[`ch${ch}`] = val;
+          }
+          // include counter if present
+          try { sampleObj.counter = packet[2]; } catch (e) {}
+
           // Push to global channel data context (use provider ref when available)
           try {
             const dispatchSample = providerAddSampleRef?.current ?? channelData.addSample;
-            dispatchSample && dispatchSample({ ch0, ch1, ch2, timestamp: Date.now() });
+            dispatchSample && dispatchSample({ ...(sampleObj as any), timestamp: Date.now() });
           } catch (err) {
             console.error('addSample error', err);
           }
+
           // Update current data (real-time display)
-          setCurrentData(newSample)
+          try { setCurrentData(sampleObj as any); } catch (e) {}
           // Update recent samples (keep only last MAX_DISPLAY_SAMPLES)
           setRecentSamples(prev => {
-            const updated = [...prev, newSample]
-            return updated.length > MAX_DISPLAY_SAMPLES 
-              ? updated.slice(-MAX_DISPLAY_SAMPLES) 
+            const updated = [...prev, (sampleObj as any)];
+            return updated.length > MAX_DISPLAY_SAMPLES
+              ? updated.slice(-MAX_DISPLAY_SAMPLES)
               : updated
           })
           sampleIndex.current = (sampleIndex.current + 1) % 1000
           totalSamples.current += 1
-          
+
           // Remove processed packet from buffer
-          bufferRef.current = buffer.slice(i + PACKET_LEN)
+          bufferRef.current = buffer.slice(i + PACKET_LEN_CUR)
           return
         }
       }
@@ -202,6 +280,15 @@ export default function SerialConnection() {
 
   return (
     <div className="flex flex-col items-center gap-4">
+      <div className="flex items-center gap-2">
+        <label className="text-sm">Device Mode:</label>
+        <select value={deviceMode} onChange={e => setDeviceMode(e.target.value as any)} className="px-2 py-1 border rounded">
+          <option value="auto">Auto-detect</option>
+          <option value="r4">UNO R4 (6ch)</option>
+          <option value="3ch">Legacy (3ch)</option>
+        </select>
+      </div>
+
       <button
         onClick={connect}
         disabled={isConnected}
@@ -210,9 +297,12 @@ export default function SerialConnection() {
         {isConnected ? 'Connected' : 'Connect to NPG Device'}
       </button>
       
-    
-
-     
+      {/* Device type badge */}
+      <div className="mt-2">
+        <span className={`px-2 py-1 text-xs font-medium rounded ${detectedDeviceType ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-700'}`}>
+          {detectedDeviceType ?? 'Unknown Device'}
+        </span>
+      </div>
     </div>
   )
 }

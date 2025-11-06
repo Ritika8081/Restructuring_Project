@@ -48,14 +48,15 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
                     const idx = Math.max(0, Math.floor(propIndex));
                     const color = colors[idx % colors.length];
                     // channel data keys are zero-based (ch0, ch1, ...). Use ch{idx} as id.
-                    return [{ id: `ch${idx}`, name: `CH ${idx + 1}`, color, visible: true }];
+                    // Use zero-based human-readable label to match BasicGraph (e.g. 'CH 0').
+                    return [{ id: `ch${idx}`, name: `CH ${idx}`, color, visible: true }];
                 }
                 // Fallback to parsing id (legacy behavior)
                 if (typeof widget.id === 'string' && widget.id.startsWith('channel-')) {
                     const m = widget.id.match(/channel-(\d+)/i);
                     const idx = m ? Math.max(0, parseInt(m[1], 10)) : 0;
                     const color = colors[idx % colors.length];
-                    return [{ id: `ch${idx}`, name: `CH ${idx + 1}`, color, visible: true }];
+                    return [{ id: `ch${idx}`, name: `CH ${idx}`, color, visible: true }];
                 }
             }
         } catch (err) {
@@ -75,7 +76,8 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
                     const idx = Math.max(0, Math.floor(propIndex));
                     const color = colors[idx % colors.length];
                     // zero-based channel id (ch0, ch1, ...)
-                    setWidgetChannels([{ id: `ch${idx}`, name: `CH ${idx + 1}`, color, visible: true }]);
+                    // Keep human-readable label zero-based to match BasicGraph
+                    setWidgetChannels([{ id: `ch${idx}`, name: `CH ${idx}`, color, visible: true }]);
                     return;
                 }
                 // Fallback to parse id
@@ -84,7 +86,8 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
                     const idx = m ? Math.max(0, parseInt(m[1], 10)) : 0;
                     const color = colors[idx % colors.length];
                     // zero-based channel id (ch0, ch1, ...)
-                    setWidgetChannels([{ id: `ch${idx}`, name: `CH ${idx + 1}`, color, visible: true }]);
+                    // Keep human-readable label zero-based to match BasicGraph
+                    setWidgetChannels([{ id: `ch${idx}`, name: `CH ${idx}`, color, visible: true }]);
                     return;
                 }
             }
@@ -272,7 +275,7 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
                 className="cursor-move overflow-hidden relative pb-5"
                 onMouseDown={(e) => handleMouseDown(e, 'move')}
                 style={{
-                    height: 'calc(100% - 48px)',
+                    height: '100%',
                     width: '100%'
                 }}
             >

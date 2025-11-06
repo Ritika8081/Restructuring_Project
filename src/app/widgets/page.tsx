@@ -68,10 +68,18 @@ const Widgets: React.FC = () => {
     // Draft of settings for the currently-open modal
     const [settingsDraft, setSettingsDraft] = useState<Record<string, any> | null>(null);
 
+    // Channel data context (used to wire sampling rate into the Filter modal)
+    const { setRegisteredChannels, setChannelFilters, samplingRate } = useChannelData();
+
     // Open settings for a given flow option id and seed the draft from flowOptions
     const openSettings = (widgetId: string) => {
         const opt = flowOptions.find(o => o.id === widgetId);
-        setSettingsDraft(opt && (opt as any).config ? { ...(opt as any).config } : {});
+        // Pre-fill samplingRate for filter nodes from provider if missing
+        const base = opt && (opt as any).config ? { ...(opt as any).config } : {};
+        if (opt && opt.type === 'filter') {
+            if (!base.samplingRate && samplingRate) base.samplingRate = samplingRate;
+        }
+        setSettingsDraft(base);
         setSettingsModal({ show: true, widgetId });
     };
 
@@ -98,6 +106,8 @@ const Widgets: React.FC = () => {
     const isChannel = type === 'channel';
     const isFFT = type === 'fft' || String(opt.id).startsWith('fft-');
     const isFilter = type === 'filter';
+
+        
 
         
         return (
@@ -164,57 +174,71 @@ const Widgets: React.FC = () => {
                     })()}
 
                     
-
-                    {isFFT && (
-                        <div>
-                            <div style={{ marginBottom: 12 }}>
-                                <label style={{ fontWeight: 500 }}>FFT Size:</label>
-                                <select value={(settingsDraft && settingsDraft.fftSize) || 256} onChange={e => setSettingsDraft(prev => ({ ...(prev || {}), fftSize: parseInt(e.target.value, 10) }))} style={{ marginLeft: 8 }}>
-                                    <option value={128}>128</option>
-                                    <option value={256}>256</option>
-                                    <option value={512}>512</option>
-                                    <option value={1024}>1024</option>
-                                </select>
-                                <div style={{ marginTop: 6, fontSize: 12, color: '#6b7280' }}>Choose FFT window size (power of two). Larger sizes give finer frequency resolution but more latency.</div>
-                            </div>
-
-                            <div style={{ marginBottom: 12 }}>
-                                <label style={{ fontWeight: 500 }}>Window:</label>
-                                <select value={(settingsDraft && settingsDraft.window) || 'hann'} onChange={e => setSettingsDraft(prev => ({ ...(prev || {}), window: e.target.value }))} style={{ marginLeft: 8 }}>
-                                    <option value="none">None</option>
-                                    <option value="hann">Hann</option>
-                                    <option value="hamming">Hamming</option>
-                                    <option value="blackman">Blackman</option>
-                                </select>
-                                <div style={{ marginTop: 6, fontSize: 12, color: '#6b7280' }}>Windowing reduces spectral leakage. Hann is a good default for biomedical signals.</div>
-                            </div>
-
-                            <div style={{ marginBottom: 12 }}>
-                                <label style={{ fontWeight: 500 }}>Sampling Rate (Hz):</label>
-                                <select value={(settingsDraft && settingsDraft.samplingRate) || 250} onChange={e => setSettingsDraft(prev => ({ ...(prev || {}), samplingRate: parseInt(e.target.value, 10) }))} style={{ marginLeft: 8 }}>
-                                    <option value={250}>250</option>
-                                    <option value={500}>500</option>
-                                    <option value={1000}>1000</option>
-                                </select>
-                                <div style={{ marginTop: 6, fontSize: 12, color: '#6b7280' }}>{samplingRateHelp}</div>
-                            </div>
-                        </div>
-                    )}
-
                     {isFilter && (
                         <div>
-                           
-                            {/* Notch frequency selection (50Hz / 60Hz) */}
-                            {(((settingsDraft && settingsDraft.filterType) || 'notch') === 'notch') && (
-                                <div style={{ marginBottom: 12 }}>
-                                    <label style={{ fontWeight: 500 }}>Notch Frequency (Hz):</label>
-                                    <select value={(settingsDraft && settingsDraft.notchFreq) || 50} onChange={e => setSettingsDraft(prev => ({ ...(prev || {}), notchFreq: parseInt(e.target.value, 10) }))} style={{ marginLeft: 8 }}>
-                                        <option value={50}>50 Hz</option>
-                                        <option value={60}>60 Hz</option>
+                            {/* Filter selection: separate dropdowns for Notch, High-pass and Low-pass.
+                                Only one filterKey is stored; selecting an option sets filterKey and clears other categories. */}
+                            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
+                                <div>
+                                    <label style={{ fontWeight: 500 }}>Notch:</label>
+                                    <select value={(settingsDraft && settingsDraft.notchKey) ? settingsDraft.notchKey : 'none'} onChange={e => {
+                                            const v = e.target.value;
+                                            if (v === 'none') {
+                                                setSettingsDraft(prev => ({ ...(prev || {}), notchKey: undefined, notchFreq: undefined }));
+                                            } else {
+                                                const nf = parseInt(v.split('-')[1] || '50', 10) || 50;
+                                                setSettingsDraft(prev => ({ ...(prev || {}), notchKey: `notch-${nf}`, notchFreq: nf }));
+                                            }
+                                        }} style={{ marginLeft: 8 }}>
+                                        <option value="none">None</option>
+                                        <option value="notch-50">50 Hz</option>
+                                        <option value="notch-60">60 Hz</option>
                                     </select>
-                                    <div style={{ marginTop: 6, fontSize: 12, color: '#6b7280' }}>Choose the mains notch frequency to remove from signals.</div>
                                 </div>
-                            )}
+
+                                <div>
+                                    <label style={{ fontWeight: 500 }}>High-pass:</label>
+                                    <select value={(settingsDraft && settingsDraft.hpKey) ? settingsDraft.hpKey : 'none'} onChange={e => {
+                                        const v = e.target.value;
+                                        if (v === 'none') {
+                                            setSettingsDraft(prev => ({ ...(prev || {}), hpKey: undefined }));
+                                        } else {
+                                            setSettingsDraft(prev => ({ ...(prev || {}), hpKey: v }));
+                                        }
+                                    }} style={{ marginLeft: 8 }}>
+                                        <option value="none">None</option>
+                                        <option value="hp-0.01">0.01 Hz</option>
+                                        <option value="hp-0.02">0.02 Hz</option>
+                                        <option value="hp-0.05">0.05 Hz</option>
+                                        <option value="hp-0.1">0.1 Hz</option>
+                                        <option value="hp-0.2">0.2 Hz</option>
+                                        <option value="hp-0.5">0.5 Hz</option>
+                                        <option value="hp-1.0">1.0 Hz</option>
+                                        <option value="hp-2.0">2.0 Hz</option>
+                                        <option value="hp-5.0">5.0 Hz</option>
+                                        <option value="hp-10.0">10.0 Hz</option>
+                                    </select>
+                                </div>
+
+                                <div>
+                                    <label style={{ fontWeight: 500 }}>Low-pass:</label>
+                                    <select value={(settingsDraft && settingsDraft.lpKey) ? settingsDraft.lpKey : 'none'} onChange={e => {
+                                        const v = e.target.value;
+                                        if (v === 'none') {
+                                            setSettingsDraft(prev => ({ ...(prev || {}), lpKey: undefined }));
+                                        } else {
+                                            setSettingsDraft(prev => ({ ...(prev || {}), lpKey: v }));
+                                        }
+                                    }} style={{ marginLeft: 8 }}>
+                                        <option value="none">None</option>
+                                        <option value="lp-10.0">10 Hz</option>
+                                        <option value="lp-20.0">20 Hz</option>
+                                        <option value="lp-30.0">30 Hz</option>
+                                        <option value="lp-50.0">50 Hz</option>
+                                        <option value="lp-70.0">70 Hz</option>
+                                    </select>
+                                </div>
+                            </div>
                             <div style={{ marginBottom: 12 }}>
                                 <label style={{ fontWeight: 500 }}>Sampling Rate (Hz):</label>
                                 <select value={(settingsDraft && settingsDraft.samplingRate) || 250} onChange={e => setSettingsDraft(prev => ({ ...(prev || {}), samplingRate: parseInt(e.target.value, 10) }))} style={{ marginLeft: 8 }}>
@@ -434,7 +458,6 @@ const Widgets: React.FC = () => {
 
     // Register which channel flow nodes are present so the channel data context
     // will route incoming samples only to the active channels.
-    const { setRegisteredChannels, setChannelFilters } = useChannelData();
     useEffect(() => {
         const channelIds = flowOptions.filter(o => typeof o.id === 'string' && o.id.startsWith('channel-')).map(o => o.id as string);
         try {
@@ -522,7 +545,7 @@ const Widgets: React.FC = () => {
     // the channel data provider so emitted samples are filtered.
     useEffect(() => {
         try {
-            const mapping: Record<number, { enabled?: boolean, filterType?: string, notchFreq?: number, samplingRate?: number }> = {};
+            const mapping: Record<number, { enabled?: boolean, filterType?: string, filterKeys?: string[], filterKey?: string, notchFreq?: number, samplingRate?: number }> = {};
             for (const c of connections) {
                 try {
                     if (typeof c.from === 'string' && String(c.from).startsWith('channel-') && typeof c.to === 'string') {
@@ -534,12 +557,29 @@ const Widgets: React.FC = () => {
                         if (!targetOpt) continue;
                         if (targetOpt.type === 'filter') {
                             const cfg = (targetOpt as any).config || {};
+                            // Build an ordered list of filter keys from explicit per-category fields
+                            const keys: string[] = [];
+                            // legacy single-key support
+                            if (cfg.filterKey) keys.push(cfg.filterKey);
+                            // new per-category keys
+                            if (cfg.notchKey) keys.push(cfg.notchKey);
+                            if (cfg.hpKey) keys.push(cfg.hpKey);
+                            if (cfg.lpKey) keys.push(cfg.lpKey);
+                            // legacy notch fields
+                            if (!keys.length && cfg.filterType === 'notch') {
+                                keys.push(`notch-${(cfg.notchFreq || 50)}`);
+                            }
+
                             mapping[chIdx] = {
                                 enabled: cfg.enabled !== false,
-                                filterType: cfg.filterType || 'notch',
-                                notchFreq: cfg.notchFreq || 50,
+                                filterType: cfg.filterType || (keys.length > 0 && keys[0].startsWith('notch') ? 'notch' : undefined),
+                                // pass an array of filter keys to the provider so it can apply them in order
+                                filterKey: undefined,
+                                notchFreq: cfg.notchFreq || (keys.length > 0 && keys[0].startsWith('notch') ? parseInt(keys[0].split('-')[1], 10) : undefined),
                                 samplingRate: cfg.samplingRate || undefined,
                             };
+                            // attach the ordered keys into a companion field for clarity
+                            (mapping as any)[chIdx].filterKeys = keys.length ? keys : undefined;
                         }
                     }
                 } catch (err) { /* ignore per-connection errors */ }

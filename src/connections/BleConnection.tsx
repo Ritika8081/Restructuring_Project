@@ -255,6 +255,8 @@ export default function BleConnection() {
 
       setDevice(selectedDevice)
       setIsConnected(true)
+  // Inform provider of the device sampling rate so filter modal can auto-populate
+  try { channelData.setSamplingRate && channelData.setSamplingRate(SAMPLE_RATE); } catch (e) {}
 
       const server = await selectedDevice.gatt?.connect()
       const service = await server?.getPrimaryService(SERVICE_UUID)

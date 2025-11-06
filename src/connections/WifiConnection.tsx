@@ -209,6 +209,8 @@ export default function WifiConnection() {
         setDevice(ws)
         setIsConnected(true)
         setReceivedData(['Connected! Starting data collection...'])
+        // Report sampling rate to provider so filters can be auto-configured
+        try { channelData.setSamplingRate && channelData.setSamplingRate(SAMPLE_RATE); } catch (e) {}
         
         // Send commands automatically like BLE/Serial
         setTimeout(async () => {

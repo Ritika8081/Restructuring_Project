@@ -71,9 +71,9 @@ const BasicGraphRealtime = forwardRef((props: BasicGraphRealtimeProps, ref) => {
   const {
     channels: initialChannels = [
       // Default channel id uses 0-based numbering (ch0) to match the
-      // project's canonical 0-based channel indexing. UI label remains
-      // 1-based for human readability ("CH 1").
-      { id: 'ch0', name: 'CH 1', color: '#10B981', visible: true },
+      // project's canonical 0-based channel indexing. UI label uses
+      // zero-based numbering for human readability ("CH 0").
+      { id: 'ch0', name: 'CH 0', color: '#10B981', visible: true },
     ],
   bufferSize = 2000,
     width = 400,
@@ -92,7 +92,10 @@ const BasicGraphRealtime = forwardRef((props: BasicGraphRealtimeProps, ref) => {
   const plotRefs = useRef<Map<string, WebglPlot>>(new Map());
   const linesRef = useRef<Map<string, WebglLine>>(new Map());
   const animationRef = useRef<number | null>(null);
-  const dataBuffers = useRef<Map<string, number[]>>(new Map());
+  // Per-channel circular buffers stored as Float32Array for efficient updates
+  const dataBuffers = useRef<Map<string, Float32Array>>(new Map());
+  // Per-channel sweep (write) position for overwrite plotting
+  const sweepPositionsRef = useRef<Map<string, number>>(new Map());
   // Pending per-channel sample queues (filled by the provider subscription
   // callback). Each queue contains normalized numeric values in the range
   // approximately -1..1 (see `normalize` below). These queues are drained
@@ -177,6 +180,19 @@ const BasicGraphRealtime = forwardRef((props: BasicGraphRealtimeProps, ref) => {
     return new ColorRGBA(r, g, b, a);
   };
 
+  // Normalize raw integer device values into -1..1. Centralized helper so
+  // all paths use the same logic. Assumes 16-bit unsigned-ish samples by
+  // default; adjust FULL_SCALE if your device uses a different range.
+  const FULL_SCALE = 2 ** 16;
+  const normalizeValue = (value: number | undefined | null) => {
+    if (value === undefined || value === null) return 0;
+    let v = Number(value);
+    // center at FULL_SCALE/2 and scale to -1..1
+    let out = (v - FULL_SCALE / 2) * (2 / FULL_SCALE);
+    if (!isFinite(out) || isNaN(out)) out = 0;
+    return Math.max(-1, Math.min(1, out));
+  };
+
   // Initialize canvases and plots for visible channels - responds to height changes.
   // Each visible channel uses its own canvas/WebglPlot instance. We size the
   // canvas using the devicePixelRatio to keep the rendering crisp on HiDPI
@@ -219,7 +235,7 @@ const BasicGraphRealtime = forwardRef((props: BasicGraphRealtimeProps, ref) => {
           existingPlot.removeAllLines();
         }
 
-        const plot = new WebglPlot(canvas);
+  const plot = new WebglPlot(canvas);
         plotRefs.current.set(channel.id, plot);
 
         const colorObj = hexToColorRGBA(channel.color);
@@ -230,17 +246,21 @@ const BasicGraphRealtime = forwardRef((props: BasicGraphRealtimeProps, ref) => {
         line.scaleY = 0.4;
         line.offsetY = 0;
 
-        // Initialize with zeros or restore existing data
+        // Initialize a Float32Array buffer and zero the Webgl line points
         const existingBuffer = dataBuffers.current.get(channel.id);
         if (existingBuffer) {
+          // restore existing contents into the line
           for (let i = 0; i < Math.min(bufferSize, existingBuffer.length); i++) {
             line.setY(i, existingBuffer[i] || 0);
           }
         } else {
+          const buf = new Float32Array(bufferSize);
           for (let i = 0; i < bufferSize; i++) {
+            buf[i] = 0;
             line.setY(i, 0);
           }
-          dataBuffers.current.set(channel.id, new Array(bufferSize).fill(0));
+          dataBuffers.current.set(channel.id, buf);
+          sweepPositionsRef.current.set(channel.id, 0);
         }
 
         plot.addLine(line);
@@ -269,20 +289,20 @@ const BasicGraphRealtime = forwardRef((props: BasicGraphRealtimeProps, ref) => {
             const take = Math.min(pending.length, samplesPerFrame);
             const toApply = pending.splice(0, take);
 
-            // `buffer` is the ring buffer storing historical values for this
-            // channel. If it's missing (new channel) create and initialize it
-            // with zeros to avoid rendering garbage.
-            const buffer = dataBuffers.current.get(channel.id) || new Array(bufferSize).fill(0);
-            buffer.push(...toApply);
-            if (buffer.length > bufferSize) buffer.splice(0, buffer.length - bufferSize);
-            dataBuffers.current.set(channel.id, buffer);
-
+            const buffer = dataBuffers.current.get(channel.id) || new Float32Array(bufferSize);
+            let sweep = sweepPositionsRef.current.get(channel.id) || 0;
             const line = linesRef.current.get(channel.id);
-            if (line) {
-              for (let i = 0; i < line.numPoints; i++) {
-                line.setY(i, buffer[i] || 0);
+            // Write each sample into the current sweep position (overwrite)
+            for (let s = 0; s < toApply.length; s++) {
+              const v = toApply[s];
+              buffer[sweep] = v;
+              if (line) {
+                try { line.setY(sweep, v); } catch (err) { /* ignore per-point errors */ }
               }
+              sweep = (sweep + 1) % bufferSize;
             }
+            sweepPositionsRef.current.set(channel.id, sweep);
+            dataBuffers.current.set(channel.id, buffer);
           }
         } catch (err) {
           // swallow per-channel errors
@@ -326,14 +346,12 @@ const BasicGraphRealtime = forwardRef((props: BasicGraphRealtimeProps, ref) => {
       // console.debug(`[BasicGraph${instanceId ? `:${instanceId}` : ''}] pushData`, { channelId, newValue });
     } catch (err) {}
 
-    // Shift buffer
-    buffer.shift();
-    buffer.push(newValue);
-
-    // Update line
-    for (let i = 0; i < line.numPoints; i++) {
-      line.setY(i, buffer[i]);
-    }
+    // Overwrite at current sweep position
+    let sweep = sweepPositionsRef.current.get(channelId) || 0;
+    buffer[sweep] = newValue;
+    try { line.setY(sweep, newValue); } catch (err) { /* ignore */ }
+    sweep = (sweep + 1) % line.numPoints;
+    sweepPositionsRef.current.set(channelId, sweep);
   };
 
   // Subscribe to ChannelDataProvider's sample-batch stream when allowed.
@@ -343,25 +361,11 @@ const BasicGraphRealtime = forwardRef((props: BasicGraphRealtimeProps, ref) => {
   // provider (that would create a feedback loop). The subscription returns
   // an unsubscribe function which we call on cleanup.
   const { subscribeToSampleBatches } = useChannelData();
+  const { subscribeToControlEvents } = useChannelData();
   useEffect(() => {
     if (!allowDeviceSamples) return;
 
-  // Normalizer: convert device integer ADC-like values into a roughly
-  // -1..1 floating range for plotting. This is a heuristic that assumes
-  // the device sends values centered at ~4096 (12-bit-like). If your
-  // device uses a different scale adjust this function accordingly.
-    const normalize = (value: number) => {
-      if (value === undefined || value === null) return 0;
-      let v = Number(value);
-      // Heuristic: if incoming samples are large integers (ADC-like),
-      // convert to normalized -1..1 assuming a 12-bit center at 4096.
-      // Otherwise assume already normalized.
-        // try center at 4096 (device may send unsigned-like values)
-        v = (v - 4096) / 4096;
-      // clamp
-      if (!isFinite(v) || isNaN(v)) v = 0;
-      return Math.max(-1, Math.min(1, v));
-    };
+  // Normalization is handled by `normalizeValue` defined above.
     // Enqueue sample batches into per-channel pending queues. The animation
     // loop will drain up to `samplesPerFrame` items per channel each frame.
     // We preserve `(sample as any)._raw` when present so developers can
@@ -423,8 +427,15 @@ const BasicGraphRealtime = forwardRef((props: BasicGraphRealtimeProps, ref) => {
                   if ((first as any)[k] !== undefined) { selectedKey = k; break; }
                 }
                 const raw = (first as any)._raw as Record<string, any> | undefined;
-                const valSource = (selectedKey && raw && raw[selectedKey as string] !== undefined) ? raw[selectedKey as string] : (selectedKey ? (first as any)[selectedKey as string] : undefined);
-                firstPreview[ch.id] = selectedKey && valSource !== undefined ? Number(valSource) : null;
+                // The provider emits normalized processed values (-1..1) when
+                // filters are applied. Prefer processed value; otherwise normalize raw.
+                const processedVal = selectedKey ? (first as any)[selectedKey as string] : undefined;
+                if (processedVal !== undefined) {
+                  firstPreview[ch.id] = Number(processedVal);
+                } else {
+                  const rawVal = selectedKey && raw && raw[selectedKey as string] !== undefined ? Number(raw[selectedKey as string]) : undefined;
+                  firstPreview[ch.id] = rawVal !== undefined ? normalizeValue(rawVal) : null;
+                }
               } catch (err) {
                 firstPreview[ch.id] = null;
               }
@@ -459,8 +470,12 @@ const BasicGraphRealtime = forwardRef((props: BasicGraphRealtimeProps, ref) => {
               }
               if (!selectedKey) continue;
               const raw = (sample as any)._raw as Record<string, any> | undefined;
-              const valSource = (selectedKey && raw && raw[selectedKey as string] !== undefined) ? raw[selectedKey as string] : (sample as any)[selectedKey as string];
-              const v = normalize(valSource as number);
+              // Provider emits normalized processed values (-1..1). Use them
+              // directly; otherwise normalize the preserved raw sample.
+              const processedVal = selectedKey ? (sample as any)[selectedKey as string] : undefined;
+              const v = processedVal !== undefined
+                ? Number(processedVal)
+                : normalizeValue(selectedKey && raw && raw[selectedKey as string] !== undefined ? Number(raw[selectedKey as string]) : 0);
               const q = pendingPerChannel.current.get(ch.id) || [];
               q.push(v);
               if (q.length > bufferSize * 4) q.splice(0, q.length - bufferSize * 4);
@@ -477,6 +492,35 @@ const BasicGraphRealtime = forwardRef((props: BasicGraphRealtimeProps, ref) => {
 
   if (!subscribeToSampleBatches) return () => {};
   const unsub = subscribeToSampleBatches(handleSampleBatch);
+  // Listen for provider control events (e.g. filter changes) so we can
+  // immediately clear per-channel buffers and avoid waiting for the
+  // circular buffer to fully rotate with old unfiltered data.
+  let unsubControl: (() => void) | undefined;
+  try {
+    if (subscribeToControlEvents) {
+      unsubControl = subscribeToControlEvents((evt) => {
+        try {
+          if (evt && evt.type === 'filterChanged' && typeof evt.channelIndex === 'number') {
+            const chId = `ch${evt.channelIndex}`;
+            // Clear buffer and reset sweep for the impacted channel
+            const buf = dataBuffers.current.get(chId);
+            const line = linesRef.current.get(chId);
+            if (buf) {
+              for (let i = 0; i < buf.length; i++) buf[i] = 0;
+            }
+            if (line) {
+              try {
+                for (let i = 0; i < line.numPoints; i++) line.setY(i, 0);
+              } catch (e) { /* ignore */ }
+            }
+            sweepPositionsRef.current.set(chId, 0);
+            // Also clear any pending queue so we don't immediately display stale values
+            pendingPerChannel.current.set(chId, []);
+          }
+        } catch (e) { /* swallow */ }
+      });
+    }
+  } catch (e) { /* ignore */ }
   return () => { unsub(); };
   }, [allowDeviceSamples, subscribeToSampleBatches, channels, bufferSize]);
 
@@ -512,13 +556,7 @@ const BasicGraphRealtime = forwardRef((props: BasicGraphRealtimeProps, ref) => {
               const ch = channels[i];
               if (!ch || !ch.visible) return;
               const value = (channelNumber >= 0 && channelNumber < arr.length) ? arr[channelNumber] : 0;
-              const v = ((): number => {
-                // reuse normalization heuristic from subscription
-                let vv = Number(value);
-                vv = (vv - 4096) / 4096;
-                if (!isFinite(vv) || isNaN(vv)) vv = 0;
-                return Math.max(-1, Math.min(1, vv));
-              })();
+              const v = normalizeValue(value);
               // push immediate
               pushData(ch.id, v);
             });
@@ -541,7 +579,7 @@ const BasicGraphRealtime = forwardRef((props: BasicGraphRealtimeProps, ref) => {
             }
             if (!selectedKey) continue;
             const val = (sample as any)[selectedKey as string] as number | undefined;
-            const v = val === undefined || val === null ? 0 : Math.max(-1, Math.min(1, (Number(val) - 4096) / 4096));
+            const v = normalizeValue(val);
             pushData(ch.id, v);
           }
         }

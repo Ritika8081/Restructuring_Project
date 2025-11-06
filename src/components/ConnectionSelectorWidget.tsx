@@ -7,7 +7,6 @@
  * Exports: default ConnectionSelectorWidget
  */
 import React, { useState } from 'react';
-import { v4 as uuidv4 } from 'uuid';
 
 const CONNECTION_TYPES = [
   { label: 'Serial', value: 'serial' },
