@@ -37,10 +37,12 @@ export default function SerialConnection() {
   const sampleIndex = useRef(0)
   const totalSamples = useRef(0)
   const readerActiveRef = useRef(false)
-  // Debug helpers: log raw assembly of hi/lo bytes once and optionally
-  // perform a one-time autoscale from 14-bit->16-bit if we see values
-  // that look like 14-bit samples (<= 0x3FFF).
-  const autoScaleLoggedRef = useRef(false);
+  // Debug helpers: log raw assembly of hi/lo bytes for the first few
+  // received packets. We do NOT mutate or rescale assembled sample
+  // values here; the provider is responsible for normalization and
+  // centering (the connection may call `channelData.setAdcBits` to
+  // inform the provider of ADC resolution). We only print raw bytes
+  // for inspection.
   const debugSamplesLoggedRef = useRef(0);
   
   // Ref for auto-scrolling
@@ -101,6 +103,8 @@ export default function SerialConnection() {
               for (let i = 0; i < numChannelsRef.current; i++) channelData.setChannelSamplingRate(i, sampleRateRef.current);
             }
           } catch (e) {}
+          // Tell provider this device uses 14-bit ADC values
+          try { channelData.setAdcBits && channelData.setAdcBits(14); } catch (e) {}
         } else if (deviceMode === '3ch') {
           numChannelsRef.current = 3;
           sampleRateRef.current = 500;
@@ -178,6 +182,8 @@ export default function SerialConnection() {
                         for (let i = 0; i < numChannelsRef.current; i++) channelData.setChannelSamplingRate(i, sampleRateRef.current);
                       }
                     } catch (e) {}
+                    // Set ADC resolution to 14 bits for UNO-R4 so provider centers correctly
+                    try { channelData.setAdcBits && channelData.setAdcBits(14); } catch (e) {}
                     console.info('[Serial] Detected device: UNO-R4');
                     setDetectedDeviceType('UNO-R4');
                     setReceivedData(prev => [...prev.slice(-10), `${timestamp}: Detected UNO-R4, using ${numChannelsRef.current} channels @ ${sampleRateRef.current}Hz`]);
@@ -244,10 +250,10 @@ export default function SerialConnection() {
           for (let ch = 0; ch < numChannelsRef.current; ch++) {
             const hi = packet[HEADER_LEN + (2 * ch)];
             const lo = packet[HEADER_LEN + (2 * ch) + 1];
-            // Assemble 16-bit word from hi/lo. Some firmwares send 14-bit
-            // ADC values (max ~0x3FFF). Detect that case and scale to
-            // full 16-bit range so downstream code expecting 16-bit sees
-            // values near 65535 for full-scale inputs.
+            // Assemble a 16-bit word from hi/lo. We do NOT modify or
+            // rescale the assembled sample here; raw numeric values are
+            // passed unchanged to the provider. The provider will perform
+            // centering/normalization (using `adcBits` if configured).
             let val = (hi << 8) | lo;
             // Log the raw hi/lo and assembled val for the first few samples
             if (debugSamplesLoggedRef.current < 8) {
@@ -255,17 +261,10 @@ export default function SerialConnection() {
                 console.debug(`[Serial] raw bytes ch${ch}: hi=0x${hi.toString(16).padStart(2,'0')} lo=0x${lo.toString(16).padStart(2,'0')} assembled=${val}`);
               } catch (e) {}
             }
-            // If the observed value fits within 14 bits, assume device uses 14-bit ADC
-            // and scale to 16-bit. Use multiplication rather than bit-shift for
-            // slightly better accuracy across the range.
-            if (val <= 0x3FFF) {
-              const scaled = Math.round(val * (65535 / 0x3FFF));
-              if (!autoScaleLoggedRef.current) {
-                console.info('[Serial] detected <=14-bit samples; auto-scaling to 16-bit (14->16)');
-                autoScaleLoggedRef.current = true;
-              }
-              val = scaled;
-            }
+            // NOTE: No autoscaling is performed here; raw `val` is forwarded
+            // unchanged to the provider. If you need provider-side
+            // normalization, call `channelData.setAdcBits(bits)` from the
+            // connection layer (we set this automatically for UNO-R4).
             sampleObj[`ch${ch}`] = val;
           }
           debugSamplesLoggedRef.current += 1;

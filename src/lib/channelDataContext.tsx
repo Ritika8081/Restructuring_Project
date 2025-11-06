@@ -54,6 +54,11 @@ export type ChannelDataContextType = {
   // can call setSamplingRate when a device connection reports its sample rate.
   samplingRate?: number;
   setSamplingRate?: (sr: number) => void;
+  // ADC resolution in bits (optional). If provided, the provider will use
+  // this value for centering and normalization instead of inferring from
+  // observed maxima. For UNO-R4 set to 14.
+  adcBits?: number;
+  setAdcBits?: (bits: number) => void;
 };
 
 const ChannelDataContext = createContext<ChannelDataContextType | undefined>(undefined);
@@ -75,6 +80,7 @@ export const ChannelDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
   const filterInstancesRef = useRef<Record<number, Record<string, any>>>({});
   // Global sampling rate (device-level). We keep a state so components can read it.
   const [samplingRate, setSamplingRateState] = useState<number | undefined>(undefined);
+  const [adcBits, setAdcBitsState] = useState<number | undefined>(undefined);
   // Queue of incoming samples to be flushed on the next animation frame.
   // This batches high-frequency producers to avoid React render storms.
   const incomingSampleQueueRef = useRef<any[]>([]);
@@ -85,9 +91,13 @@ export const ChannelDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
   const sampleSeqRef = useRef<number>(0);
   const subscribersRef = useRef<Set<(s: ChannelSample[]) => void>>(new Set());
   const controlSubscribersRef = useRef<Set<(e: { type: string; channelIndex?: number }) => void>>(new Set());
-  // Track observed per-channel raw maximums to infer ADC range (helps when
-  // devices use 10/12/14-bit ADCs packed into 16-bit fields). This lets us
-  // normalize correctly even if the device doesn't use full 16-bit range.
+  // Track observed per-channel raw maximums to help infer the ADC range
+  // when the device does not explicitly report ADC resolution. This
+  // supports cases where firmware uses 10/12/14-bit ADCs but transmits
+  // values in 16-bit fields. The inference is heuristic: we choose a
+  // power-of-two full-scale (2**bits) that covers the observed maximum.
+  // If an explicit `adcBits` is provided via `setAdcBits`, the provider
+  // will use that fixed resolution instead of inferring.
   const channelObservedMaxRef = useRef<Record<number, number>>({});
   // Expose addSample via a ref for high-frequency consumers that run
   // outside React lifecycles (e.g. BLE notification handlers).
@@ -124,24 +134,33 @@ export const ChannelDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
         if ((sample as any)[key] === undefined) break;
         // Read raw numeric sample value from device
         const rawVal = Number((sample as any)[key]);
+        console.log("rawVal:", rawVal);
         // Update observed per-channel max
         try {
           const prevMax = channelObservedMaxRef.current[i] || 0;
           const newMax = Math.max(prevMax, rawVal);
+          
           channelObservedMaxRef.current = { ...channelObservedMaxRef.current, [i]: newMax };
         } catch (e) { }
 
-        // Infer an effective FULL_SCALE for this channel based on observed
-        // max. Use the smallest power-of-two >= (observedMax + 1). Fallback
-        // to 2^16 when unknown.
-        let effectiveFullScale = 2 ** 16;
+  // Determine effective FULL_SCALE used for centering and scaling.
+  // Priority:
+  // 1) Use explicit `adcBits` if set by the connection layer.
+  // 2) Otherwise infer a conservative power-of-two full-scale from
+  //    the observed per-channel maximum (heuristic).
+  // 3) Fall back to 16-bit when nothing else is known.
+        let effectiveFullScale = 2 ** 14;
         try {
-          const obs = channelObservedMaxRef.current[i] || 0;
-          if (obs > 0 && obs < (2 ** 16)) {
-            const bits = Math.ceil(Math.log2(obs + 1));
-            effectiveFullScale = 2 ** bits;
+          if (adcBits) {
+            effectiveFullScale = 2 ** adcBits;
+          } else {
+            const obs = channelObservedMaxRef.current[i] || 0;
+            if (obs > 0 && obs < (2 ** 14)) {
+              const bits = Math.ceil(Math.log2(obs + 1));
+              effectiveFullScale = 2 ** bits;
+            }
           }
-        } catch (e) { effectiveFullScale = 2 ** 16; }
+        } catch (e) { effectiveFullScale = 2 ** 14; }
 
         const Y_SCALE = 2 / effectiveFullScale;
 
@@ -422,6 +441,15 @@ export const ChannelDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
     }
   }, []);
 
+  const setAdcBits = useCallback((bits: number) => {
+    try {
+      setAdcBitsState(bits);
+      try { console.info('[ChannelData] setAdcBits', bits); } catch (e) {}
+    } catch (err) {
+      // swallow
+    }
+  }, []);
+
   // Set a global sampling rate. When provided, create any pending filter
   // instances for configured channels that were waiting for a sampling rate.
   const setSamplingRate = useCallback((sr: number) => {
@@ -468,7 +496,7 @@ export const ChannelDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
   }, []);
 
   return (
-    <ChannelDataContext.Provider value={{ samples: snapshot, addSample, addSampleRef, clearSamples, setRegisteredChannels, subscribeToSampleBatches, setChannelFilters, setChannelSamplingRate, samplingRate, setSamplingRate }}>
+    <ChannelDataContext.Provider value={{ samples: snapshot, addSample, addSampleRef, clearSamples, setRegisteredChannels, subscribeToSampleBatches, subscribeToControlEvents, setChannelFilters, setChannelSamplingRate, samplingRate, setSamplingRate, adcBits, setAdcBits }}>
       {children}
     </ChannelDataContext.Provider>
   );
