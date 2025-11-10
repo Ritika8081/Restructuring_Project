@@ -1170,7 +1170,7 @@ const Widgets: React.FC = () => {
                         maxWidth: 1400,
                         width: '90vw',
                         position: 'relative',
-                        overflow: 'auto',
+                        overflow: 'visible',
                         margin: 'auto',
                     }}>
                         {/* Settings modal always rendered at top level of flowchart modal */}
@@ -1194,7 +1194,7 @@ const Widgets: React.FC = () => {
 
                             <div style={{ display: 'flex', gap: 12, marginBottom: 0, alignItems: 'center', flexWrap: 'wrap' }}>
                             <button
-                                style={{ background: '#2563eb', color: 'white', padding: '8px 18px', borderRadius: 8, fontWeight: 'bold', border: 'none', cursor: 'pointer', fontSize: 16 }}
+                                style={{ background: '#2563eb', color: 'white', padding: '8px 14px', borderRadius: 10, fontWeight: 700, border: 'none', cursor: 'pointer', fontSize: 14, display: 'inline-flex', alignItems: 'center', gap: 8, boxShadow: '0 8px 24px rgba(37,99,235,0.12)', transition: 'transform 120ms ease, box-shadow 120ms ease' }}
                                 onClick={() => {
                                     // Download full flowchart layout (widgets, grid, connections, positions, options) as JSON file
                                     try {
@@ -1221,10 +1221,13 @@ const Widgets: React.FC = () => {
                                         showToast('Failed to download layout', 'error');
                                     }
                                 }}
-                            >Save Layout</button>
+                            >
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 3v9" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/><path d="M8 11l4-4 4 4" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/><path d="M21 21H3" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                                <span>Save Layout</span>
+                            </button>
                             {/* Left palette is now shown inside the flow area as a draggable list (see below) */}
                             <button
-                                style={{ background: '#10B981', color: 'white', padding: '8px 18px', borderRadius: 8, fontWeight: 'bold', border: 'none', cursor: 'pointer', fontSize: 16 }}
+                                style={{ background: '#10B981', color: 'white', padding: '8px 14px', borderRadius: 10, fontWeight: 700, border: 'none', cursor: 'pointer', fontSize: 14, display: 'inline-flex', alignItems: 'center', gap: 8, boxShadow: '0 8px 24px rgba(16,185,129,0.12)', transition: 'transform 120ms ease, box-shadow 120ms ease' }}
                                 onClick={() => {
                                     // Open file selector to load flowchart layout
                                     try {
@@ -1268,15 +1271,21 @@ const Widgets: React.FC = () => {
                                         showToast('Failed to open file selector', 'error');
                                     }
                                 }}
-                            >Load Layout</button>
+                            >
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 3v9" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/><path d="M8 11l4-4 4 4" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/><path d="M21 21H3" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                                <span>Load Layout</span>
+                            </button>
                             {/* Make Connection button placed next to Load Layout for convenience */}
                             <button
-                                style={{ background: '#f59e0b', color: 'white', padding: '8px 18px', borderRadius: 8, fontWeight: 'bold', border: 'none', cursor: 'pointer', fontSize: 16 }}
+                                style={{ background: '#f59e0b', color: 'white', padding: '8px 14px', borderRadius: 10, fontWeight: 700, border: 'none', cursor: 'pointer', fontSize: 14, display: 'inline-flex', alignItems: 'center', gap: 8, boxShadow: '0 8px 24px rgba(245,158,11,0.12)', transition: 'transform 120ms ease, box-shadow 120ms ease' }}
                                 onClick={() => setShowConnectionModal(true)}
-                            >Make Connection</button>
+                            >
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M10 14a3 3 0 0 1 0-4l2-2a3 3 0 0 1 4 4l-1 1" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/><path d="M14 10a3 3 0 0 1 0 4l-2 2a3 3 0 0 1-4-4l1-1" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                                <span>Make Connection</span>
+                            </button>
                             {/* Skip initial flowchart and continue to dashboard */}
                             <button
-                                style={{ background: '#6b7280', color: 'white', padding: '8px 18px', borderRadius: 8, fontWeight: 'bold', border: 'none', cursor: 'pointer', fontSize: 16 }}
+                                style={{ background: '#6b7280', color: 'white', padding: '8px 14px', borderRadius: 10, fontWeight: 700, border: 'none', cursor: 'pointer', fontSize: 14, display: 'inline-flex', alignItems: 'center', gap: 8, boxShadow: '0 8px 24px rgba(107,114,128,0.06)', transition: 'transform 120ms ease, box-shadow 120ms ease' }}
                                 onClick={() => {
                                     try {
                                         markFlowSeen();
@@ -1286,7 +1295,10 @@ const Widgets: React.FC = () => {
                                         setShowFlowModal(false);
                                     }
                                 }}
-                            >Skip</button>
+                            >
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M5 12h14" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/><path d="M12 5l7 7-7 7" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                                <span>Skip</span>
+                            </button>
                             </div>
                         </div>
                         {/* Connection modal (opened via toolbar Make Connection button) */}
@@ -1341,7 +1353,7 @@ const Widgets: React.FC = () => {
                         {/* Flowchart grid layout */}
                         {/* Row layout: left palette + flow area to avoid overlap */}
                         <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start', paddingTop: 8 }}>
-                            <div style={{ width: 240, flex: '0 0 240', height: 520, overflowY: 'auto', padding: 10, borderRadius: 10, background: '#ffffff', border: '1px solid #eef2f7', boxShadow: '0 6px 18px rgba(17,24,39,0.04)' }}>
+                            <div style={{ width: 240, flex: '0 0 240', height: 520, overflowY: 'visible', padding: 10, borderRadius: 10, background: '#ffffff', border: '1px solid #eef2f7', boxShadow: '0 6px 18px rgba(17,24,39,0.04)' }}>
                                 <div style={{ fontWeight: 700, padding: '6px 8px', color: '#111827', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                     <span>Applications</span>
                                     <span style={{ fontSize: 12, color: '#6b7280' }}>{flowOptions.length} items</span>
@@ -1609,7 +1621,7 @@ const Widgets: React.FC = () => {
                                     <div
                                         key="channels-box"
                                         // Render as absolute inside the flowchart container so it aligns with other modal widgets
-                                        style={{ position: 'absolute', left: clampedLeft, top: clampedTop, width: boxWidth, border: '1px solid #e6e7eb', borderRadius: 12, background: '#ffffff', padding: 6, display: 'flex', flexDirection: 'column', gap: 4, boxShadow: '0 6px 18px rgba(2,6,23,0.04)', zIndex: 2, overflow: 'visible' }}
+                                        style={{ position: 'absolute', left: clampedLeft, top: clampedTop, width: boxWidth, border: '1px solid #d1d5db', borderRadius: 12, background: '#ffffff', padding: 6, display: 'flex', flexDirection: 'column', gap: 4, boxShadow: '0 6px 18px rgba(2,6,23,0.04)', zIndex: 2, overflow: 'visible' }}
                                         onMouseDown={handleDragChannels}
                                     >
                                         {/* Header with widget name, delete and settings buttons (compact) */}
@@ -1909,7 +1921,7 @@ const Widgets: React.FC = () => {
                                 return (
                                     <div
                                         key="plots-box"
-                                        style={{ position: 'absolute', left: clampedLeft, top: clampedTop, width: boxWidth, border: '1px solid #e6e7eb', borderRadius: 12, background: '#ffffff', padding: 6, display: 'flex', flexDirection: 'column', gap: 4, boxShadow: '0 6px 18px rgba(2,6,23,0.04)', zIndex: 2, overflow: 'visible' }}
+                                        style={{ position: 'absolute', left: clampedLeft, top: clampedTop, width: boxWidth, border: '1px solid #d1d5db', borderRadius: 12, background: '#ffffff', padding: 6, display: 'flex', flexDirection: 'column', gap: 4, boxShadow: '0 6px 18px rgba(2,6,23,0.04)', zIndex: 2, overflow: 'visible' }}
                                         onMouseDown={handleDragPlots}
                                     >
                                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6, background: '#f8fafc', padding: '6px 8px', borderRadius: 8 }}>
@@ -2152,7 +2164,7 @@ const Widgets: React.FC = () => {
                                 return (
                                     <div
                                         key={widgetId}
-                                        style={{ position: 'absolute', left: widgetLeft, top: widgetTop, width: widgetWidth, height: widgetHeight, border: '2px solid #222', borderRadius: 12, background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: 12, zIndex: showConnectionModal || settingsModal.show ? 0 : 2, boxShadow: '0 2px 12px rgba(0,0,0,0.07)', transition: 'box-shadow 0.2s', gap: 8, wordBreak: 'break-word', overflowWrap: 'break-word', textAlign: 'center', cursor: showConnectionModal || settingsModal.show ? 'default' : 'move', pointerEvents: showConnectionModal || settingsModal.show ? 'none' : 'auto' }}
+                                        style={{ position: 'absolute', left: widgetLeft, top: widgetTop, width: widgetWidth, height: widgetHeight, border: '1px solid #d1d5db', borderRadius: 12, background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: 12, zIndex: showConnectionModal || settingsModal.show ? 0 : 2, boxShadow: '0 2px 12px rgba(0,0,0,0.07)', transition: 'box-shadow 0.2s', gap: 8, wordBreak: 'break-word', overflowWrap: 'break-word', textAlign: 'center', cursor: showConnectionModal || settingsModal.show ? 'default' : 'move', pointerEvents: showConnectionModal || settingsModal.show ? 'none' : 'auto' }}
                                         onMouseDown={handleDrag}
                                     >
                                         <div style={{ display: 'flex', alignItems: 'center', width: '100%', height: '100%', position: 'relative', justifyContent: 'space-between' }}>
