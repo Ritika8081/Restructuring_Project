@@ -16,6 +16,7 @@ import FFTPlotRealtime from '@/components/FFTPlot';
 import BasicGraphRealtime from '@/components/BasicGraph';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import { useChannelData } from '@/lib/channelDataContext';
+import { FFT } from '@/lib/fft';
 import { Widget, GridSettings, DragState } from '@/types/widget.types';
 import { checkCollisionAtPosition } from '@/utils/widget.utils';
 
@@ -99,6 +100,63 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
 
     // Global channel samples from context (used by multiple widget render paths)
     const { samples } = useChannelData();
+
+    // FFT input data computed from the first incoming channel connection (if any)
+    const [fftInputData, setFftInputData] = useState<number[] | undefined>(undefined);
+
+    useEffect(() => {
+        // Only compute FFT when this widget is an FFTGraph and has incomingConnections
+        if (widget.type !== 'FFTGraph') return;
+        if (!incomingConnections || incomingConnections.length === 0) {
+            setFftInputData(undefined);
+            return;
+        }
+
+        // Prefer the first channel source. If it's a filter node, it will have been
+        // expanded upstream so plots receive original channel-* ids.
+        const src = String(incomingConnections[0] || '');
+        if (!src.startsWith('channel-')) {
+            setFftInputData(undefined);
+            return;
+        }
+
+        const m = src.match(/channel-(\d+)/i);
+        const chIdx = m ? Math.max(0, parseInt(m[1], 10)) : 0;
+        const key = `ch${chIdx}`;
+
+        // FFT size (power of two). Match the FFTPlot bufferSize (256) for best visuals.
+        const fftSize = 256;
+
+        // Pull the most recent fftSize samples from the provider (samples are normalized -1..1)
+        const recent = samples.slice(-fftSize);
+        if (!recent || recent.length === 0) {
+            setFftInputData(undefined);
+            return;
+        }
+
+        // Build input Float32Array of length fftSize (pad with zeros on the left if necessary)
+        const input = new Float32Array(fftSize);
+        const start = Math.max(0, recent.length - fftSize);
+        // If recent.length < fftSize, we align to the right and leave leading zeros
+        const offset = fftSize - (recent.length - start);
+        for (let i = 0; i < fftSize; i++) {
+            const srcIdx = start + (i - offset);
+            const v = (srcIdx >= start && srcIdx < recent.length) ? ((recent[srcIdx] as any)[key] ?? 0) : 0;
+            input[i] = v;
+        }
+
+        try {
+            const fft = new FFT(fftSize);
+            const mags = fft.computeMagnitudes(input); // Float32Array length fftSize/2
+            // Debug log to help trace why nothing is plotted
+            try { console.debug('[FFT] computed mags', { src, chIdx, recentLen: recent.length, magsLen: mags.length, firstMags: Array.from(mags.slice(0, 8)) }); } catch (e) { }
+            setFftInputData(Array.from(mags));
+        } catch (err) {
+            // If FFT fails, clear input and log
+            try { console.error('[FFT] compute failed', err); } catch (e) { }
+            setFftInputData(undefined);
+        }
+    }, [samples, incomingConnections, widget.type]);
 
     /**
      * Handle mouse down events for drag/resize operations
@@ -323,6 +381,7 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
                     ) : widget.type === 'FFTGraph' ? (
                         <div className="relative w-full h-full">
                             {availableWidth > 100 && availableHeight > 80 ? (
+                                <>
                                 <FFTPlotRealtime
                                     color="#3B82F6"
                                     width={availableWidth}
@@ -330,7 +389,24 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
                                     bufferSize={256}
                                     showGrid={widget.width >= 3}
                                     backgroundColor="rgba(59, 130, 246, 0.05)"
+                                    inputData={fftInputData}
                                 />
+                                {/* Debug overlay to show upstream/fft data status */}
+                                <div style={{ position: 'absolute', left: 6, top: 6,  color: 'black', padding: '6px 8px', borderRadius: 6, fontSize: 11, zIndex: 20 }}>
+                                   
+                                    <div>src: {String(incomingConnections && incomingConnections[0] ? incomingConnections[0] : '—')}</div>
+                                    {(() => {
+                                        try {
+                                            const src = String(incomingConnections && incomingConnections[0] ? incomingConnections[0] : '');
+                                            const m = src.match(/channel-(\d+)/i);
+                                            const chIdx = m ? Math.max(0, parseInt(m[1], 10)) : null;
+                                            return <div>chIdx: {chIdx ?? '—'}</div>;
+                                        } catch (e) { return <div>chIdx: —</div>; }
+                                    })()}
+                                    <div>recent samples: {samples ? samples.length : '—'}</div>
+                                    <div>fft bins: {fftInputData ? fftInputData.length : '—'}</div>
+                                </div>
+                                </>
                             ) : (
                                 <div className="flex items-center justify-center h-full text-gray-400 text-xs">
                                     FFT widget too small to display graph
@@ -423,16 +499,16 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
 
                             // Debug: log why this BasicGraph is allowed to consume device data
                             // (temporary; remove after troubleshooting)
-                            try {
-                                // use console.debug so normal logs stay clean
-                                console.debug('[DraggableWidget] BasicGraph render', {
-                                    widgetId: widget.id,
-                                    allowDevice,
-                                    finalChannels,
-                                    incomingConnections,
-                                    isChannelWidget,
-                                });
-                            } catch (err) {}
+                            // try {
+                            //     // use console.debug so normal logs stay clean
+                            //     console.debug('[DraggableWidget] BasicGraph render', {
+                            //         widgetId: widget.id,
+                            //         allowDevice,
+                            //         finalChannels,
+                            //         incomingConnections,
+                            //         isChannelWidget,
+                            //     });
+                            // } catch (err) {}
 
                             return (
                                 <div className="w-full h-full overflow-hidden flex items-center justify-center p-0.5">

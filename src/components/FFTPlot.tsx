@@ -69,8 +69,10 @@ const FFTPlotRealtime: React.FC<FFTPlotRealtimeProps> = ({
       magnitude += Math.exp(-Math.pow((freq - 1.2) * 6, 2)) * 0.4;  // Peak at high freq
       
       // Add noise and time variation
+      // Deterministic time variation only — removed all random noise
       magnitude += Math.sin(time * 2 + freq * 10) * 0.1;
-      magnitude += (Math.random() - 0.5) * 0.05;
+      // small deterministic micro-variation (no Math.random)
+      magnitude += Math.sin(time * 3 + freq * 7) * 0.01;
       
       // Apply frequency rolloff (typical in FFT)
       magnitude *= Math.exp(-freq * 0.5);
@@ -180,6 +182,7 @@ const FFTPlotRealtime: React.FC<FFTPlotRealtimeProps> = ({
     };
 
     if (inputData && inputData.length > 0) {
+      try { console.debug('[FFTPlotRealtime] received inputData length', inputData.length); } catch (e) {}
       // If upstream provides data, render it at animation frame rate
       pushInputData(inputData);
       interval = window.setInterval(() => pushInputData(inputData), 50);
@@ -194,6 +197,9 @@ const FFTPlotRealtime: React.FC<FFTPlotRealtimeProps> = ({
       if (interval) clearInterval(interval);
     };
   }, [bufferSize, enableSimulation, inputData]);
+
+  // Simple UI indicator when there is no input data and simulation is off
+  const showNoInput = !inputData || inputData.length === 0;
 
   // Normalize an incoming value (v) to -1..1 based on the array's max (if >0)
   const normalizeToWebGL = (v: number, arr: number[]) => {
@@ -226,6 +232,12 @@ const FFTPlotRealtime: React.FC<FFTPlotRealtimeProps> = ({
           zIndex: 1
         }}
       />
+
+      {showNoInput && !enableSimulation && (
+        <div style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', zIndex: 10 }}>
+          <div style={{ background: 'rgba(0,0,0,0.45)', color: 'white', padding: '6px 10px', borderRadius: 6, fontSize: 12 }}>No FFT input data</div>
+        </div>
+      )}
 
       {/* Any overlay elements should have lower z-index than header */}
       {showGrid && (

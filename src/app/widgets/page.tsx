@@ -2507,8 +2507,11 @@ const Widgets: React.FC = () => {
                         // ensures dashboard Plot widgets see channel-IDs even when
                         // a filter node is placed in the path (channel -> filter -> plot).
                         const getUpstreamSources = (wId: string) => {
+                            // Direct connections to this dashboard widget id
                             const direct = connections.filter(c => c.to === wId).map(c => c.from);
                             const expanded: string[] = [];
+
+                            // Expand direct sources: inline channels, unwrap filters -> channels, and keep other ids
                             for (const src of direct) {
                                 try {
                                     const s = String(src);
@@ -2524,6 +2527,40 @@ const Widgets: React.FC = () => {
                                     }
                                 } catch (err) { /* ignore */ }
                             }
+
+                            // --- Auto-mapping for FFT dashboard widgets ---
+                            // Some users wire the flowchart 'fft' node (e.g. id 'fft-...') to channels
+                            // but the dashboard widget instance has a different id (e.g. 'widget-FFTGraph-...').
+                            // To make dashboard FFT widgets receive channel-* inputs even when the
+                            // flow connection targets a flow-node id, scan flowOptions for fft nodes
+                            // and collect their channel feeders here when this is an FFTGraph widget.
+                            try {
+                                const targetWidget = widgets.find(w => w.id === wId);
+                                if (targetWidget && targetWidget.type === 'FFTGraph') {
+                                    // gather all flow-node ids that represent FFT nodes
+                                    const fftNodeIds = (flowOptions || []).filter((o: any) => {
+                                        return String(o.type || '').toLowerCase() === 'fft' || String(o.id || '').toLowerCase().startsWith('fft-');
+                                    }).map((o: any) => String(o.id));
+
+                                    for (const nodeId of fftNodeIds) {
+                                        // find direct feeders into the flow fft node
+                                        const feeders = connections.filter(c => c.to === nodeId).map(c => c.from);
+                                        for (const f of feeders) {
+                                            const s = String(f);
+                                            if (s.startsWith('channel-')) {
+                                                if (!expanded.includes(s)) expanded.push(s);
+                                            } else if (s.startsWith('filter-')) {
+                                                // if a filter feeds the fft node, resolve channels that feed that filter
+                                                const chs = connections.filter(c2 => c2.to === s && String(c2.from).startsWith('channel-')).map(c2 => c2.from);
+                                                for (const ch of chs) if (!expanded.includes(String(ch))) expanded.push(String(ch));
+                                            }
+                                        }
+                                    }
+                                }
+                            } catch (err) {
+                                // non-critical; if something goes wrong here, fall back to direct expanded list
+                            }
+
                             return expanded;
                         };
 
