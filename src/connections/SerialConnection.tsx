@@ -157,7 +157,10 @@ export default function SerialConnection() {
           try {
             const textData = new TextDecoder().decode(value)
             const trimmed = textData.trim();
-            if (trimmed.length > 0 && !textData.includes('\x00')) {
+            // Run detection on any trimmed textual response. Some devices
+            // include NUL bytes when sending mixed binary/text replies;
+            // don't skip detection just because NULs are present.
+            if (trimmed.length > 0) {
               const timestamp = new Date().toLocaleTimeString()
               // Avoid appending the same text repeatedly which can cause
               // frequent state churn and render storms.

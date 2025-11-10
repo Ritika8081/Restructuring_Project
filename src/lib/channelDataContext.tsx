@@ -99,6 +99,14 @@ export const ChannelDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
   // If an explicit `adcBits` is provided via `setAdcBits`, the provider
   // will use that fixed resolution instead of inferring.
   const channelObservedMaxRef = useRef<Record<number, number>>({});
+
+  // Debug flag to gate expensive per-sample logging in hot paths.
+  // Set to `true` only when actively troubleshooting; keep `false`
+  // in normal runs to avoid console and allocation overhead.
+  const DEBUG = false;
+  // Maximum queued, unflushed incoming samples. Protects against
+  // producers faster than the RAF flush and prevents unbounded growth.
+  const MAX_INCOMING_QUEUE = 5000;
   // Expose addSample via a ref for high-frequency consumers that run
   // outside React lifecycles (e.g. BLE notification handlers).
   const addSampleRef = useRef<((sample: ChannelSample) => void) | null>(null);
@@ -134,13 +142,13 @@ export const ChannelDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
         if ((sample as any)[key] === undefined) break;
         // Read raw numeric sample value from device
         const rawVal = Number((sample as any)[key]);
-        console.log("rawVal:", rawVal);
-        // Update observed per-channel max
+        if (DEBUG) console.debug('rawVal:', rawVal);
+        // Update observed per-channel max in-place to avoid frequent
+        // object cloning/allocations on every sample.
         try {
           const prevMax = channelObservedMaxRef.current[i] || 0;
           const newMax = Math.max(prevMax, rawVal);
-          
-          channelObservedMaxRef.current = { ...channelObservedMaxRef.current, [i]: newMax };
+          channelObservedMaxRef.current[i] = newMax;
         } catch (e) { }
 
   // Determine effective FULL_SCALE used for centering and scaling.
@@ -220,12 +228,22 @@ export const ChannelDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
       // Attach a monotonic sequence id to help trace ordering across layers
       sampleSeqRef.current = (sampleSeqRef.current + 1) % 1000000;
       (processed as any)._seq = sampleSeqRef.current;
+      // Protect the incoming queue from unbounded growth. If the queue is
+      // too large, drop the oldest chunk before pushing new samples. This
+      // helps when producers temporarily outrun the rAF flush.
+      try {
+        if (incomingSampleQueueRef.current.length >= MAX_INCOMING_QUEUE) {
+          // Drop an older slice to recover headroom (drop 20% of cap).
+          incomingSampleQueueRef.current.splice(0, Math.floor(MAX_INCOMING_QUEUE * 0.2));
+          if (DEBUG) console.warn('[ChannelData] incoming queue trimmed to prevent OOM', incomingSampleQueueRef.current.length);
+        }
+      } catch (e) {}
       incomingSampleQueueRef.current.push(processed as ChannelSample);
 
       // Rate-limited incoming-sample debug to help trace counters end-to-end
       try {
         const now = Date.now();
-        if (now - lastAddLogRef.current > 200) {
+        if (now - lastAddLogRef.current > 200 && DEBUG) {
           lastAddLogRef.current = now;
           const cnt = (sample as any).counter;
           try { console.debug('[ChannelData] queued sample counter', { counter: cnt, registered: Array.from(registeredChannelIndices.current).sort((a, b) => a - b) }); } catch (e) { }
@@ -234,8 +252,10 @@ export const ChannelDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
       // Debug: lightweight log
       try {
-        const regs = Array.from(registeredChannelIndices.current).sort((a, b) => a - b);
-        console.debug('[ChannelData] queueSample', { registeredIndices: regs, incoming: sample });
+        if (DEBUG) {
+          const regs = Array.from(registeredChannelIndices.current).sort((a, b) => a - b);
+          console.debug('[ChannelData] queueSample', { registeredIndices: regs, incoming: sample });
+        }
       } catch (err) { }
 
       if (rafHandleRef.current == null) {
@@ -274,22 +294,22 @@ export const ChannelDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
                     if (d > 1) totalMissing += (d - 1)
                   }
                   // Always emit a debug-level summary; escalate to warn if gaps exist
-                  if (totalMissing > 0) {
-                    console.warn('[ChannelData] batch detected missing samples', { batchSize: sampleBatch.length, first, last, missing: totalMissing })
-                  } else {
-                    // Rate-limit positive confirmation to avoid noisy logs
-                    try {
-                      const now = Date.now()
-                      if (now - lastOkFlushTimeRef.current > 5000) {
-                        console.info('[ChannelData] batch OK: no missing samples', { batchSize: sampleBatch.length, first, last })
-                        lastOkFlushTimeRef.current = now
-                      } else {
-                        console.debug('[ChannelData] batch', { batchSize: sampleBatch.length, first, last })
-                      }
-                    } catch (err) {
-                      console.debug('[ChannelData] batch', { batchSize: sampleBatch.length, first, last })
-                    }
-                  }
+                  // if (totalMissing > 0) {
+                  //   console.warn('[ChannelData] batch detected missing samples', { batchSize: sampleBatch.length, first, last, missing: totalMissing })
+                  // } else {
+                  //   // Rate-limit positive confirmation to avoid noisy logs
+                  //   try {
+                  //     const now = Date.now()
+                  //     if (now - lastOkFlushTimeRef.current > 5000) {
+                  //       console.info('[ChannelData] batch OK: no missing samples', { batchSize: sampleBatch.length, first, last })
+                  //       lastOkFlushTimeRef.current = now
+                  //     } else {
+                  //       console.debug('[ChannelData] batch', { batchSize: sampleBatch.length, first, last })
+                  //     }
+                  //   } catch (err) {
+                  //     console.debug('[ChannelData] batch', { batchSize: sampleBatch.length, first, last })
+                  //   }
+                  // }
                 } catch (err) { }
               }
             } catch (err) {

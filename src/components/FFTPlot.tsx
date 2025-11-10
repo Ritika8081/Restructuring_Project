@@ -20,6 +20,8 @@ interface FFTPlotRealtimeProps {
   showGrid?: boolean;
   backgroundColor?: string;
   enableSimulation?: boolean;
+  // Optional incoming FFT/magnitude data from upstream widgets (normalized or raw magnitudes)
+  inputData?: number[];
 }
 
 const FFTPlotRealtime: React.FC<FFTPlotRealtimeProps> = ({
@@ -29,7 +31,11 @@ const FFTPlotRealtime: React.FC<FFTPlotRealtimeProps> = ({
   bufferSize = 256,
   showGrid = true,
   backgroundColor = 'rgba(0, 0, 0, 0.1)',
-  enableSimulation = true,
+  // Disable built-in simulation by default to avoid showing random data when the
+  // component isn't connected to an upstream data source. Set to true explicitly
+  // for demos.
+  enableSimulation = false,
+  inputData,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const plotRef = useRef<WebglPlot | null>(null);
@@ -141,17 +147,62 @@ const FFTPlotRealtime: React.FC<FFTPlotRealtimeProps> = ({
     };
   }, [color, bufferSize, width, height]);
 
-  // FFT simulation
+  // Render from either upstream inputData (if provided) or the local simulation
   useEffect(() => {
-    if (!enableSimulation) return;
+    let interval: number | undefined;
 
-    const interval = setInterval(() => {
-      const fftData = generateFFTData();
-      updateFFT(fftData);
-    }, 50); // Update at 20 FPS for FFT
+    const pushInputData = (arr: number[]) => {
+      // Ensure array length matches line.numPoints; pad or truncate as necessary
+      const targetLen = lineRef.current?.numPoints ?? bufferSize;
+      const out = new Array(targetLen).fill(-1);
 
-    return () => clearInterval(interval);
-  }, [bufferSize, enableSimulation]);
+      if (!arr || arr.length === 0) {
+        updateFFT(out);
+        return;
+      }
+
+      // If incoming data length differs, resample/truncate/pad
+      if (arr.length === targetLen) {
+        for (let i = 0; i < targetLen; i++) {
+          // Normalize to -1..1 if values look like magnitudes
+          const v = arr[i] ?? 0;
+          out[i] = normalizeToWebGL(v, arr);
+        }
+      } else {
+        // Simple resampling: pick by index mapping
+        for (let i = 0; i < targetLen; i++) {
+          const srcIdx = Math.floor((i / targetLen) * arr.length);
+          out[i] = normalizeToWebGL(arr[srcIdx] ?? 0, arr);
+        }
+      }
+
+      updateFFT(out);
+    };
+
+    if (inputData && inputData.length > 0) {
+      // If upstream provides data, render it at animation frame rate
+      pushInputData(inputData);
+      interval = window.setInterval(() => pushInputData(inputData), 50);
+    } else if (enableSimulation) {
+      interval = window.setInterval(() => {
+        const fftData = generateFFTData();
+        updateFFT(fftData);
+      }, 50);
+    }
+
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [bufferSize, enableSimulation, inputData]);
+
+  // Normalize an incoming value (v) to -1..1 based on the array's max (if >0)
+  const normalizeToWebGL = (v: number, arr: number[]) => {
+    if (!arr || arr.length === 0) return -1;
+    const max = Math.max(...arr.map((x) => Math.abs(x || 0)), 1e-6);
+    const norm = (v || 0) / max; // 0..1 (or more)
+    // Map to -1..1 range expected by WebGL plot
+    return Math.max(-1, Math.min(1, norm * 2 - 1));
+  };
 
   return (
     <div

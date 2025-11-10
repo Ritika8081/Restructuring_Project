@@ -93,27 +93,25 @@ const SpiderPlot: React.FC<SpiderPlotProps> = ({
 
     // Initialize data with brainwave labels (always override any incoming labels)
     useEffect(() => {
+        // Merge incoming data onto a default zeroed brainwave template.
+        // This avoids introducing random values when the provided data is
+        // incomplete — missing entries will be zeroed instead.
+        const defaultData = generateDefaultData();
+
         if (data && data.length > 0) {
-            // Use incoming data values but override labels with brainwave names
-            const brainwaveData = data.slice(0, 5).map((item, index) => ({
-                ...item,
-                label: BRAINWAVE_LABELS[index] || `Brainwave ${index + 1}`,
-                maxValue: item.maxValue || 100
-            }));
-            
-            // Fill any missing data points
-            while (brainwaveData.length < 5) {
-                brainwaveData.push({
-                    label: BRAINWAVE_LABELS[brainwaveData.length],
-                    value: Math.round(30 + Math.random() * 70),
-                    maxValue: 100
-                });
-            }
-            
-            setAnimatedData(brainwaveData);
+            const merged = defaultData.map((d, idx) => {
+                const src = data[idx];
+                return {
+                    label: BRAINWAVE_LABELS[idx] || d.label,
+                    value: typeof src?.value === 'number' ? src.value : d.value,
+                    maxValue: src?.maxValue ?? d.maxValue
+                } as SpiderPlotData;
+            });
+
+            setAnimatedData(merged);
         } else {
             // No incoming data: keep labels but zero values so the plot remains empty
-            setAnimatedData(generateDefaultData());
+            setAnimatedData(defaultData);
         }
     }, [data, generateDefaultData]);
     

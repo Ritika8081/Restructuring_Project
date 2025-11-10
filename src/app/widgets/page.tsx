@@ -217,6 +217,7 @@ const Widgets: React.FC = () => {
                                         <option value="hp-2.0">2.0 Hz</option>
                                         <option value="hp-5.0">5.0 Hz</option>
                                         <option value="hp-10.0">10.0 Hz</option>
+                                        <option value="hp-20.0">70.0 Hz</option>
                                     </select>
                                 </div>
 

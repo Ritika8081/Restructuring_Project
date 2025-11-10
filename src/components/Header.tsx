@@ -8,13 +8,17 @@
  *
  * Exports: default Header component
  */
-import React from 'react';
+import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import DocModal from './ui/DocModal';
 
 const Header: React.FC = () => {
     const router = useRouter();
     // Use FlowModalContext for modal control
     const { setShowFlowModal } = require('@/context/FlowModalContext').useFlowModal();
+
+    // Local state for showing the project documentation modal
+    const [showDocs, setShowDocs] = useState(false);
 
     return (
         <header className="bg-white border-b border-gray-200 sticky top-0 z-50">
@@ -36,6 +40,19 @@ const Header: React.FC = () => {
                             <span className="text-lg mr-2">⚙️</span>
                             <span className="hidden sm:inline">Configure Flow</span>
                         </button>
+
+                        {/* Docs button - opens the documentation modal for contributors */}
+                        <button
+                            onClick={() => setShowDocs(true)}
+                            className="px-3 py-2 rounded-md border border-gray-300 bg-white text-gray-800 hover:bg-gray-50 transition-colors duration-150 font-medium"
+                            style={{ marginLeft: '8px' }}
+                        >
+                            <span className="hidden sm:inline">Docs</span>
+                            <span className="sm:hidden">📄</span>
+                        </button>
+
+                        {/* Documentation modal rendered from header */}
+                        <DocModal show={showDocs} onClose={() => setShowDocs(false)} />
                     </div>
                 </div>
             </div>
