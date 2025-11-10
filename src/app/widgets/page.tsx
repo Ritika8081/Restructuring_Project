@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useCallback, useEffect, useMemo, useLayoutEffect } from 'react';
 import DraggableWidget from '@/components/DraggableWidget';
 import Toast from '@/components/ui/Toast';
 import ConfirmModal from '@/components/ui/ConfirmModal';
@@ -437,7 +437,7 @@ const Widgets: React.FC = () => {
         return false;
     };
     // Use FlowModalContext for modal state
-    const { showFlowModal, setShowFlowModal } = require('@/context/FlowModalContext').useFlowModal();
+    const { showFlowModal, setShowFlowModal, markFlowSeen } = require('@/context/FlowModalContext').useFlowModal();
     // List of all possible widgets in the flow (initially based on flowchart)
     // Channel configuration: default show DEFAULT_CHANNEL_COUNT channels, up to MAX_CHANNELS
     // Channel ids are zero-based: 'channel-0', 'channel-1', ...
@@ -669,8 +669,10 @@ const Widgets: React.FC = () => {
         setToast({ show: true, message, type });
     }, []);
 
-    // Monitor screen size and adjust grid to use full viewport
-    useEffect(() => {
+    // Monitor screen size and adjust grid to use full viewport. Use useLayoutEffect
+    // so sizing is computed before the browser paints and avoids an initial
+    // layout jump (visible gap) when client JS hydrates.
+    useLayoutEffect(() => {
         let resizeTimeout: NodeJS.Timeout;
 
         const adjustGridToScreen = () => {
@@ -1179,8 +1181,18 @@ const Widgets: React.FC = () => {
                         >
                             &times;
                         </button>
-                        <h2 style={{ fontWeight: 'bold', fontSize: 22, marginBottom: 2 }}>Configure Flow</h2>
-                        <div style={{ display: 'flex', gap: 16, marginBottom: 8 }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
+                                <div>
+                                    <h2 style={{ fontWeight: '700', fontSize: 22, margin: 0 }}>Configure Flow</h2>
+                                    <div style={{ fontSize: 13, color: '#6b7280', marginTop: 6 }}>Arrange channels, transforms and plots. Drag items from the palette into the flow area to build your pipeline.</div>
+                                </div>
+                                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                                    <div style={{ fontSize: 12, color: '#9ca3af' }}>Tips: drag → connect → Play</div>
+                                </div>
+                            </div>
+
+                            <div style={{ display: 'flex', gap: 12, marginBottom: 0, alignItems: 'center', flexWrap: 'wrap' }}>
                             <button
                                 style={{ background: '#2563eb', color: 'white', padding: '8px 18px', borderRadius: 8, fontWeight: 'bold', border: 'none', cursor: 'pointer', fontSize: 16 }}
                                 onClick={() => {
@@ -1262,6 +1274,20 @@ const Widgets: React.FC = () => {
                                 style={{ background: '#f59e0b', color: 'white', padding: '8px 18px', borderRadius: 8, fontWeight: 'bold', border: 'none', cursor: 'pointer', fontSize: 16 }}
                                 onClick={() => setShowConnectionModal(true)}
                             >Make Connection</button>
+                            {/* Skip initial flowchart and continue to dashboard */}
+                            <button
+                                style={{ background: '#6b7280', color: 'white', padding: '8px 18px', borderRadius: 8, fontWeight: 'bold', border: 'none', cursor: 'pointer', fontSize: 16 }}
+                                onClick={() => {
+                                    try {
+                                        markFlowSeen();
+                                        showToast('Skipped flowchart. Continuing to dashboard.', 'info');
+                                    } catch (err) {
+                                        // fallback: close modal
+                                        setShowFlowModal(false);
+                                    }
+                                }}
+                            >Skip</button>
+                            </div>
                         </div>
                         {/* Connection modal (opened via toolbar Make Connection button) */}
                         {showConnectionModal && (
@@ -1315,9 +1341,15 @@ const Widgets: React.FC = () => {
                         {/* Flowchart grid layout */}
                         {/* Row layout: left palette + flow area to avoid overlap */}
                         <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start', paddingTop: 8 }}>
-                            <div style={{ width: 220, flex: '0 0 220', height: 520, overflowY: 'auto', padding: 8, borderRadius: 8, background: '#fafafa', border: '1px solid #e6e7eb' }}>
-                                <div style={{ fontWeight: 600, padding: '6px 8px', color: '#374151' }}>Applications</div>
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
+                            <div style={{ width: 240, flex: '0 0 240', height: 520, overflowY: 'auto', padding: 10, borderRadius: 10, background: '#ffffff', border: '1px solid #eef2f7', boxShadow: '0 6px 18px rgba(17,24,39,0.04)' }}>
+                                <div style={{ fontWeight: 700, padding: '6px 8px', color: '#111827', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                    <span>Applications</span>
+                                    <span style={{ fontSize: 12, color: '#6b7280' }}>{flowOptions.length} items</span>
+                                </div>
+                                <div style={{ margin: '8px 6px 6px 6px' }}>
+                                    <input placeholder="Search" onChange={(e) => { /* lightweight search could be added later */ }} style={{ width: '100%', padding: '8px 10px', borderRadius: 8, border: '1px solid #e6e7eb', background: '#f8fafc', fontSize: 13 }} />
+                                </div>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
                                     {[
                                         { id: 'spiderplot', label: 'Spider Plot' },
                                         { id: 'FFTGraph', label: 'FFT' },
@@ -1330,7 +1362,9 @@ const Widgets: React.FC = () => {
                                             key={item.id}
                                             draggable
                                             onDragStart={(e) => { try { e.dataTransfer.setData('application/widget-type', item.id); e.dataTransfer.effectAllowed = 'copy'; } catch (err) {} }}
-                                            style={{ cursor: 'grab', padding: '8px 10px', background: '#fff', border: '1px solid #e5e7eb', borderRadius: 6, boxShadow: '0 1px 2px rgba(0,0,0,0.04)', color: '#111827' }}
+                                            onMouseEnter={e => { const t = e.currentTarget as HTMLElement; t.style.transform = 'translateY(-3px)'; t.style.boxShadow = '0 8px 20px rgba(2,6,23,0.06)'; }}
+                                            onMouseLeave={e => { const t = e.currentTarget as HTMLElement; t.style.transform = 'translateY(0px)'; t.style.boxShadow = '0 1px 2px rgba(0,0,0,0.04)'; }}
+                                            style={{ cursor: 'grab', padding: '10px 12px', background: '#fff', border: '1px solid #eef2f7', borderRadius: 8, boxShadow: '0 1px 2px rgba(0,0,0,0.04)', color: '#0f172a', transition: 'transform 120ms ease, box-shadow 120ms ease' }}
                                         >
                                             {item.label}
                                         </div>
@@ -1570,26 +1604,27 @@ const Widgets: React.FC = () => {
                                 const clampedLeft = Math.max(8, Math.min(boxPos.left, Math.max(8, Math.floor(containerWidth - boxWidth - 8))));
                                 const clampedTop = Math.max(8, Math.min(boxPos.top, Math.max(8, Math.floor(containerHeight - finalBoxHeight - 8))));
 
+                                const contentMaxHeight = Math.max(40, finalBoxHeight - headerHeight - 18);
                                 return (
                                     <div
                                         key="channels-box"
                                         // Render as absolute inside the flowchart container so it aligns with other modal widgets
-                                        style={{ position: 'absolute', left: clampedLeft, top: clampedTop, width: boxWidth, height: finalBoxHeight, border: '2px solid #222', borderRadius: 12, background: '#fff', padding: 6, display: 'flex', flexDirection: 'column', gap: 4, boxShadow: '0 2px 12px rgba(0,0,0,0.07)', zIndex: 2, overflow: 'visible' }}
+                                        style={{ position: 'absolute', left: clampedLeft, top: clampedTop, width: boxWidth, border: '1px solid #e6e7eb', borderRadius: 12, background: '#ffffff', padding: 6, display: 'flex', flexDirection: 'column', gap: 4, boxShadow: '0 6px 18px rgba(2,6,23,0.04)', zIndex: 2, overflow: 'visible' }}
                                         onMouseDown={handleDragChannels}
                                     >
                                         {/* Header with widget name, delete and settings buttons (compact) */}
-                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6 }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6, background: '#f8fafc', padding: '6px 8px', borderRadius: 8 }}>
                                             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                                                 <button
-                                                    style={{ background: '#d1d5db', color: '#111827', border: 'none', borderRadius: 6, padding: '2px 6px', cursor: 'pointer', fontWeight: 600, fontSize: 11 }}
+                                                    style={{ background: '#d1d5db', color: '#111827', border: 'none', borderRadius: 6, padding: '2px 3px', cursor: 'pointer', fontWeight: 600, fontSize: 11 }}
                                                     onClick={e => { e.stopPropagation(); decreaseChannels(); }}
                                                     title="Decrease channels"
                                                 >
                                                     −
                                                 </button>
-                                                <strong style={{ fontSize: 12 }}>Channels ({channelCount})</strong>
+                                                <strong style={{ fontSize: 11 }}>Channels ({channelCount})</strong>
                                                 <button
-                                                    style={{ background: '#d1d5db', color: '#111827', border: 'none', borderRadius: 6, padding: '2px 6px', cursor: 'pointer', fontWeight: 600, fontSize: 11 }}
+                                                    style={{ background: '#d1d5db', color: '#111827', border: 'none', borderRadius: 6, padding: '2px 3px', cursor: 'pointer', fontWeight: 600, fontSize: 11 }}
                                                     onClick={e => { e.stopPropagation(); increaseChannels(); }}
                                                     title="Increase channels"
                                                 >
@@ -1598,14 +1633,14 @@ const Widgets: React.FC = () => {
                                             </div>
                                             <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                                                 <button
-                                                    style={{ background: '#ef4444', color: 'white', border: 'none', borderRadius: 6, padding: '2px 6px', cursor: 'pointer', fontWeight: 600, fontSize: 11 }}
+                                                    style={{ background: '#ef4444', color: 'white', border: 'none', borderRadius: 6, padding: '2px', cursor: 'pointer', fontWeight: 600, fontSize: 11, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                                                     onClick={e => { e.stopPropagation(); handleRemoveChannels(); }}
                                                     title="Delete Channels"
                                                 >
-                                                    Delete
+                                                    <svg width="14" height="14" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false"><path d="M6 7v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7H6z" fill="white"/><path d="M19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z" fill="white"/></svg>
                                                 </button>
                                                 <button
-                                                    style={{ background: '#2563eb', color: 'white', border: 'none', borderRadius: 6, padding: '2px 6px', cursor: 'pointer', fontWeight: 600, fontSize: 11 }}
+                                                    style={{ background: '#2563eb', color: 'white', border: 'none', borderRadius: 6, padding: '2px 3px', cursor: 'pointer', fontWeight: 600, fontSize: 11 }}
                                                     onClick={e => { e.stopPropagation(); openSettings('channels-box'); }}
                                                     title="Settings"
                                                 >
@@ -1618,10 +1653,10 @@ const Widgets: React.FC = () => {
                                         {(() => {
                                             const minSingleColHeight = headerHeight + channelsCount * 12 + 12; // if below this, prefer multi-column
                                             const useTwoColumns = boxHeight < minSingleColHeight || rowHeight < 12;
-                                            if (!useTwoColumns) {
-                                                // single column
+                                                if (!useTwoColumns) {
+                                                // single column — allow the box to grow with content
                                                 return (
-                                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2, paddingTop: 4, paddingBottom: 4, overflow: 'visible' }}>
+                                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2, paddingTop: 6, paddingBottom: 6 }}>
                                                         {channelOptions.map((opt, idx) => {
                                                             const id = opt.id as string;
                                                             const m = id.match(/channel-(\d+)/i);
@@ -1632,12 +1667,12 @@ const Widgets: React.FC = () => {
                                                                 <div key={id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: `3px 6px`, borderRadius: 4, height: rowHeight }}>
                                                                     <div style={{ width: svgSize, height: svgSize }} />
 
-                                                                    <span style={{ flex: 1, textAlign: 'center', fontSize: 11, fontWeight: 600 }}>{opt.label}</span>
+                                                                    <span style={{ flex: 1, textAlign: 'center', fontSize: 10, fontWeight: 600 }}>{opt.label}</span>
 
                                                                     <button
                                                                         onClick={e => removeChannelAt(id, e)}
                                                                         title={`Remove ${opt.label}`}
-                                                                        style={{ marginRight: 6, background: '#ef4444', color: 'white', border: 'none', borderRadius: 6, padding: '2px 6px', cursor: 'pointer', fontWeight: 600, fontSize: 11 }}
+                                                                        style={{ marginRight: 6, background: '#ef4444', color: 'white', border: 'none', borderRadius: 3, padding: '0px 4px', cursor: 'pointer', fontWeight: 600, fontSize: 9, lineHeight: '14px', height: 16, minWidth: 16, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
                                                                     >
                                                                         ×
                                                                     </button>
@@ -1727,7 +1762,7 @@ const Widgets: React.FC = () => {
                                                                                 <circle cx={svgSize / 2} cy={svgSize / 2} r={Math.max(3, circleR)} fill="#fff" stroke="#10B981" strokeWidth={1.2} />
                                                                             </svg>
 
-                                                                            <span style={{ flex: 1, textAlign: 'center', fontSize: 11, fontWeight: 600 }}>{option.label}</span>
+                                                                            <span style={{ flex: 1, textAlign: 'center', fontSize: 10, fontWeight: 600 }}>{option.label}</span>
 
                                                                             <svg
                                                                                 data-widgetid={id}
@@ -1769,7 +1804,7 @@ const Widgets: React.FC = () => {
                                                                                     <button
                                                                                         onClick={e => removeChannelAt(id, e)}
                                                                                         title={`Remove ${option.label}`}
-                                                                                        style={{ marginRight: 6, background: '#ef4444', color: 'white', border: 'none', borderRadius: 6, padding: '2px 6px', cursor: 'pointer', fontWeight: 600, fontSize: 11 }}
+                                                                                        style={{ marginRight: 6, background: '#ef4444', color: 'white', border: 'none', borderRadius: 4, padding: '0px 6px', cursor: 'pointer', fontWeight: 600, fontSize: 10, lineHeight: '16px', height: 18, minWidth: 18, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
                                                                                     >
                                                                                         ×
                                                                                     </button>
@@ -1870,24 +1905,25 @@ const Widgets: React.FC = () => {
                                 const clampedLeft = Math.max(8, Math.min(boxPos.left, Math.max(8, Math.floor(containerWidth - boxWidth - 8))));
                                 const clampedTop = Math.max(8, Math.min(boxPos.top, Math.max(8, Math.floor(containerHeight - finalBoxHeight - 8))));
 
+                                const plotContentMax = Math.max(40, finalBoxHeight - headerHeight - 18);
                                 return (
                                     <div
                                         key="plots-box"
-                                        style={{ position: 'absolute', left: clampedLeft, top: clampedTop, width: boxWidth, height: finalBoxHeight, border: '2px solid #222', borderRadius: 12, background: '#fff', padding: 6, display: 'flex', flexDirection: 'column', gap: 4, boxShadow: '0 2px 12px rgba(0,0,0,0.07)', zIndex: 2, overflow: 'visible' }}
+                                        style={{ position: 'absolute', left: clampedLeft, top: clampedTop, width: boxWidth, border: '1px solid #e6e7eb', borderRadius: 12, background: '#ffffff', padding: 6, display: 'flex', flexDirection: 'column', gap: 4, boxShadow: '0 6px 18px rgba(2,6,23,0.04)', zIndex: 2, overflow: 'visible' }}
                                         onMouseDown={handleDragPlots}
                                     >
-                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6 }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6, background: '#f8fafc', padding: '6px 8px', borderRadius: 8 }}>
                                             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                                                 <button
-                                                    style={{ background: '#d1d5db', color: '#111827', border: 'none', borderRadius: 6, padding: '2px 6px', cursor: 'pointer', fontWeight: 600, fontSize: 11 }}
+                                                    style={{ background: '#d1d5db', color: '#111827', border: 'none', borderRadius: 6, padding: '2px 3px', cursor: 'pointer', fontWeight: 600, fontSize: 11 }}
                                                     onClick={e => { e.stopPropagation(); decreasePlots(); }}
                                                     title="Decrease plots"
                                                 >
                                                     −
                                                 </button>
-                                                <strong style={{ fontSize: 12 }}>Plots ({plotsCount})</strong>
+                                                <strong style={{ fontSize: 11 }}>Plots ({plotsCount})</strong>
                                                 <button
-                                                    style={{ background: '#d1d5db', color: '#111827', border: 'none', borderRadius: 6, padding: '2px 6px', cursor: 'pointer', fontWeight: 600, fontSize: 11 }}
+                                                    style={{ background: '#d1d5db', color: '#111827', border: 'none', borderRadius: 6, padding: '2px 3px', cursor: 'pointer', fontWeight: 600, fontSize: 11 }}
                                                     onClick={e => { e.stopPropagation(); increasePlots(); }}
                                                     title="Increase plots"
                                                 >
@@ -1896,14 +1932,14 @@ const Widgets: React.FC = () => {
                                             </div>
                                             <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                                                 <button
-                                                    style={{ background: '#ef4444', color: 'white', border: 'none', borderRadius: 6, padding: '2px 6px', cursor: 'pointer', fontWeight: 600, fontSize: 11 }}
+                                                    style={{ background: '#ef4444', color: 'white', border: 'none', borderRadius: 6, padding: '2px', cursor: 'pointer', fontWeight: 600, fontSize: 11, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                                                     onClick={e => { e.stopPropagation(); handleRemovePlots(); }}
                                                     title="Delete Plots"
                                                 >
-                                                    Delete
+                                                    <svg width="14" height="14" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false"><path d="M6 7v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7H6z" fill="white"/><path d="M19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z" fill="white"/></svg>
                                                 </button>
                                                 <button
-                                                    style={{ background: '#2563eb', color: 'white', border: 'none', borderRadius: 6, padding: '2px 6px', cursor: 'pointer', fontWeight: 600, fontSize: 11 }}
+                                                    style={{ background: '#2563eb', color: 'white', border: 'none', borderRadius: 6, padding: '2px 3px', cursor: 'pointer', fontWeight: 600, fontSize: 11 }}
                                                     onClick={e => { e.stopPropagation(); openSettings('plots-box'); }}
                                                     title="Settings"
                                                 >
@@ -1916,9 +1952,9 @@ const Widgets: React.FC = () => {
                                         {(() => {
                                             const minSingleColHeight = headerHeight + plotsCount * 12 + 12;
                                             const useTwoColumns = boxHeight < minSingleColHeight || rowHeight < 12;
-                                            if (!useTwoColumns) {
+                                                if (!useTwoColumns) {
                                                 return (
-                                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2, paddingTop: 4, paddingBottom: 4, overflow: 'visible' }}>
+                                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 2, paddingTop: 4, paddingBottom: 4 }}>
                                                         {plotInstances.map((ins, idx) => {
                                                                 const circleR = Math.max(2, Math.floor(rowHeight * 0.16));
                                                                 const svgSize = Math.max(10, Math.floor(circleR * 2 + 2));
@@ -1949,11 +1985,11 @@ const Widgets: React.FC = () => {
                                                                         >
                                                                             <circle cx={svgSize / 2} cy={svgSize / 2} r={Math.max(3, circleR)} fill="#fff" stroke="#10B981" strokeWidth={1.2} />
                                                                         </svg>
-                                                                        <span style={{ flex: 1, textAlign: 'center', fontSize: 11, fontWeight: 600 }}>{ins.label}</span>
+                                                                        <span style={{ flex: 1, textAlign: 'center', fontSize: 10, fontWeight: 600 }}>{ins.label}</span>
                                                                         <button
                                                                             onClick={e => { e.stopPropagation(); removeBasicInstance(ins.id.split('-').slice(0,2).join('-'), ins.id); }}
                                                                             title={`Remove ${ins.label}`}
-                                                                            style={{ marginRight: 6, background: '#ef4444', color: 'white', border: 'none', borderRadius: 6, padding: '2px 6px', cursor: 'pointer', fontWeight: 600, fontSize: 11 }}
+                                                                            style={{ marginRight: 6, background: '#ef4444', color: 'white', border: 'none', borderRadius: 3, padding: '0px 4px', cursor: 'pointer', fontWeight: 600, fontSize: 9, lineHeight: '14px', height: 16, minWidth: 16, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
                                                                         >
                                                                             ×
                                                                         </button>
@@ -2056,7 +2092,7 @@ const Widgets: React.FC = () => {
                                                                             <button
                                                                                 onClick={e => { e.stopPropagation(); removeBasicInstance(id.split('-').slice(0,2).join('-'), id); }}
                                                                                 title={`Remove ${option.label}`}
-                                                                                style={{ marginRight: 6, background: '#ef4444', color: 'white', border: 'none', borderRadius: 6, padding: '2px 6px', cursor: 'pointer', fontWeight: 600, fontSize: 11 }}
+                                                                                style={{ marginRight: 6, background: '#ef4444', color: 'white', border: 'none', borderRadius: 3, padding: '0px 4px', cursor: 'pointer', fontWeight: 600, fontSize: 9, lineHeight: '14px', height: 16, minWidth: 16, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
                                                                             >
                                                                                 ×
                                                                             </button>
@@ -2116,7 +2152,7 @@ const Widgets: React.FC = () => {
                                 return (
                                     <div
                                         key={widgetId}
-                                        style={{ position: 'absolute', left: widgetLeft, top: widgetTop, width: widgetWidth, height: widgetHeight, border: '2px solid #222', borderRadius: 12, background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: 14, zIndex: showConnectionModal || settingsModal.show ? 0 : 2, boxShadow: '0 2px 12px rgba(0,0,0,0.07)', transition: 'box-shadow 0.2s', gap: 8, wordBreak: 'break-word', overflowWrap: 'break-word', textAlign: 'center', cursor: showConnectionModal || settingsModal.show ? 'default' : 'move', pointerEvents: showConnectionModal || settingsModal.show ? 'none' : 'auto' }}
+                                        style={{ position: 'absolute', left: widgetLeft, top: widgetTop, width: widgetWidth, height: widgetHeight, border: '2px solid #222', borderRadius: 12, background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold', fontSize: 12, zIndex: showConnectionModal || settingsModal.show ? 0 : 2, boxShadow: '0 2px 12px rgba(0,0,0,0.07)', transition: 'box-shadow 0.2s', gap: 8, wordBreak: 'break-word', overflowWrap: 'break-word', textAlign: 'center', cursor: showConnectionModal || settingsModal.show ? 'default' : 'move', pointerEvents: showConnectionModal || settingsModal.show ? 'none' : 'auto' }}
                                         onMouseDown={handleDrag}
                                     >
                                         <div style={{ display: 'flex', alignItems: 'center', width: '100%', height: '100%', position: 'relative', justifyContent: 'space-between' }}>
@@ -2184,7 +2220,7 @@ const Widgets: React.FC = () => {
                                                                 >
                                                                     +
                                                                 </button>
-                                                                <div style={{ minWidth: 28, textAlign: 'center', fontSize: 12, fontWeight: 700 }}>{instancesList.length}</div>
+                                        <div style={{ minWidth: 28, textAlign: 'center', fontSize: 11, fontWeight: 700 }}>{instancesList.length}</div>
                                                             </>
                                                         )}
                                                     </div>
@@ -2218,12 +2254,12 @@ const Widgets: React.FC = () => {
                                                                         <circle cx={9} cy={9} r={4} fill="#fff" stroke="#10B981" strokeWidth={1.2} />
                                                                     </svg>
 
-                                                                    <div style={{ fontSize: 12, fontWeight: 600, minWidth: 80, textAlign: 'center' }}>{ins.label}</div>
+                                                                    <div style={{ fontSize: 11, fontWeight: 600, minWidth: 80, textAlign: 'center' }}>{ins.label}</div>
 
                                                                     <button
                                                                         onClick={e => { e.stopPropagation(); removeBasicInstance(opt.id, ins.id); }}
                                                                         title={`Remove ${ins.label}`}
-                                                                        style={{ background: '#ef4444', color: 'white', border: 'none', borderRadius: 6, padding: '2px 6px', cursor: 'pointer', fontWeight: 600, fontSize: 11 }}
+                                                                        style={{ background: '#ef4444', color: 'white', border: 'none', borderRadius: 4, padding: '0px 6px', cursor: 'pointer', fontWeight: 600, fontSize: 10, lineHeight: '16px', height: 18, minWidth: 18, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
                                                                     >
                                                                         ×
                                                                     </button>
@@ -2260,13 +2296,19 @@ const Widgets: React.FC = () => {
 
                                             {/* Right area: Delete and Settings */}
                                             <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                                                <button style={{ background: '#ef4444', color: 'white', border: 'none', borderRadius: 6, padding: '2px 7px', cursor: showConnectionModal || settingsModal.show ? 'default' : 'pointer', fontWeight: 500, fontSize: 11, boxShadow: '0 1px 4px rgba(239,68,68,0.08)', pointerEvents: showConnectionModal || settingsModal.show ? 'none' : 'auto', height: 22 }} onClick={() => {
-                                                    if (showConnectionModal || settingsModal.show) return;
-                                                    handleRemoveWidget(opt.id);
-                                                    setFlowOptions(prev => prev.filter(o => o.id !== opt.id));
-                                                }}>Delete</button>
                                                 <button
-                                                    style={{ background: '#2563eb', color: 'white', border: 'none', borderRadius: 6, padding: '2px 6px', cursor: 'pointer', fontWeight: 500, fontSize: 11, boxShadow: '0 1px 4px rgba(37,99,235,0.08)', pointerEvents: 'auto', zIndex: 100002, height: 22, width: 22, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                                                    style={{ background: '#ef4444', color: 'white', border: 'none', borderRadius: 3, padding: '0px 4px', cursor: showConnectionModal || settingsModal.show ? 'default' : 'pointer', fontWeight: 600, fontSize: 9, lineHeight: '14px', height: 16, minWidth: 16, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', pointerEvents: showConnectionModal || settingsModal.show ? 'none' : 'auto' }}
+                                                    onClick={() => {
+                                                        if (showConnectionModal || settingsModal.show) return;
+                                                        handleRemoveWidget(opt.id);
+                                                        setFlowOptions(prev => prev.filter(o => o.id !== opt.id));
+                                                    }}
+                                                    title={`Delete ${opt.label}`}
+                                                >
+                                                    ×
+                                                </button>
+                                                <button
+                                                    style={{ background: '#2563eb', color: 'white', border: 'none', borderRadius: 6, padding: '2px 4px', cursor: 'pointer', fontWeight: 500, fontSize: 11, boxShadow: '0 1px 4px rgba(37,99,235,0.08)', pointerEvents: 'auto', zIndex: 100002, height: 18, width: 18, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
                                                     title="Settings"
                                                     onClick={e => {
                                                         e.stopPropagation();
@@ -2335,7 +2377,8 @@ const Widgets: React.FC = () => {
                         <button
                             style={{ marginTop: 24, background: '#10B981', color: 'white', padding: '10px 24px', borderRadius: 8, fontWeight: 'bold', border: 'none', cursor: 'pointer', fontSize: 18 }}
                             onClick={() => {
-                                setShowFlowModal(false);
+                                // Mark the flow as seen (persist choice) and close modal
+                                try { markFlowSeen(); } catch (err) { setShowFlowModal(false); }
                                 // Arrange selected widgets to fill dashboard space using grid, offset by header
                                 setWidgets(prev => {
                                     const typeMap: Record<string, string> = {
@@ -2371,8 +2414,7 @@ const Widgets: React.FC = () => {
                                     // Get grid settings and offsets
                                     const cols = gridSettings.cols || 24;
                                     const rows = gridSettings.rows || 16;
-                                    const offsetX = gridSettings.offsetX || 0;
-                                    const offsetY = gridSettings.offsetY || 0;
+                                   
                                     // Calculate grid arrangement
                                     // Count total instances across selected flow options so the dashboard
                                     // layout matches the number of plot instances (not just selected options)
@@ -2492,7 +2534,7 @@ const Widgets: React.FC = () => {
                     </div>
                 </div>
             )}
-            <div style={{ width: '100%', display: 'flex', justifyContent: 'center', boxSizing: 'border-box', minHeight: `calc(100vh - ${(gridSettings.offsetY || 64)}px)` }}>
+            <div style={{ width: '100%', display: 'flex', justifyContent: 'center', boxSizing: 'border-box', minHeight: `calc(100vh )` }}>
                 {/* Centered grid container sized to whole grid in pixels so cells are never cut */}
                 <div style={{ position: 'relative', width: (gridSettings.cols || 24) * (gridSettings.cellWidth || 50), height: (gridSettings.rows || 16) * (gridSettings.cellHeight || 50), overflow: 'hidden' }}>
                     {GridLines}

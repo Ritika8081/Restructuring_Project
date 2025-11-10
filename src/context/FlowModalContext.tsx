@@ -14,6 +14,9 @@ import React, { createContext, useContext, useState, ReactNode } from 'react';
 interface FlowModalContextType {
   showFlowModal: boolean;
   setShowFlowModal: (show: boolean) => void;
+  // markFlowSeen: record that user has seen/handled the initial flowchart
+  // and should not be forced to see it again on subsequent visits.
+  markFlowSeen: () => void;
 }
 
 const FlowModalContext = createContext<FlowModalContextType | undefined>(undefined);
@@ -27,9 +30,18 @@ export const useFlowModal = () => {
 };
 
 export const FlowModalProvider = ({ children }: { children: ReactNode }) => {
-  const [showFlowModal, setShowFlowModal] = useState(false);
+  // Always show the flow modal on load. The consumer can call markFlowSeen
+  // to close it for the current session; we intentionally do NOT persist
+  // this choice so the modal will reappear on every subsequent page load.
+  const [showFlowModal, setShowFlowModal] = useState(true);
+
+  const markFlowSeen = () => {
+    // Close modal for current session only (no localStorage persistence)
+    setShowFlowModal(false);
+  };
+
   return (
-    <FlowModalContext.Provider value={{ showFlowModal, setShowFlowModal }}>
+    <FlowModalContext.Provider value={{ showFlowModal, setShowFlowModal, markFlowSeen }}>
       {children}
     </FlowModalContext.Provider>
   );

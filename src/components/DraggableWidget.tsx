@@ -403,8 +403,8 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
                                             return <div>chIdx: {chIdx ?? '—'}</div>;
                                         } catch (e) { return <div>chIdx: —</div>; }
                                     })()}
-                                    <div>recent samples: {samples ? samples.length : '—'}</div>
-                                    <div>fft bins: {fftInputData ? fftInputData.length : '—'}</div>
+                                    {/* <div>recent samples: {samples ? samples.length : '—'}</div>
+                                    <div>fft bins: {fftInputData ? fftInputData.length : '—'}</div> */}
                                 </div>
                                 </>
                             ) : (
