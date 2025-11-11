@@ -66,6 +66,7 @@ interface BasicGraphRealtimeProps {
   instanceId?: string;
   /** Number of samples to apply to buffers each animation frame (per channel). */
   samplesPerFrame?: number;
+  selectedChannels?: number[];
 }
 
 // DEFAULT_COLORS removed (not used in this component)
@@ -194,6 +195,19 @@ const BasicGraphRealtime = forwardRef((props: BasicGraphRealtimeProps, ref) => {
     let out = (v - FULL_SCALE / 2) * (2 / FULL_SCALE);
     if (!isFinite(out) || isNaN(out)) out = 0;
     return Math.max(-1, Math.min(1, out));
+  };
+
+  // If an incoming value looks already normalized (floating value in a
+  // small range, e.g. -2..2), treat it as normalized and avoid re-normalizing
+  // (which assumes integer ADC counts). This lets transform widgets publish
+  // normalised streams (envelope, filter outputs) and have them plotted
+  // without distortion.
+  const normalizeOrPassThrough = (value: number | undefined | null) => {
+    if (typeof value === 'number' && Math.abs(value) <= 2) {
+      // clamp into -1..1 if slightly out of range
+      return Math.max(-1, Math.min(1, value));
+    }
+    return normalizeValue(value as any);
   };
 
   // Initialize canvases and plots for visible channels - responds to height changes.
@@ -559,7 +573,7 @@ const BasicGraphRealtime = forwardRef((props: BasicGraphRealtimeProps, ref) => {
               const ch = channels[i];
               if (!ch || !ch.visible) return;
               const value = (channelNumber >= 0 && channelNumber < arr.length) ? arr[channelNumber] : 0;
-              const v = normalizeValue(value);
+              const v = normalizeOrPassThrough(value as any);
               // push immediate
               pushData(ch.id, v);
             });
@@ -582,7 +596,7 @@ const BasicGraphRealtime = forwardRef((props: BasicGraphRealtimeProps, ref) => {
             }
             if (!selectedKey) continue;
             const val = (sample as any)[selectedKey as string] as number | undefined;
-            const v = normalizeValue(val);
+            const v = normalizeOrPassThrough(val as any);
             pushData(ch.id, v);
           }
         }

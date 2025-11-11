@@ -59,6 +59,12 @@ export type ChannelDataContextType = {
   // observed maxima. For UNO-R4 set to 14.
   adcBits?: number;
   setAdcBits?: (bits: number) => void;
+  // Widget output publish/subscribe API: transforms can publish numeric
+  // streams (e.g. envelope values) which other widgets can subscribe to
+  // by widget id. Values are pushed as number samples (one per incoming
+  // device sample/frame) and delivered as arrays in batch callbacks.
+  publishWidgetOutputs?: (widgetId: string, values: number[] | number) => void;
+  subscribeToWidgetOutputs?: (widgetId: string, onValues: (vals: number[]) => void) => () => void;
 };
 
 const ChannelDataContext = createContext<ChannelDataContextType | undefined>(undefined);
@@ -91,6 +97,9 @@ export const ChannelDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
   const sampleSeqRef = useRef<number>(0);
   const subscribersRef = useRef<Set<(s: ChannelSample[]) => void>>(new Set());
   const controlSubscribersRef = useRef<Set<(e: { type: string; channelIndex?: number }) => void>>(new Set());
+  // Per-widget output buffers and subscribers (for transform nodes like envelope)
+  const widgetOutputsRef = useRef<Record<string, number[]>>({});
+  const widgetOutputSubscribersRef = useRef<Record<string, Set<(vals: number[]) => void>>>({});
   // Track observed per-channel raw maximums to help infer the ADC range
   // when the device does not explicitly report ADC resolution. This
   // supports cases where firmware uses 10/12/14-bit ADCs but transmits
@@ -377,6 +386,41 @@ export const ChannelDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
     return () => { controlSubscribersRef.current.delete(onEvent); };
   }, []);
 
+  const publishWidgetOutputs = useCallback((widgetId: string, values: number[] | number) => {
+    try {
+      const arr = Array.isArray(values) ? values : [values];
+      if (!widgetOutputsRef.current[widgetId]) widgetOutputsRef.current[widgetId] = [];
+      // Append and keep only the last 1024 values to bound memory
+      widgetOutputsRef.current[widgetId].push(...arr);
+      if (widgetOutputsRef.current[widgetId].length > 1024) {
+        widgetOutputsRef.current[widgetId] = widgetOutputsRef.current[widgetId].slice(-1024);
+      }
+      const subs = widgetOutputSubscribersRef.current[widgetId];
+      if (subs && subs.size > 0) {
+        // Deliver a shallow copy
+        const copy = widgetOutputsRef.current[widgetId].slice();
+        subs.forEach(s => { try { s(copy); } catch (e) { /* ignore */ } });
+      }
+    } catch (err) { /* swallow */ }
+  }, []);
+
+  const subscribeToWidgetOutputs = useCallback((widgetId: string, onValues: (vals: number[]) => void) => {
+    try {
+      if (!widgetOutputSubscribersRef.current[widgetId]) widgetOutputSubscribersRef.current[widgetId] = new Set();
+      widgetOutputSubscribersRef.current[widgetId].add(onValues);
+      // Immediately deliver any existing buffer snapshot
+      const existing = widgetOutputsRef.current[widgetId];
+      if (existing && existing.length > 0) {
+        try { onValues(existing.slice()); } catch (e) { /* ignore subscriber errors */ }
+      }
+      return () => {
+        try { widgetOutputSubscribersRef.current[widgetId].delete(onValues); } catch (e) { }
+      };
+    } catch (err) {
+      return () => { };
+    }
+  }, []);
+
   const setChannelFilters = useCallback((map: Record<number, { enabled?: boolean, filterType?: string, filterKeys?: string[], filterKey?: string, notchFreq?: number, samplingRate?: number }>) => {
     channelFiltersRef.current = map || {};
     // Update/create filter instances where applicable
@@ -516,7 +560,7 @@ export const ChannelDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
   }, []);
 
   return (
-    <ChannelDataContext.Provider value={{ samples: snapshot, addSample, addSampleRef, clearSamples, setRegisteredChannels, subscribeToSampleBatches, subscribeToControlEvents, setChannelFilters, setChannelSamplingRate, samplingRate, setSamplingRate, adcBits, setAdcBits }}>
+    <ChannelDataContext.Provider value={{ samples: snapshot, addSample, addSampleRef, clearSamples, setRegisteredChannels, subscribeToSampleBatches, subscribeToControlEvents, setChannelFilters, setChannelSamplingRate, samplingRate, setSamplingRate, adcBits, setAdcBits, publishWidgetOutputs, subscribeToWidgetOutputs }}>
       {children}
     </ChannelDataContext.Provider>
   );

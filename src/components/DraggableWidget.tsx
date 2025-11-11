@@ -14,9 +14,11 @@ import CandleChart from '@/components/Candle';
 import StatisticGraph from '@/components/StatisticGraph';
 import FFTPlotRealtime from '@/components/FFTPlot';
 import BasicGraphRealtime from '@/components/BasicGraph';
+import Envelope from '@/components/Envelope';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import { useChannelData } from '@/lib/channelDataContext';
 import { FFT } from '@/lib/fft';
+import { computeBandPowers, BANDS } from '@/lib/bandpower';
 import { Widget, GridSettings, DragState } from '@/types/widget.types';
 import { checkCollisionAtPosition } from '@/utils/widget.utils';
 
@@ -99,7 +101,7 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
     }, [widget.id, (widget as any).channelIndex]);
 
     // Global channel samples from context (used by multiple widget render paths)
-    const { samples } = useChannelData();
+    const { samples, subscribeToWidgetOutputs, samplingRate } = useChannelData();
 
     // FFT input data computed from the first incoming channel connection (if any)
     const [fftInputData, setFftInputData] = useState<number[] | undefined>(undefined);
@@ -157,6 +159,50 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
             setFftInputData(undefined);
         }
     }, [samples, incomingConnections, widget.type]);
+
+    // Enhanced FFT input handling: allow the first incoming source to be a
+    // widget that publishes numeric outputs (e.g. Envelope). Subscribe to
+    // that widget's published values and compute FFT from the rolling buffer.
+    useEffect(() => {
+        if (widget.type !== 'FFTGraph') return;
+        if (!incomingConnections || incomingConnections.length === 0) return;
+
+        const src = String(incomingConnections[0] || '');
+        // If source is a channel, the other effect already handled it.
+        if (src.startsWith('channel-')) return;
+
+        if (!subscribeToWidgetOutputs || !src) return;
+
+        const fftSize = 256;
+        const buffer: number[] = new Array(fftSize).fill(0);
+        let idx = 0;
+
+        const unsub = subscribeToWidgetOutputs(src, (vals) => {
+            try {
+                for (const v of vals) {
+                    buffer[idx] = typeof v === 'number' ? v : 0;
+                    idx = (idx + 1) % fftSize;
+                }
+                // Build input aligned to most recent sample
+                const input = new Float32Array(fftSize);
+                let p = idx;
+                for (let i = 0; i < fftSize; i++) {
+                    input[i] = buffer[p];
+                    p = (p + 1) % fftSize;
+                }
+                try {
+                    const fft = new FFT(fftSize);
+                    const mags = fft.computeMagnitudes(input);
+                    setFftInputData(Array.from(mags));
+                } catch (err) {
+                    try { console.error('[FFT] compute (widget-src) failed', err); } catch (e) { }
+                    setFftInputData(undefined);
+                }
+            } catch (err) { /* ignore per-batch subscriber errors */ }
+        });
+
+        return () => { try { unsub(); } catch (e) { } };
+    }, [incomingConnections, widget.type, subscribeToWidgetOutputs]);
 
     /**
      * Handle mouse down events for drag/resize operations
@@ -319,7 +365,99 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
 
     // Calculate available space for widget content
     const availableWidth = widget.width * gridSettings.cellWidth - 4;
-    const availableHeight = widget.height * gridSettings.cellHeight - 52;
+    const availableHeight = widget.height * gridSettings.cellHeight;
+
+    // Refs for imperative APIs
+    const basicGraphRef = React.useRef<any>(null);
+    // Bandpower state for statistic widgets
+    const [bandStats, setBandStats] = React.useState<Array<{ label: string; value: number }>>([]);
+
+    // If this basic widget receives upstream widget outputs (non-channel ids),
+    // subscribe to those outputs and push values into the BasicGraph via
+    // its imperative `updateData` API so users can connect any widget output
+    // to this plot without changing code elsewhere.
+    useEffect(() => {
+        if (widget.type !== 'basic') return;
+        if (!incomingConnections || incomingConnections.length === 0) return;
+        const sources = incomingConnections.filter(id => { try { return !String(id).startsWith('channel-'); } catch (e) { return false; } });
+        if (sources.length === 0) return;
+        if (!subscribeToWidgetOutputs) return;
+
+        const unsubs: Array<() => void> = [];
+        for (const s of sources) {
+            try {
+                const unsub = subscribeToWidgetOutputs(String(s), (vals) => {
+                    try {
+                        if (!basicGraphRef.current) return;
+                        for (const v of vals) {
+                            if (typeof v === 'number') {
+                                // push as single-element array so selectedChannels maps it
+                                try { basicGraphRef.current.updateData([v]); } catch (e) { /* ignore */ }
+                            } else if (Array.isArray(v)) {
+                                try { basicGraphRef.current.updateData(v as any); } catch (e) { }
+                            }
+                        }
+                    } catch (err) { /* ignore per-callback errors */ }
+                });
+                if (unsub) unsubs.push(unsub);
+            } catch (err) { /* ignore subscribe errors */ }
+        }
+
+        return () => { for (const u of unsubs) try { u(); } catch (e) { } };
+    }, [widget.type, incomingConnections, subscribeToWidgetOutputs]);
+
+    // Compute band powers for statistic/bargraph widgets from upstream sources
+    useEffect(() => {
+        if (!(widget.type === 'bargraph' || widget.type === 'statistic')) return;
+        setBandStats([]);
+        if (!incomingConnections || incomingConnections.length === 0) return;
+
+        const src = String(incomingConnections[0] || '');
+    const fftSize = 256;
+    const sr = samplingRate || 256; // fallback
+
+        // If source is a channel, compute from recent samples
+        if (src.startsWith('channel-')) {
+            const m = src.match(/channel-(\d+)/i);
+            const chIdx = m ? Math.max(0, parseInt(m[1], 10)) : 0;
+            const key = `ch${chIdx}`;
+            const recent = samples.slice(-fftSize);
+            const input: number[] = new Array(fftSize).fill(0);
+            const start = Math.max(0, recent.length - fftSize);
+            const offset = fftSize - (recent.length - start);
+            for (let i = 0; i < fftSize; i++) {
+                const srcIdx = start + (i - offset);
+                input[i] = (srcIdx >= start && srcIdx < recent.length) ? ((recent[srcIdx] as any)[key] ?? 0) : 0;
+            }
+            try {
+                const { relative } = computeBandPowers(input, sr, fftSize);
+                const data = Object.keys(BANDS).map(b => ({ label: b, value: (relative as any)[b] * 100 }));
+                setBandStats(data);
+            } catch (err) { /* ignore */ }
+            return;
+        }
+
+        // If source is another widget, subscribe to its published outputs and build a rolling buffer
+        if (!subscribeToWidgetOutputs) return;
+        const buffer: number[] = new Array(fftSize).fill(0);
+        let idx = 0;
+        const unsub = subscribeToWidgetOutputs(src, (vals) => {
+            try {
+                for (const v of vals) {
+                    buffer[idx] = typeof v === 'number' ? v : 0;
+                    idx = (idx + 1) % fftSize;
+                }
+                // Build aligned signal
+                const signal: number[] = new Array(fftSize);
+                let p = idx;
+                for (let i = 0; i < fftSize; i++) { signal[i] = buffer[p]; p = (p + 1) % fftSize; }
+                const { relative } = computeBandPowers(signal, sr, fftSize);
+                const data = Object.keys(BANDS).map(b => ({ label: b, value: (relative as any)[b] * 100 }));
+                setBandStats(data);
+            } catch (err) { /* ignore per-callback errors */ }
+        });
+        return () => { try { unsub(); } catch (e) { } };
+    }, [widget.type, incomingConnections, samples, subscribeToWidgetOutputs]);
 
     return (
         <div
@@ -330,7 +468,7 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
 
             {/* Widget Content Area */}
             <div
-                className="cursor-move overflow-hidden relative pb-5"
+                className="cursor-move overflow-hidden relative"
                 onMouseDown={(e) => handleMouseDown(e, 'move')}
                 style={{
                     height: '100%',
@@ -418,13 +556,16 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
                             <StatisticGraph
                                 width={availableWidth}
                                 height={availableHeight}
-                                data={[
-                                    { label: 'A', value: 10 },
-                                    { label: 'B', value: 20 },
-                                    { label: 'C', value: 15 },
-                                    { label: 'D', value: 30 }
+                                data={bandStats && bandStats.length > 0 ? bandStats : [
+                                    { label: 'delta', value: 0 },
+                                    { label: 'theta', value: 0 },
+                                    { label: 'alpha', value: 0 },
+                                    { label: 'beta', value: 0 },
+                                    { label: 'gamma', value: 0 }
                                 ]}
                                 type="bar"
+                                showLabels={true}
+                                showValues={true}
                             />
                         </div>
                     ) : widget.type === 'candle' ? (
@@ -513,6 +654,7 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
                             return (
                                 <div className="w-full h-full overflow-hidden flex items-center justify-center p-0.5">
                                     <BasicGraphRealtime
+                                        ref={basicGraphRef}
                                         channels={finalChannels}
                                         // Inject device samples from context only when allowed
                                         deviceSamples={allowDevice ? samples : undefined}
@@ -531,6 +673,10 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
                                         onSizeRequest={handleSizeRequest}
                                         showChannelControls={isChannelWidget}
                                         showLegend={isChannelWidget}
+                                        // For upstream widget-output streams we will push arrays via the
+                                        // imperative `updateData` API. The `selectedChannels` prop maps
+                                        // incoming array indices to plotted channels.
+                                        selectedChannels={[0]}
                                     />
                                 </div>
                             );
