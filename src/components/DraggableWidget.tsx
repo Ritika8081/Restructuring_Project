@@ -262,12 +262,15 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
                 );
                 
                 if (!wouldCollide) {
+                    // Avoid assigning large epoch-based zIndex values which can
+                    // inadvertently float widgets above modal overlays. Keep zIndex
+                    // in a small, controlled range (allow caller to manage z-index
+                    // if needed via `onUpdateWidget` elsewhere).
                     onUpdateWidget(widget.id, { 
                         width: newWidth,
                         height: newHeight,
                         minWidth: Math.max(widget.minWidth || 1, minGridWidth),
                         minHeight: Math.max(widget.minHeight || 1, minGridHeight),
-                        zIndex: Date.now() 
                     });
                 }
             }

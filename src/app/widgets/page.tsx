@@ -458,6 +458,10 @@ const Widgets: React.FC = () => {
                 } catch (err) { /* ignore */ }
             }
 
+            // If there are any 'basic' (Plot) flow options, create a single aggregated
+            // dashboard widget that will display multiple channel inputs in one plot.
+            const hasBasic = widgetTypes.some(o => o.type === 'basic');
+
             let placeIndex = 0;
             widgetTypes.forEach((opt, optIdx) => {
                 if (typeof opt.id === 'string' && opt.id.startsWith('channel-')) {
@@ -465,6 +469,12 @@ const Widgets: React.FC = () => {
                     const idxVal = m ? parseInt(m[1], 10) : null;
                     if (idxVal !== null && !isNaN(idxVal) && channelsRouted.has(idxVal)) return;
                 }
+                // If this is a basic plot and we're aggregating, skip creating per-instance widgets
+                if (opt.type === 'basic' && hasBasic) {
+                    // We'll add a single aggregated basic widget after the loop
+                    return;
+                }
+
                 const instancesArr: Array<{ id: string, label?: string }> = (opt as any).instances || Array.from({ length: (opt.count || 1) }, (_, i) => ({ id: `${opt.id}-${i}`, label: `${opt.label} ${i}` }));
                 for (let inst = 0; inst < instancesArr.length; inst++) {
                     const rowIdx = placeIndex % gridRows;
@@ -497,6 +507,29 @@ const Widgets: React.FC = () => {
                     placeIndex++;
                 }
             });
+
+            // If we detected basic plot types, add a single aggregated basic widget.
+            if (hasBasic) {
+                // Place it at the next available slot
+                const rowIdx = placeIndex % gridRows;
+                const colIdx = Math.floor(placeIndex / gridRows);
+                const x = offsetCells + colIdx * dynamicWidgetWidth;
+                const y = offsetCells + rowIdx * dynamicWidgetHeight;
+                const safeX = Math.min(x, cols - dynamicWidgetWidth);
+                const safeY = Math.min(y, rows - dynamicWidgetHeight);
+                const aggWidget: Widget = {
+                    id: 'plots-aggregated',
+                    x: safeX,
+                    y: safeY,
+                    width: Math.max(dynamicWidgetWidth, 8),
+                    height: Math.max(dynamicWidgetHeight, 6),
+                    minWidth: 6,
+                    minHeight: 5,
+                    type: 'basic',
+                };
+                newWidgets.push(aggWidget);
+            }
+
             return newWidgets;
         });
     };
@@ -2931,6 +2964,36 @@ const Widgets: React.FC = () => {
                             } catch (err) {
                                 // non-critical; if something goes wrong here, fall back to direct expanded list
                             }
+
+                                // --- Auto-mapping for aggregated Plot dashboard widget ---
+                                // If the dashboard has a single aggregated 'plots-aggregated' widget,
+                                // collect all channel feeders that target any basic flow nodes so the
+                                // aggregated widget can display all connected channels in a single plot.
+                                try {
+                                    const targetWidget = widgets.find(w => w.id === wId);
+                                    if (targetWidget && targetWidget.type === 'basic' && wId === 'plots-aggregated') {
+                                        // gather all flow-node ids that represent basic/Plot nodes
+                                        const plotNodeIds = (flowOptions || []).filter((o: any) => String(o.type || '').toLowerCase() === 'basic' || String(o.id || '').toLowerCase().startsWith('basic-')).map((o: any) => {
+                                            const insts = (o as any).instances || Array.from({ length: (o.count || 1) }, (_, i) => ({ id: `${o.id}-${i}` }));
+                                            return insts.map((ins: any) => String(ins.id));
+                                        }).flat();
+
+                                        for (const nodeId of plotNodeIds) {
+                                            const feeders = connections.filter(c => c.to === nodeId).map(c => c.from);
+                                            for (const f of feeders) {
+                                                const s = String(f);
+                                                if (s.startsWith('channel-')) {
+                                                    if (!expanded.includes(s)) expanded.push(s);
+                                                } else if (s.startsWith('filter-')) {
+                                                    const chs = connections.filter(c2 => c2.to === s && String(c2.from).startsWith('channel-')).map(c2 => c2.from);
+                                                    for (const ch of chs) if (!expanded.includes(String(ch))) expanded.push(String(ch));
+                                                } else {
+                                                    if (!expanded.includes(s)) expanded.push(s);
+                                                }
+                                            }
+                                        }
+                                    }
+                                } catch (err) { /* ignore auto-mapping errors */ }
 
                             return expanded;
                         };
