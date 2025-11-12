@@ -51,11 +51,48 @@ const Widgets: React.FC = () => {
         return THEME_COLORS.default.text;
     };
 
+    // Lighter color variant for arrows (prefer border color which is lighter than text)
+    const colorForIdLight = (id?: string) => {
+        // Darken the border color slightly to make arrows "a little darker"
+        const darkenHex = (hex: string, amt = 0.18) => {
+            try {
+                let h = String(hex || '').replace('#', '');
+                if (h.length === 3) h = h.split('').map(c => c + c).join('');
+                const num = parseInt(h, 16);
+                let r = (num >> 16) & 0xff;
+                let g = (num >> 8) & 0xff;
+                let b = num & 0xff;
+                r = Math.max(0, Math.min(255, Math.floor(r * (1 - amt))));
+                g = Math.max(0, Math.min(255, Math.floor(g * (1 - amt))));
+                b = Math.max(0, Math.min(255, Math.floor(b * (1 - amt))));
+                const out = (r << 16) + (g << 8) + b;
+                return `#${out.toString(16).padStart(6, '0')}`;
+            } catch (err) {
+                return hex;
+            }
+        };
+
+        if (!id) return darkenHex(THEME_COLORS.default.border);
+        try {
+            if (String(id).startsWith('channel')) return darkenHex(themeFor('channel').border);
+            if (String(id).startsWith('spider')) return darkenHex(themeFor('spiderplot').border);
+            if (String(id).startsWith('fft')) return darkenHex(themeFor('fft').border);
+            if (String(id).startsWith('bandpower')) return darkenHex(themeFor('bandpower').border);
+            if (String(id).startsWith('filter')) return darkenHex(themeFor('filter').border);
+            if (String(id).startsWith('envelope')) return darkenHex(themeFor('envelope').border);
+            if (String(id).startsWith('candle')) return darkenHex(themeFor('candle').border);
+            if (String(id).startsWith('basic')) return darkenHex(themeFor('basic').border);
+            const fo = flowOptions.find(o => String(o.id) === String(id));
+            if (fo && (fo as any).type) return darkenHex(themeFor((fo as any).type).border);
+        } catch (err) { }
+        return darkenHex(THEME_COLORS.default.border);
+    };
+
     // Premium action palette for flowchart control buttons
     const ACTION_COLORS: Record<string, { bg: string, text: string, shadow: string }> = {
-        primary: { bg: '#3564e6ff', text: '#ffffff', shadow: '0 8px 24px rgba(15,75,240,0.14)' },
-        success: { bg: '#4b80c5ff', text: '#ffffff', shadow: '0 8px 24px rgba(5,150,105,0.12)' },
-        accent: { bg: '#0688d9ff', text: '#ffffff', shadow: '0 8px 24px rgba(217,119,6,0.12)' },
+        primary: { bg: '#4e78ebff', text: '#ffffff', shadow: '0 8px 24px rgba(15,75,240,0.14)' },
+        success: { bg: '#cf850fff', text: '#ffffff', shadow: '0 8px 24px rgba(5,150,105,0.12)' },
+        accent: { bg: '#dcaa06ff', text: '#ffffff', shadow: '0 8px 24px rgba(217,119,6,0.12)' },
         neutral: { bg: '#374151', text: '#ffffff', shadow: '0 8px 24px rgba(55,65,81,0.06)' },
         ghost: { bg: '#c4d8edff', text: '#0f172a', shadow: 'none' },
     };
@@ -1734,18 +1771,21 @@ const Widgets: React.FC = () => {
                                         { id: 'candle', label: 'Candle' },
                                         { id: 'bandpower', label: 'Bandpower' },
                                         { id: 'filter', label: 'Filter' },
-                                    ].map(item => (
-                                        <div
-                                            key={item.id}
-                                            draggable
-                                            onDragStart={(e) => { try { e.dataTransfer.setData('application/widget-type', item.id); e.dataTransfer.effectAllowed = 'copy'; } catch (err) {} }}
-                                            onMouseEnter={e => { const t = e.currentTarget as HTMLElement; t.style.transform = 'translateY(-3px)'; t.style.boxShadow = '0 8px 20px rgba(2,6,23,0.06)'; }}
-                                            onMouseLeave={e => { const t = e.currentTarget as HTMLElement; t.style.transform = 'translateY(0px)'; t.style.boxShadow = '0 1px 2px rgba(0,0,0,0.04)'; }}
-                                            style={{ cursor: 'grab', padding: '10px 12px', background: THEME_COLORS.default.bg, border: `1px solid ${THEME_COLORS.default.border}`, borderRadius: 8, boxShadow: THEME_COLORS.default.shadow, color: THEME_COLORS.default.text, transition: 'transform 120ms ease, box-shadow 120ms ease' }}
-                                        >
-                                            {item.label}
-                                        </div>
-                                    ))}
+                                    ].map(item => {
+                                        const th = themeFor(String(item.id).toLowerCase());
+                                        return (
+                                            <div
+                                                key={item.id}
+                                                draggable
+                                                onDragStart={(e) => { try { e.dataTransfer.setData('application/widget-type', item.id); e.dataTransfer.effectAllowed = 'copy'; } catch (err) {} }}
+                                                onMouseEnter={e => { const t = e.currentTarget as HTMLElement; t.style.transform = 'translateY(-3px)'; t.style.boxShadow = '0 8px 20px rgba(2,6,23,0.06)'; }}
+                                                onMouseLeave={e => { const t = e.currentTarget as HTMLElement; t.style.transform = 'translateY(0px)'; t.style.boxShadow = '0 1px 2px rgba(0,0,0,0.04)'; }}
+                                                style={{ cursor: 'grab', padding: '10px 12px', background: th.bg, border: `1px solid ${th.border}`, borderRadius: 8, boxShadow: th.shadow, color: th.text, transition: 'transform 120ms ease, box-shadow 120ms ease' }}
+                                            >
+                                                {item.label}
+                                            </div>
+                                        );
+                                    })}
                                 </div>
                             </div>
 
@@ -2432,35 +2472,19 @@ const Widgets: React.FC = () => {
                                     const fromCol = colorForId(drawingConnection.from as string);
                                     return (
                                     <svg style={{ position: 'absolute', left: 0, top: 0, width: '1200px', height: '500px', pointerEvents: 'none', zIndex: 10000 }}>
-                                        <defs>
-                                            <linearGradient id={`liveGrad`} x1="0%" x2="100%" y1="0%" y2="0%">
-                                                <stop offset="0%" stopColor={fromCol} stopOpacity={1} />
-                                                <stop offset="100%" stopColor={fromCol} stopOpacity={0.12} />
-                                            </linearGradient>
-                                        </defs>
                                         <path
                                             d={`M ${drawingConnection.startX} ${drawingConnection.startY} L ${mousePos.x} ${mousePos.y}`}
-                                            stroke={`url(#liveGrad)`}
+                                            stroke={colorForIdLight(drawingConnection.from as string)}
                                             strokeWidth={2.5}
                                             fill="none"
+                                            strokeLinecap="round"
                                         />
                                     </svg>
                                     );
                                 })()}
                                 {/* Render all manual connections as arrows */}
                                 <svg id="flowchart-arrow-svg" style={{ position: 'absolute', left: 0, top: 0, width: '1200px', height: '500px', pointerEvents: 'none', zIndex: 9999 }}>
-                                    <defs>
-                                        {connections.map(({ from, to }, idx) => {
-                                            const fromCol = colorForId(from as string);
-                                            const toCol = colorForId(to as string);
-                                            return (
-                                                <linearGradient id={`connGrad-${idx}`} key={`g-${idx}`} x1="0%" x2="100%" y1="0%" y2="0%">
-                                                    <stop offset="0%" stopColor={fromCol} />
-                                                    <stop offset="100%" stopColor={toCol} />
-                                                </linearGradient>
-                                            );
-                                        })}
-                                    </defs>
+                                        <defs />
                                     {connections.map(({ from, to }, idx) => {
                                         // Get exact circle centers when possible
                                         const fromCenter = getCircleCenter(from, 'output');
@@ -2533,9 +2557,9 @@ const Widgets: React.FC = () => {
                                                     }}
                                                 />
                                                 <path
-                                                    // visible path
+                                                    // visible path - use a lighter solid color instead of gradient
                                                     d={path}
-                                                    stroke={isSelected ? '#ef4444' : `url(#${gradId})`}
+                                                    stroke={isSelected ? '#ef4444' : colorForIdLight(from as string)}
                                                     strokeWidth={isSelected ? 3.5 : 2}
                                                     fill="none"
                                                     strokeLinecap="round"

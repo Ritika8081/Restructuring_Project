@@ -81,7 +81,7 @@ const Envelope: React.FC<EnvelopeProps> = ({ id, incomingConnections = [], buffe
   return (
     <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 6 }}>
       <div style={{ textAlign: 'center' }}>
-        <div style={{ fontSize: 12, color: '#6b7280' }}>Envelope</div>
+        {/* <div style={{ fontSize: 12, color: '#6b7280' }}>Envelope</div> */}
         <div style={{ fontSize: 18, fontWeight: 700, color: '#2563eb' }}>{display}</div>
         <div style={{ fontSize: 11, color: '#9ca3af' }}>{`src: ${incomingConnections && incomingConnections[0] ? incomingConnections[0] : '—'}`}</div>
       </div>
