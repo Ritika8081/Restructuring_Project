@@ -275,18 +275,52 @@ const Widgets: React.FC = () => {
         );
     };
     // Modal widget positions state (for flowchart modal)
+    // modalPositions is stored as normalized coordinates (0..1) relative to the
+    // flow area (unscaled). We convert to/from pixel coordinates when reading
+    // or writing so the rest of the code can operate on pixels.
+    const initialModalPositionsPx: Record<string, { left: number, top: number }> = {};
+    initialModalPositionsPx['channels-box'] = { left: 60, top: 80 };
+    initialModalPositionsPx['plots-box'] = { left: 60, top: 260 };
+    initialModalPositionsPx['spiderplot'] = { left: 320, top: 100 };
+    initialModalPositionsPx['fft'] = { left: 540, top: 100 };
+    initialModalPositionsPx['bandpower'] = { left: 760, top: 100 };
+
+    // Internal storage uses normalized coordinates: { left: number, top: number } where
+    // values are 0..1 fractions of the container width/height. Initialize lazily to
+    // fallback normalized values using assumed container size (1200x500) — these
+    // will be converted at runtime to exact pixel positions when rendered.
+    const normalizeFallback = (px: { left: number, top: number }) => ({ left: px.left / 1200, top: px.top / 500 });
     const initialModalPositions: Record<string, { left: number, top: number }> = {};
-    // Place a combined Channels container (holds individual channel handles visually)
-    initialModalPositions['channels-box'] = { left: 60, top: 80 };
-    // Place a combined Plots container (mirrors Channels box for Plot instances)
-    initialModalPositions['plots-box'] = { left: 60, top: 260 };
-    // Keep positions for the other flowchart items (three rows: spiderplot, fft, bandpower)
-    // Single spiderplot widget position
-    initialModalPositions['spiderplot'] = { left: 320, top: 100 };
-    // FFT and Bandpower single placeholders
-    initialModalPositions['fft'] = { left: 540, top: 100 };
-    initialModalPositions['bandpower'] = { left: 760, top: 100 };
+    Object.keys(initialModalPositionsPx).forEach(k => { initialModalPositions[k] = normalizeFallback(initialModalPositionsPx[k]); });
     const [modalPositions, setModalPositions] = useState<Record<string, { left: number, top: number }>>(initialModalPositions);
+
+    // Helper: get the flow container (the inner scaled div) bounding rect. Use defaults
+    // if DOM is not available yet.
+    const getFlowContainerRect = () => {
+        try {
+            const el = document.querySelector('[style*="transform: scale("]') as HTMLElement | null;
+            if (el) return el.getBoundingClientRect();
+        } catch (e) { }
+        return { width: 1200, height: 500, top: 0, left: 0, right: 1200, bottom: 500 } as DOMRect;
+    };
+
+    const pixelToNormalized = (leftPx: number, topPx: number) => {
+        const r = getFlowContainerRect();
+        const w = r.width || 1200;
+        const h = r.height || 500;
+        return { left: Math.max(0, Math.min(1, leftPx / w)), top: Math.max(0, Math.min(1, topPx / h)) };
+    };
+
+    const normalizedToPixel = (pos: { left: number, top: number }) => {
+        const r = getFlowContainerRect();
+        const w = r.width || 1200;
+        const h = r.height || 500;
+        return { left: Math.round((pos.left || 0) * w), top: Math.round((pos.top || 0) * h) };
+    };
+
+    // Debug: log modalPositions and flowScale when they change to help diagnose
+    // issues where stored positions don't match the visual scaled surface.
+    // (Effect moved below where `flowScale` is declared.)
     // Helper to find exact center of input/output circle relative to the flowchart SVG
     const getCircleCenter = (widgetId: string, handle: 'input' | 'output') => {
         try {
@@ -338,8 +372,8 @@ const Widgets: React.FC = () => {
             const fromCenter = getCircleCenter(from, 'output');
             const toCenter = getCircleCenter(to, 'input');
             let startX: number, startY: number, endX: number, endY: number;
-            const fromPos = modalPositions[from];
-            const toPos = modalPositions[to];
+            const fromPos = modalPositions[from] ? normalizedToPixel(modalPositions[from]) : undefined;
+            const toPos = modalPositions[to] ? normalizedToPixel(modalPositions[to]) : undefined;
             if (!fromCenter && !fromPos) return null;
             if (!toCenter && !toPos) return null;
             if (fromCenter) {
@@ -488,6 +522,14 @@ const Widgets: React.FC = () => {
     // Flowchart zoom scale (1 = 100%). Users can zoom in/out the flow modal to fit more widgets.
     const [flowScale, setFlowScale] = useState<number>(1);
     const clampScale = (v: number) => Math.max(0.4, Math.min(2.0, v));
+
+    // Debug: log modalPositions and flowScale when they change to help diagnose
+    // issues where stored positions don't match the visual scaled surface.
+    useEffect(() => {
+        try {
+            console.debug('[FlowDebug] flowScale/modalPositions', { flowScale, modalPositions });
+        } catch (err) { /* ignore */ }
+    }, [flowScale, modalPositions]);
     // Selected connection index (for arrow selection/deletion)
     const [selectedConnectionIndex, setSelectedConnectionIndex] = useState<number | null>(null);
     // List of all possible widgets in the flow (initially based on flowchart)
@@ -993,17 +1035,27 @@ const Widgets: React.FC = () => {
         // Add to flowOptions so it's rendered in the flow modal
     setFlowOptions(prev => [...prev, { id, label, type: canonical, selected: true, ...(canonical === 'basic' ? { instances: [{ id: `${id}-0`, label: `${label} 0` }] } : {}) }]);
 
+        // Adjust incoming coordinates for current zoom scale so items drop
+        // where the user expects when the flow area is scaled via CSS
+        // transform: scale(flowScale). We treat `left`/`top` as screen
+        // coordinates relative to the scaled container, so divide by
+        // flowScale to convert into the unscaled modal coordinate space.
+        const s = flowScale || 1;
+        const adjLeft = Math.round(left / s);
+        const adjTop = Math.round(top / s);
+
         // Clamp left/top to reasonable bounds inside the flow modal container
-        const containerWidth = 1200; // default used elsewhere
-        const containerHeight = 500;
+        const containerWidth = 1200; // default used elsewhere (unscaled)
+        const containerHeight = 500; // unscaled
         const widgetWidth = (canonical === 'bandpower') ? 220 : 180;
         const widgetHeight = 70;
-        const clampedLeft = Math.max(8, Math.min(Math.round(left), Math.max(8, Math.floor(containerWidth - widgetWidth - 8))));
-        const clampedTop = Math.max(8, Math.min(Math.round(top), Math.max(8, Math.floor(containerHeight - widgetHeight - 8))));
+        const clampedLeft = Math.max(8, Math.min(adjLeft, Math.max(8, Math.floor(containerWidth - widgetWidth - 8))));
+        const clampedTop = Math.max(8, Math.min(adjTop, Math.max(8, Math.floor(containerHeight - widgetHeight - 8))));
 
-        setModalPositions(prev => ({ ...prev, [id]: { left: clampedLeft, top: clampedTop } }));
+        // Store normalized coordinates so positions remain correct under zoom/resize
+        setModalPositions(prev => ({ ...prev, [id]: pixelToNormalized(clampedLeft, clampedTop) }));
         showToast(`${label} added to flowchart`, 'success');
-    }, [flowOptions, setFlowOptions, setModalPositions, showToast]);
+    }, [flowOptions, setFlowOptions, setModalPositions, showToast, flowScale]);
 
     /**
      * Add a new instance (sub-widget) to a basic flow option.
@@ -1046,8 +1098,15 @@ const Widgets: React.FC = () => {
     const id = `basic-${Date.now()}-${Math.random().toString(36).substr(2,6)}`;
     const label = 'Plot';
     setFlowOptions(prev => [...prev, { id, label, type: 'basic', selected: true, instances: [{ id: `${id}-0`, label: `${label} 0` }] }]);
-        setModalPositions(prev => ({ ...prev, [id]: { left: 200, top: 100 } }));
-    }, [flowOptions, addBasicInstance]);
+        // Adjust default stored position to account for current visual scale so
+        // the node appears in the expected place when the flow surface is scaled.
+        setModalPositions(prev => {
+            const s = flowScale || 1;
+            const adjLeft = Math.round(200 / s);
+            const adjTop = Math.round(100 / s);
+            return ({ ...prev, [id]: pixelToNormalized(adjLeft, adjTop) });
+        });
+        }, [flowOptions, addBasicInstance, flowScale]);
 
     const decreasePlots = useCallback(() => {
         // Remove the last created basic instance across all basic options
@@ -1366,7 +1425,37 @@ const Widgets: React.FC = () => {
                                                         if (layout.widgets) setWidgets(layout.widgets);
                                                         if (layout.gridSettings) setGridSettings(layout.gridSettings);
                                                         if (layout.connections) setConnections(layout.connections);
-                                                        if (layout.modalPositions) setModalPositions(layout.modalPositions);
+                                                        if (layout.modalPositions) {
+                                                            // Adjust imported modal positions to the current flowScale.
+                                                            // Layout files may have been exported at a different zoom
+                                                            // level; convert positions into the unscaled modal
+                                                            // coordinate space by dividing by flowScale.
+                                                            try {
+                                                                    const s = flowScale || 1;
+                                                                    const adjusted: Record<string, { left: number, top: number }> = {};
+                                                                    Object.keys(layout.modalPositions).forEach(k => {
+                                                                        try {
+                                                                            const v = (layout.modalPositions as any)[k];
+                                                                            if (v && typeof v.left === 'number' && typeof v.top === 'number') {
+                                                                                // If incoming values are already normalized (<=1), assume normalized and use directly.
+                                                                                if (v.left <= 1 && v.top <= 1) {
+                                                                                    adjusted[k] = { left: v.left, top: v.top };
+                                                                                } else {
+                                                                                    // Incoming values are pixels. They may be saved at a zoomed scale,
+                                                                                    // so first convert to unscaled pixels, then to normalized coords.
+                                                                                    const unscaledLeft = Math.round(v.left / s);
+                                                                                    const unscaledTop = Math.round(v.top / s);
+                                                                                    adjusted[k] = pixelToNormalized(unscaledLeft, unscaledTop);
+                                                                                }
+                                                                            }
+                                                                        } catch (e) { /* ignore per-key */ }
+                                                                    });
+                                                                    setModalPositions(adjusted);
+                                                            } catch (err) {
+                                                                    // Fallback: if conversion failed, try using incoming positions directly
+                                                                    setModalPositions(layout.modalPositions);
+                                                            }
+                                                        }
                                                             if (layout.flowOptions) setFlowOptions(layout.flowOptions);
                                                             // Restore channel count if present; otherwise infer from flowOptions
                                                             if (typeof layout.channelCount === 'number') {
@@ -1518,7 +1607,7 @@ const Widgets: React.FC = () => {
                             {/* Combined Channels box: visually represent all channels inside one widget but keep individual channel ids for connections */}
                             {(() => {
                                 // derive channel list from flowOptions so removing one channel doesn't renumber others
-                                const boxPos = modalPositions['channels-box'] || { left: 60, top: 80 };
+                                const boxPos = modalPositions['channels-box'] ? normalizedToPixel(modalPositions['channels-box']) : { left: 60, top: 80 };
                                 const channelOptions = flowOptions.filter(o => typeof o.id === 'string' && o.id.startsWith('channel-')).slice().sort((a, b) => {
                                     const ma = (a.id as string).match(/channel-(\d+)/i);
                                     const mb = (b.id as string).match(/channel-(\d+)/i);
@@ -1567,12 +1656,14 @@ const Widgets: React.FC = () => {
                                     const startY = e.clientY;
                                     const origLeft = boxPos.left;
                                     const origTop = boxPos.top;
-                                    const onMouseMove = (moveEvent: MouseEvent) => {
+                                        const onMouseMove = (moveEvent: MouseEvent) => {
                                         const dx = moveEvent.clientX - startX;
                                         const dy = moveEvent.clientY - startY;
-                                        const newLeft = Math.round((origLeft + dx) / 10) * 10;
-                                        const newTop = Math.round((origTop + dy) / 10) * 10;
-                                        setModalPositions(pos => ({ ...pos, ['channels-box']: { left: newLeft, top: newTop } }));
+                                        const s = flowScale || 1;
+                                        const newLeft = Math.round((origLeft + dx / s) / 10) * 10;
+                                        const newTop = Math.round((origTop + dy / s) / 10) * 10;
+                                        // Store normalized position
+                                        setModalPositions(pos => ({ ...pos, ['channels-box']: pixelToNormalized(newLeft, newTop) }));
                                     };
                                     const onMouseUp = () => {
                                         window.removeEventListener('mousemove', onMouseMove);
@@ -1885,7 +1976,7 @@ const Widgets: React.FC = () => {
 
                             {/* Plots aggregated box: visually mirror the Channels box but list Plot instances */}
                             {(() => {
-                                const boxPos = modalPositions['plots-box'] || { left: 60, top: 260 };
+                                const boxPos = modalPositions['plots-box'] ? normalizedToPixel(modalPositions['plots-box']) : { left: 60, top: 260 };
                                 // derive plot instances from basic flowOptions
                                 const plotOptions = flowOptions.filter(o => o.type === 'basic');
                                 const plotInstances: Array<{ id: string, label: string }> = [];
@@ -1928,9 +2019,11 @@ const Widgets: React.FC = () => {
                                     const onMouseMove = (moveEvent: MouseEvent) => {
                                         const dx = moveEvent.clientX - startX;
                                         const dy = moveEvent.clientY - startY;
-                                        const newLeft = Math.round((origLeft + dx) / 10) * 10;
-                                        const newTop = Math.round((origTop + dy) / 10) * 10;
-                                        setModalPositions(pos => ({ ...pos, ['plots-box']: { left: newLeft, top: newTop } }));
+                                        const s = flowScale || 1;
+                                        const newLeft = Math.round((origLeft + dx / s) / 10) * 10;
+                                        const newTop = Math.round((origTop + dy / s) / 10) * 10;
+                                        // Store normalized position
+                                        setModalPositions(pos => ({ ...pos, ['plots-box']: pixelToNormalized(newLeft, newTop) }));
                                     };
                                     const onMouseUp = () => {
                                         window.removeEventListener('mousemove', onMouseMove);
@@ -2193,8 +2286,8 @@ const Widgets: React.FC = () => {
                                         // Fallback to modalPositions-based calculation
                                         let startX: number, startY: number, endX: number, endY: number;
 
-                                        const fromPos = modalPositions[from];
-                                        const toPos = modalPositions[to];
+                                        const fromPos = modalPositions[from] ? normalizedToPixel(modalPositions[from]) : undefined;
+                                        const toPos = modalPositions[to] ? normalizedToPixel(modalPositions[to]) : undefined;
 
                                         // If we don't have either a DOM center or a modal position for either end, skip drawing
                                         if (!fromCenter && !fromPos) return null;
@@ -2216,10 +2309,11 @@ const Widgets: React.FC = () => {
                                             endX = (toPos as { left: number, top: number }).left + 7;
                                             endY = (toPos as { left: number, top: number }).top + 35;
                                         }
-                                        // Build obstacle boxes from modalPositions for routing
+                                        // Build obstacle boxes from modalPositions for routing (convert normalized -> pixels)
                                         const obstacles: Array<{ left: number, top: number, right: number, bottom: number, id?: string }> = [];
                                         Object.keys(modalPositions).forEach(k => {
-                                            const p = modalPositions[k];
+                                            const pnorm = modalPositions[k];
+                                            const p = pnorm ? normalizedToPixel(pnorm) : { left: 0, top: 0 };
                                             // approximate modal widget sizes used in layout (match earlier logic)
                                             const widgetType = k.startsWith('channel') ? 'channel' : k.startsWith('spider') ? 'spiderplot' : k.startsWith('fft') ? 'fft' : 'bandpower';
                                             const w = (widgetType === 'bandpower') ? 220 : 180;
@@ -2273,8 +2367,9 @@ const Widgets: React.FC = () => {
                                 const widgetId = opt.id;
                                 const defaultLeft = 200 + (idx % 3) * 220;
                                 const defaultTop = 100 + Math.floor(idx / 3) * 120;
-                                const widgetLeft = modalPositions[widgetId]?.left ?? defaultLeft;
-                                const widgetTop = modalPositions[widgetId]?.top ?? defaultTop;
+                                const widgetPos = modalPositions[widgetId] ? normalizedToPixel(modalPositions[widgetId]) : { left: defaultLeft, top: defaultTop };
+                                const widgetLeft = widgetPos.left;
+                                const widgetTop = widgetPos.top;
                                 const instancesList = (opt as any).instances || Array.from({ length: (opt.count || 1) }, (_, i) => ({ id: `${opt.id}-${i}`, label: `${opt.label} ${i}` }));
                                 // Make Plot boxes larger in the flow modal so input/output handles fit inside
                                 const widgetWidth = opt.type === 'bandpower' ? 220 : (opt.type === 'basic' ? 240 : 180);
@@ -2288,12 +2383,15 @@ const Widgets: React.FC = () => {
                                     const startY = e.clientY;
                                     const origLeft = widgetLeft;
                                     const origTop = widgetTop;
-                                    const onMouseMove = (moveEvent: MouseEvent) => {
+                                        const onMouseMove = (moveEvent: MouseEvent) => {
                                         const dx = moveEvent.clientX - startX;
                                         const dy = moveEvent.clientY - startY;
-                                        const newLeft = Math.round((origLeft + dx) / 10) * 10;
-                                        const newTop = Math.round((origTop + dy) / 10) * 10;
-                                        setModalPositions(pos => ({ ...pos, [widgetId]: { left: newLeft, top: newTop } }));
+                                        const s = flowScale || 1;
+                                        // Convert screen pixel delta into unscaled modal coords
+                                        const newLeft = Math.round((origLeft + dx / s) / 10) * 10;
+                                        const newTop = Math.round((origTop + dy / s) / 10) * 10;
+                                        // Store normalized coordinates
+                                        setModalPositions(pos => ({ ...pos, [widgetId]: pixelToNormalized(newLeft, newTop) }));
                                     };
                                     const onMouseUp = () => {
                                         window.removeEventListener('mousemove', onMouseMove);
