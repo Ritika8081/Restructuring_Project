@@ -83,17 +83,7 @@ const COEFFS: Record<number, Record<string, SectionCoeffs[]>> = {
             { b0: 0.10926967, b1: 0.21853934, b2: 0.10926967, a1: -0.78734302, a2: 0.28518928 },
         ],
     },
-    // 250Hz coefficients for notches are preserved for backward compatibility
-    250: {
-        'notch-50': [
-            { b0: 0.93137886, b1: -0.57635175, b2: 0.93137886, a1: -0.53127491, a2: 0.93061518 },
-            { b0: 1.0, b1: -0.61881558, b2: 1.0, a1: -0.66243374, a2: 0.93214913 },
-        ],
-        'notch-60': [
-            { b0: 0.93137886, b1: -0.11711144, b2: 0.93137886, a1: -0.05269865, a2: 0.93123336 },
-            { b0: 1.0, b1: -0.12573985, b2: 1.0, a1: -0.18985625, a2: 0.93153034 },
-        ],
-    },
+    
 };
 
 /**
@@ -158,40 +148,75 @@ export function createFilterInstance(filterKey: string, samplingRate: number): B
  * Internally uses the coefficient table and BiquadCascade.
  */
 export class Notch {
-    private samplingRate: number = 0;
-    // instances per notch type (1 -> 50Hz, 2 -> 60Hz)
-    private instances: Record<number, BiquadCascade | null> = { 1: null, 2: null };
+    private z1_1: number;
+    private z2_1: number;
+    private z1_2: number;
+    private z2_2: number;
+    private x_1: number;
+    private x_2: number;
+    private currentSamplingRate: number;
 
     constructor() {
-        // nothing expensive at construction time; instances created lazily or via setbits
+        this.z1_1 = 0;
+        this.z2_1 = 0;
+        this.z1_2 = 0;
+        this.z2_2 = 0;
+        this.x_1 = 0;
+        this.x_2 = 0;
+        this.currentSamplingRate = 0;
     }
 
-    setbits(samplingRate: number): void {
-        if (!samplingRate || this.samplingRate === samplingRate) {
-            this.samplingRate = samplingRate || this.samplingRate;
-            return;
-        }
-        this.samplingRate = samplingRate;
-        // If instances already existed, re-create them with new coeffs (if available)
-        for (const t of [1, 2]) {
-            const key = t === 2 ? 'notch-60' : 'notch-50';
-            const inst = createFilterInstance(key, this.samplingRate);
-            this.instances[t] = inst;
-        }
+    setbits(currentSamplingRate: number): void {
+        this.currentSamplingRate = currentSamplingRate;
+        // reset state when sampling rate changes to avoid artifacts
+        this.z1_1 = this.z2_1 = this.z1_2 = this.z2_2 = 0;
+        this.x_1 = this.x_2 = 0;
     }
 
     process(input: number, type: number): number {
         if (!type) return input;
-        const key = type === 2 ? 'notch-60' : 'notch-50';
-        // Ensure we have a sampling rate; if not, return input (no-op)
-        if (!this.samplingRate) return input;
-        let inst = this.instances[type];
-        if (!inst) {
-            inst = createFilterInstance(key, this.samplingRate);
-            this.instances[type] = inst;
+        let output = input;
+
+        switch (this.currentSamplingRate) {
+            case 500:
+                switch (type) {
+                    case 1:
+                        // Notch @ ~50Hz, sampling 500Hz - section 1
+                        this.x_1 = output - (-1.56858163 * this.z1_1) - (0.96424138 * this.z2_1);
+                        output = 0.96508099 * this.x_1 + -1.56202714 * this.z1_1 + 0.96508099 * this.z2_1;
+                        this.z2_1 = this.z1_1;
+                        this.z1_1 = this.x_1;
+                        // section 2
+                        this.x_2 = output - (-1.61100358 * this.z1_2) - (0.96592171 * this.z2_2);
+                        output = 1.0 * this.x_2 + -1.61854514 * this.z1_2 + 1.0 * this.z2_2;
+                        this.z2_2 = this.z1_2;
+                        this.z1_2 = this.x_2;
+                        break;
+
+                    case 2:
+                        // Notch @ ~60Hz, sampling 500Hz - section 1
+                        this.x_1 = output - (-1.40810535 * this.z1_1) - (0.96443153 * this.z2_1);
+                        output = 0.96508099 * this.x_1 + -1.40747202 * this.z1_1 + 0.96508099 * this.z2_1;
+                        this.z2_1 = this.z1_1;
+                        this.z1_1 = this.x_1;
+                        // section 2
+                        this.x_2 = output - (-1.45687509 * this.z1_2) - (0.96573127 * this.z2_2);
+                        output = 1.0 * this.x_2 + -1.45839783 * this.z1_2 + 1.0 * this.z2_2;
+                        this.z2_2 = this.z1_2;
+                        this.z1_2 = this.x_2;
+                        break;
+
+                    default:
+                        break;
+                }
+                break;
+
+            default:
+                // no matching sampling rate — bypass filter
+                break;
         }
-        if (!inst) return input;
-        return inst.process(input);
+
+        return output;
     }
 }
 
