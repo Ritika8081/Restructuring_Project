@@ -53,11 +53,11 @@ const Widgets: React.FC = () => {
 
     // Premium action palette for flowchart control buttons
     const ACTION_COLORS: Record<string, { bg: string, text: string, shadow: string }> = {
-        primary: { bg: '#0f4bf0', text: '#ffffff', shadow: '0 8px 24px rgba(15,75,240,0.14)' },
-        success: { bg: '#059669', text: '#ffffff', shadow: '0 8px 24px rgba(5,150,105,0.12)' },
-        accent: { bg: '#d97706', text: '#ffffff', shadow: '0 8px 24px rgba(217,119,6,0.12)' },
+        primary: { bg: '#3564e6ff', text: '#ffffff', shadow: '0 8px 24px rgba(15,75,240,0.14)' },
+        success: { bg: '#4b80c5ff', text: '#ffffff', shadow: '0 8px 24px rgba(5,150,105,0.12)' },
+        accent: { bg: '#0688d9ff', text: '#ffffff', shadow: '0 8px 24px rgba(217,119,6,0.12)' },
         neutral: { bg: '#374151', text: '#ffffff', shadow: '0 8px 24px rgba(55,65,81,0.06)' },
-        ghost: { bg: '#f1f5f9', text: '#0f172a', shadow: 'none' },
+        ghost: { bg: '#c4d8edff', text: '#0f172a', shadow: 'none' },
     };
 
     // Manual connection drawing state
@@ -2431,7 +2431,7 @@ const Widgets: React.FC = () => {
                                 {drawingConnection && mousePos && (() => {
                                     const fromCol = colorForId(drawingConnection.from as string);
                                     return (
-                                    <svg style={{ position: 'absolute', left: 0, top: 0, width: '1200px', height: '500px', pointerEvents: 'auto', zIndex: 10000 }}>
+                                    <svg style={{ position: 'absolute', left: 0, top: 0, width: '1200px', height: '500px', pointerEvents: 'none', zIndex: 10000 }}>
                                         <defs>
                                             <linearGradient id={`liveGrad`} x1="0%" x2="100%" y1="0%" y2="0%">
                                                 <stop offset="0%" stopColor={fromCol} stopOpacity={1} />
@@ -2448,7 +2448,7 @@ const Widgets: React.FC = () => {
                                     );
                                 })()}
                                 {/* Render all manual connections as arrows */}
-                                <svg id="flowchart-arrow-svg" style={{ position: 'absolute', left: 0, top: 0, width: '1200px', height: '500px', pointerEvents: 'auto', zIndex: 9999 }}>
+                                <svg id="flowchart-arrow-svg" style={{ position: 'absolute', left: 0, top: 0, width: '1200px', height: '500px', pointerEvents: 'none', zIndex: 9999 }}>
                                     <defs>
                                         {connections.map(({ from, to }, idx) => {
                                             const fromCol = colorForId(from as string);
