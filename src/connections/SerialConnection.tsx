@@ -390,14 +390,6 @@ export default function SerialConnection() {
 
   return (
     <div className="flex flex-col items-center gap-4">
-      <div className="flex items-center gap-2">
-        <label className="text-sm">Device Mode:</label>
-        <select value={deviceMode} onChange={e => setDeviceMode(e.target.value as any)} className="px-2 py-1 border rounded">
-          <option value="auto">Auto-detect</option>
-          <option value="r4">UNO R4 (6ch)</option>
-          <option value="3ch">Legacy (3ch)</option>
-        </select>
-      </div>
 
       <button
         onClick={connect}

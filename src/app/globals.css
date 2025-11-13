@@ -24,3 +24,45 @@ html, body {
     min-height: 100vh;
     width: 100%;
 }
+
+/* Custom scrollbars (global) --------------------------------------------------
+   Provide a thin, modern scrollbar across the app. We style both WebKit-based
+   browsers (Chrome, Edge, Safari) and Firefox. Colors use CSS variables so the
+   palette can be easily adjusted later to match theme tokens.
+*/
+:root {
+    --scrollbar-bg: #f1f5f9; /* track */
+    --scrollbar-thumb: #c4d8ed; /* thumb (matches ghost theme) */
+    --scrollbar-thumb-hover: #9fbfe8;
+    --scrollbar-width: 10px;
+}
+
+/* Firefox */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-bg);
+}
+
+/* WebKit (Chrome, Edge, Safari) */
+*::-webkit-scrollbar {
+    width: var(--scrollbar-width);
+    height: var(--scrollbar-width);
+}
+*::-webkit-scrollbar-track {
+    background: var(--scrollbar-bg);
+    border-radius: 8px;
+}
+*::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb);
+    border-radius: 8px;
+    border: 2px solid var(--scrollbar-bg); /* creates a little padded look */
+}
+*::-webkit-scrollbar-thumb:hover {
+    background: var(--scrollbar-thumb-hover);
+}
+
+/* Optional: make scrollbars less obtrusive on small devices */
+@media (max-width: 640px) {
+    :root { --scrollbar-width: 8px; }
+}
+

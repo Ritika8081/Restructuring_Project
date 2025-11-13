@@ -108,13 +108,20 @@ const Widgets: React.FC = () => {
     };
 
     // Premium action palette for flowchart control buttons
+    // Refreshed 'smart' action palette — flat modern tones, neutral ghost, and subtle shadows
     const ACTION_COLORS: Record<string, { bg: string, text: string, shadow: string }> = {
-        primary: { bg: '#4e78ebff', text: '#ffffff', shadow: '0 8px 24px rgba(15,75,240,0.14)' },
-        success: { bg: '#cf850fff', text: '#ffffff', shadow: '0 8px 24px rgba(5,150,105,0.12)' },
-        green: { bg: '#10B981', text: '#ffffff', shadow: '0 8px 24px rgba(16,185,129,0.12)' },
-        accent: { bg: '#dcaa06ff', text: '#ffffff', shadow: '0 8px 24px rgba(217,119,6,0.12)' },
-        neutral: { bg: '#374151', text: '#ffffff', shadow: '0 8px 24px rgba(55,65,81,0.06)' },
-        ghost: { bg: '#c4d8edff', text: '#0f172a', shadow: 'none' },
+        // primary: calm teal for main actions
+        primary: { bg: '#0ea5a4', text: '#ffffff', shadow: '0 8px 24px rgba(14,165,164,0.12)' },
+        // success: pleasant indigo used for confirmatory actions
+        success: { bg: '#7c3aed', text: '#ffffff', shadow: '0 8px 24px rgba(124,58,237,0.12)' },
+        // green: prominent teal-cyan for play/run actions
+        green: { bg: '#4cc668ff', text: '#083344', shadow: '0 8px 24px rgba(6,182,212,0.10)' },
+        // accent: warm amber for highlights/secondary actions
+        accent: { bg: '#f59e0b', text: '#08131a', shadow: '0 8px 24px rgba(245,158,11,0.10)' },
+        // neutral: dark slate for destructive/neutral controls
+        neutral: { bg: '#0f172a', text: '#ffffff', shadow: '0 8px 24px rgba(15,23,42,0.06)' },
+        // ghost: very light subtle background used for quiet buttons
+        ghost: { bg: '#f8fafc', text: '#0f172a', shadow: 'none' },
     };
 
     // Manual connection drawing state
@@ -1333,17 +1340,34 @@ const Widgets: React.FC = () => {
      * Add a new instance (sub-widget) to a basic flow option.
      * Each instance gets a stable unique id so connections can target it.
      */
+    // Maximum number of plot instances allowed across all basic flow options
+    const MAX_PLOT_INSTANCES = 16;
+
     const addBasicInstance = useCallback((optId: string) => {
-        setFlowOptions(prev => prev.map(o => {
-            if (o.id !== optId) return o;
-            const existing = (o as any).instances || [];
-            // nextIndex is zero-based
-            const nextIndex = existing.length;
-            const newId = `${o.id}-${Date.now().toString(36).substr(2, 6)}-${nextIndex}`;
-            const newLabel = `${o.label} ${nextIndex}`;
-            return { ...o, instances: [...existing, { id: newId, label: newLabel }] };
-        }));
-    }, []);
+        setFlowOptions(prev => {
+            // Count existing basic instances across all basic options
+            const basicOpts = prev.filter(p => p.type === 'basic');
+            let totalInstances = 0;
+            for (const o of basicOpts) {
+                const insts = (o as any).instances || Array.from({ length: (o.count || 1) }, (_, i) => ({ id: `${o.id}-${i}` }));
+                totalInstances += insts.length;
+            }
+            if (totalInstances >= MAX_PLOT_INSTANCES) {
+                try { showToast(`Maximum of ${MAX_PLOT_INSTANCES} plots reached`, 'info'); } catch (e) { }
+                return prev;
+            }
+
+            return prev.map(o => {
+                if (o.id !== optId) return o;
+                const existing = (o as any).instances || [];
+                // nextIndex is zero-based
+                const nextIndex = existing.length;
+                const newId = `${o.id}-${Date.now().toString(36).substr(2, 6)}-${nextIndex}`;
+                const newLabel = `${o.label} ${nextIndex}`;
+                return { ...o, instances: [...existing, { id: newId, label: newLabel }] };
+            });
+        });
+    }, [showToast]);
 
     const removeBasicInstance = useCallback((optId: string, instanceId: string) => {
         // Remove instance from flowOptions and any connections/modal positions that reference it
@@ -1360,6 +1384,12 @@ const Widgets: React.FC = () => {
     const increasePlots = useCallback(() => {
         // Add an instance to the first existing basic option, or create a new basic flow option if none
         const basicOpts = flowOptions.filter(o => o.type === 'basic');
+        // Count existing basic instances to enforce MAX_PLOT_INSTANCES
+        const existingCount = basicOpts.reduce((acc, o) => acc + (((o as any).instances || []).length || (o.count || 1)), 0);
+        if (existingCount >= MAX_PLOT_INSTANCES) {
+            try { showToast(`Maximum of ${MAX_PLOT_INSTANCES} plots reached`, 'info'); } catch (e) { }
+            return;
+        }
         if (basicOpts.length > 0) {
             // Prefer the currently selected basic option if present, otherwise fall back to the first
             const selectedBasic = basicOpts.find(o => (o as any).selected) || basicOpts[0];
@@ -1378,7 +1408,7 @@ const Widgets: React.FC = () => {
             const adjTop = Math.round(100 / s);
             return ({ ...prev, [id]: pixelToNormalized(adjLeft, adjTop) });
         });
-    }, [flowOptions, addBasicInstance, flowScale]);
+    }, [flowOptions, addBasicInstance, flowScale, showToast]);
 
     const decreasePlots = useCallback(() => {
         // Remove the last created basic instance across all basic options
@@ -1844,36 +1874,62 @@ const Widgets: React.FC = () => {
                                 </div>
 
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 8 }}>
-                                    {([
-                                        { id: 'spiderplot', label: 'Spider Plot', desc: 'Radial multi-channel view' },
-                                        { id: 'FFTGraph', label: 'FFT', desc: 'Frequency spectrum' },
-                                        { id: 'envelope', label: 'Envelope', desc: 'Amplitude envelope' },
-                                        { id: 'candle', label: 'Candle', desc: 'Candlestick chart' },
-                                        { id: 'bandpower', label: 'Bandpower', desc: 'Power in frequency bands' },
-                                        { id: 'filter', label: 'Filter', desc: 'Signal transforms' },
-                                        { id: 'basic', label: 'Plot', desc: 'Real-time plot' },
-                                    ] as Array<any>).filter(it => !appFilter || String(it.label).toLowerCase().includes(appFilter.toLowerCase())).map(item => {
-                                        const th = themeForId(String(item.id));
-                                        return (
-                                            <div
-                                                key={item.id}
-                                                draggable
-                                                onDragStart={(e) => { try { e.dataTransfer.setData('application/widget-type', item.id); e.dataTransfer.effectAllowed = 'copy'; } catch (err) { } }}
-                                                onMouseEnter={e => { const t = e.currentTarget as HTMLElement; t.style.transform = 'translateY(-4px)'; t.style.boxShadow = '0 12px 30px rgba(2,6,23,0.08)'; }}
-                                                onMouseLeave={e => { const t = e.currentTarget as HTMLElement; t.style.transform = 'translateY(0px)'; t.style.boxShadow = '0 1px 2px rgba(0,0,0,0.04)'; }}
-                                                style={{ cursor: 'grab', padding: '10px 12px', background: th.bg, border: `1px solid ${th.border}`, borderRadius: 10, boxShadow: th.shadow, color: th.text, transition: 'transform 140ms ease, box-shadow 140ms ease', display: 'flex', alignItems: 'center', gap: 10 }}
-                                            >
-                                                <div style={{ width: 36, height: 36, borderRadius: 8, background: th.border, display: 'flex', alignItems: 'center', justifyContent: 'center', color: th.text, fontWeight: 700, fontSize: 12 }}>
-                                                    {item.label.split(' ').map((s: string) => s.charAt(0)).slice(0, 2).join('')}
+                                    {/* Applications grouped into logical sections */}
+                                    {(() => {
+                                        const sections = [
+                                            {
+                                                title: 'Addition',
+                                                items: [
+                                                    { id: 'filter', label: 'Filter', desc: 'Signal transforms' },
+                                                    { id: 'envelope', label: 'Envelope', desc: 'Amplitude envelope' },
+                                                ]
+                                            },
+                                            {
+                                                title: 'Visualization',
+                                                items: [
+                                                    { id: 'spiderplot', label: 'Spider Plot', desc: 'Radial multi-channel view' },
+                                                    { id: 'FFTGraph', label: 'FFT', desc: 'Frequency spectrum' },
+                                                    { id: 'candle', label: 'Candle', desc: 'Candlestick chart' },
+                                                    { id: 'bandpower', label: 'Bandpower', desc: 'Power in frequency bands' },
+                                                    { id: 'basic', label: 'Plot', desc: 'Real-time plot' },
+                                                ]
+                                            }
+                                        ];
+
+                                        return sections.map(section => {
+                                            const visible = section.items.filter(it => !appFilter || String(it.label).toLowerCase().includes(appFilter.toLowerCase()));
+                                            if (!visible || visible.length === 0) return null;
+                                            return (
+                                                <div key={section.title}>
+                                                    <div style={{ fontSize: 12, fontWeight: 800, color: '#374151', margin: '6px 0' }}>{section.title}</div>
+                                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                                                        {visible.map(item => {
+                                                            const th = themeForId(String(item.id));
+                                                            return (
+                                                                <div
+                                                                    key={item.id}
+                                                                    draggable
+                                                                    onDragStart={(e) => { try { e.dataTransfer.setData('application/widget-type', item.id); e.dataTransfer.effectAllowed = 'copy'; } catch (err) { } }}
+                                                                    onMouseEnter={e => { const t = e.currentTarget as HTMLElement; t.style.transform = 'translateY(-4px)'; t.style.boxShadow = '0 12px 30px rgba(2,6,23,0.08)'; }}
+                                                                    onMouseLeave={e => { const t = e.currentTarget as HTMLElement; t.style.transform = 'translateY(0px)'; t.style.boxShadow = '0 1px 2px rgba(0,0,0,0.04)'; }}
+                                                                    style={{ cursor: 'grab', padding: '10px 12px', background: th.bg, border: `1px solid ${th.border}`, borderRadius: 10, boxShadow: th.shadow, color: th.text, transition: 'transform 140ms ease, box-shadow 140ms ease', display: 'flex', alignItems: 'center', gap: 10 }}
+                                                                >
+                                                                    <div style={{ width: 36, height: 36, borderRadius: 8, background: th.border, display: 'flex', alignItems: 'center', justifyContent: 'center', color: th.text, fontWeight: 700, fontSize: 12 }}>
+                                                                        {item.label.split(' ').map((s: string) => s.charAt(0)).slice(0, 2).join('')}
+                                                                    </div>
+                                                                    <div style={{ flex: 1 }}>
+                                                                        <div style={{ fontWeight: 700, fontSize: 14 }}>{item.label}</div>
+                                                                        <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>{item.desc}</div>
+                                                                    </div>
+                                                                    <div style={{ fontSize: 12, color: '#6b7280' }}>+</div>
+                                                                </div>
+                                                            );
+                                                        })}
+                                                    </div>
                                                 </div>
-                                                <div style={{ flex: 1 }}>
-                                                    <div style={{ fontWeight: 700, fontSize: 14 }}>{item.label}</div>
-                                                    <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>{item.desc}</div>
-                                                </div>
-                                                <div style={{ fontSize: 12, color: '#6b7280' }}>+</div>
-                                            </div>
-                                        );
-                                    })}
+                                            );
+                                        });
+                                    })()}
                                 </div>
                             </div>
 
