@@ -359,9 +359,7 @@ const BasicGraphRealtime = forwardRef((props: BasicGraphRealtimeProps, ref) => {
     
     if (!line || !buffer) return;
 
-    try {
-      // console.debug(`[BasicGraph${instanceId ? `:${instanceId}` : ''}] pushData`, { channelId, newValue });
-    } catch (err) {}
+    // (debug logging removed)
 
     // Overwrite at current sweep position
     let sweep = sweepPositionsRef.current.get(channelId) || 0;
@@ -378,7 +376,7 @@ const BasicGraphRealtime = forwardRef((props: BasicGraphRealtimeProps, ref) => {
   // provider (that would create a feedback loop). The subscription returns
   // an unsubscribe function which we call on cleanup.
   const { subscribeToSampleBatches } = useChannelData();
-  const { subscribeToControlEvents } = useChannelData();
+  const { subscribeToControlEvents, publishWidgetOutputs } = useChannelData();
   useEffect(() => {
     if (!allowDeviceSamples) return;
 
@@ -400,8 +398,8 @@ const BasicGraphRealtime = forwardRef((props: BasicGraphRealtimeProps, ref) => {
             // Plot-level missing-sample detection: look for gaps in the 8-bit
             // device counter. We check continuity with the last seen counter
             // (possibly observed in previous batches or via imperative updates)
-            try {
-              if (counters.length > 0) {
+        try {
+          if (counters.length > 0) {
                 let prev = previousCounterRef.current;
                 let totalMissing = 0;
                 const nonSeqIndices: number[] = [];
@@ -421,9 +419,7 @@ const BasicGraphRealtime = forwardRef((props: BasicGraphRealtimeProps, ref) => {
                 const now = Date.now();
                 if (totalMissing > 0 && now - lastMissingWarnRef.current > 1000) {
                   lastMissingWarnRef.current = now;
-                  try {
-                    // console.warn(`[BasicGraph${instanceId ? `:${instanceId}` : ''}] detected missing samples in sampleBatch`, { batchSize: sampleBatch.length, seqs, counters, totalMissing, nonSeqIndices });
-                  } catch (err) { /* swallow */ }
+                  // missing-sample warning suppressed in production
                 }
                 // Update previousCounterRef to last seen counter in this batch
                 previousCounterRef.current = prev as number | null;
@@ -457,9 +453,7 @@ const BasicGraphRealtime = forwardRef((props: BasicGraphRealtimeProps, ref) => {
                 firstPreview[ch.id] = null;
               }
             }
-            // Print the concise summary and the full batch (if you need to inspect values)
-            // console.info(`[BasicGraph${instanceId ? `:${instanceId}` : ''}] batch=${sampleBatch.length} seqs=`, seqs, 'counters=', counters, 'firstPreview=', firstPreview);
-            // console.debug(`[BasicGraph${instanceId ? `:${instanceId}` : ''}] fullSampleBatch=`, sampleBatch);
+            // (debug logging removed)
           } catch (err) {
             // swallow logging errors
           }
@@ -474,33 +468,50 @@ const BasicGraphRealtime = forwardRef((props: BasicGraphRealtimeProps, ref) => {
   // defensive to avoid crashes on unexpected packet shapes.
       try {
         for (const sample of sampleBatch) {
+          // Build an array of processed values in the same channel order so
+          // we can publish the widget's output as an array (or single number)
+          // for subscribers that connect to this widget's output handle.
+          const perSampleValues: number[] = [];
           for (const ch of channels) {
             try {
-              if (!ch || !ch.visible) continue;
+              if (!ch || !ch.visible) { perSampleValues.push(0); continue; }
               const m = String(ch.id).match(/ch(\d+)/i);
-              if (!m) continue;
+              if (!m) { perSampleValues.push(0); continue; }
               const parsed = parseInt(m[1], 10);
               const candidates = [`ch${parsed}`, `ch${Math.max(0, parsed - 1)}`, `ch${parsed + 1}`];
               let selectedKey: string | null = null;
               for (const k of candidates) {
                 if ((sample as any)[k] !== undefined) { selectedKey = k; break; }
               }
-              if (!selectedKey) continue;
+              if (!selectedKey) { perSampleValues.push(0); continue; }
               const raw = (sample as any)._raw as Record<string, any> | undefined;
-              // Provider emits normalized processed values (-1..1). Use them
-              // directly; otherwise normalize the preserved raw sample.
               const processedVal = selectedKey ? (sample as any)[selectedKey as string] : undefined;
               const v = processedVal !== undefined
                 ? Number(processedVal)
                 : normalizeValue(selectedKey && raw && raw[selectedKey as string] !== undefined ? Number(raw[selectedKey as string]) : 0);
+
+              // enqueue for local plotting
               const q = pendingPerChannel.current.get(ch.id) || [];
               q.push(v);
               if (q.length > bufferSize * 4) q.splice(0, q.length - bufferSize * 4);
               pendingPerChannel.current.set(ch.id, q);
+
+              perSampleValues.push(v);
             } catch (err) {
-              // ignore per-sample errors
+              // ignore per-sample errors and publish a zero placeholder
+              try { perSampleValues.push(0); } catch (e) { }
             }
           }
+
+          // Publish widget outputs (if provider API is available and an
+          // instanceId was provided). Use a single number when the widget
+          // is plotting exactly one channel to match other widgets' expectations.
+          try {
+            if (publishWidgetOutputs && instanceId) {
+              if (perSampleValues.length === 1) publishWidgetOutputs(String(instanceId), perSampleValues[0]);
+              else publishWidgetOutputs(String(instanceId), perSampleValues.slice());
+            }
+          } catch (err) { /* swallow publish errors */ }
         }
       } catch (err) {
         // swallow
@@ -554,10 +565,10 @@ const BasicGraphRealtime = forwardRef((props: BasicGraphRealtimeProps, ref) => {
         // Counter detection when data is an array and first element is a counter
         if (Array.isArray(data) && data.length > 0) {
           const cnt = Number(data[0]);
-          if (previousCounterRef.current !== null) {
+            if (previousCounterRef.current !== null) {
             const expected = (previousCounterRef.current + 1) & 0xff;
             if (cnt !== expected) {
-              // console.warn(`[BasicGraph${instanceId ? `:${instanceId}` : ''}] counter jump previous=${previousCounterRef.current} current=${cnt} expected=${expected}`);
+              // counter jump detected (debug logging removed)
             }
           }
           previousCounterRef.current = cnt;

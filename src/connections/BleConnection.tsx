@@ -36,6 +36,11 @@ export default function BleConnection() {
   // Prefer using the provider-exposed ref when available — this avoids
   // creating local effects in each connection component.
   const providerAddSampleRef = channelData.addSampleRef;
+  // Keep refs for device and characteristic so we can cleanly disconnect
+  const deviceRef = useRef<BluetoothDevice | null>(null);
+  const dataCharRef = useRef<any>(null);
+  const controlCharRef = useRef<any>(null);
+  const unregisterDisconnectRef = useRef<(() => void) | null>(null);
   
   // Refs for functionality
   const scrollContainerRef = useRef<HTMLDivElement>(null)
@@ -158,7 +163,6 @@ export default function BleConnection() {
           lastPacketVerboseRef.current = now
           // Print a concise sample of the packet: counter and channel values
           const samplePreview = newRawValues.slice(0, 8).map(v => ({ cnt: v.counter, ch0: v.ch0, ch1: v.ch1, ch2: v.ch2 }))
-          // console.info('BLE parsed packet samples (preview):', samplePreview, 'totalSamplesInPacket=', newRawValues.length)
         }
       } catch (err) {}
       // Buffer parsed samples and flush to React state at a lower rate to
@@ -253,15 +257,18 @@ export default function BleConnection() {
         optionalServices: [SERVICE_UUID]
       })
 
-      setDevice(selectedDevice)
+  setDevice(selectedDevice)
+  deviceRef.current = selectedDevice
       setIsConnected(true)
   // Inform provider of the device sampling rate so filter modal can auto-populate
   try { channelData.setSamplingRate && channelData.setSamplingRate(SAMPLE_RATE); } catch (e) {}
 
       const server = await selectedDevice.gatt?.connect()
       const service = await server?.getPrimaryService(SERVICE_UUID)
-      const controlChar = await service?.getCharacteristic(CONTROL_CHAR_UUID)
-      const dataChar = await service?.getCharacteristic(DATA_CHAR_UUID)
+  const controlChar = await service?.getCharacteristic(CONTROL_CHAR_UUID)
+  const dataChar = await service?.getCharacteristic(DATA_CHAR_UUID)
+  controlCharRef.current = controlChar
+  dataCharRef.current = dataChar
 
       // Send commands automatically
       setTimeout(async () => {
@@ -269,15 +276,67 @@ export default function BleConnection() {
       }, 500)
 
       // Start notifications
-      await dataChar?.startNotifications()
-      dataChar?.addEventListener("characteristicvaluechanged", handleDataReceived)
+  await dataChar?.startNotifications()
+  dataChar?.addEventListener("characteristicvaluechanged", handleDataReceived)
 
       setReceivedData(['Connected! Starting data collection...'])
+
+      // Register disconnect handler in provider so page-level disconnects work
+      try {
+        if (channelData && typeof channelData.registerConnectionDisconnect === 'function') {
+          unregisterDisconnectRef.current = channelData.registerConnectionDisconnect(doDisconnect);
+          console.info('[BLE] registered disconnect handler in context');
+        }
+      } catch (e) {}
 
     } catch (error) {
       console.error('BLE connection failed:', error)
     }
   }
+
+  // Graceful disconnect handler invoked by global event
+  const doDisconnect = async () => {
+    console.info('[BLE][doDisconnect] start');
+    try {
+      try {
+        if (dataCharRef.current) {
+          console.info('[BLE][doDisconnect] stopping notifications');
+          try { await dataCharRef.current.stopNotifications(); } catch (e) { console.warn('[BLE] stopNotifications error', e); }
+          try { dataCharRef.current.removeEventListener('characteristicvaluechanged', handleDataReceived); } catch (e) { console.warn('[BLE] removeEventListener error', e); }
+          dataCharRef.current = null;
+        }
+      } catch (e) { console.warn('[BLE] dataChar cleanup error', e); }
+
+      try {
+        if (deviceRef.current && deviceRef.current.gatt && deviceRef.current.gatt.connected) {
+          console.info('[BLE][doDisconnect] disconnecting gatt');
+          try { deviceRef.current.gatt.disconnect(); } catch (e) { console.warn('[BLE] gatt.disconnect error', e); }
+        }
+      } catch (e) { console.warn('[BLE] deviceRef disconnect error', e); }
+
+      try { setIsConnected(false); } catch (e) {}
+      try { setReceivedData(prev => [...prev, 'Disconnected']); } catch (e) {}
+      try { channelData.clearSamples && channelData.clearSamples(); } catch (e) { console.warn('[BLE] clearSamples error', e); }
+      console.info('[BLE][doDisconnect] done');
+      try { if (unregisterDisconnectRef.current) { unregisterDisconnectRef.current(); unregisterDisconnectRef.current = null; } } catch (e) {}
+    } catch (err) {
+      console.error('Error during BLE disconnect', err);
+    }
+  }
+
+  // Listen for global disconnect events
+  useEffect(() => {
+    const handler = () => { try { console.info('[BLE] received app:disconnect'); } catch (e) {} ; doDisconnect(); };
+    try { window.addEventListener('app:disconnect', handler as EventListener); } catch (e) {}
+    return () => {
+      try { window.removeEventListener('app:disconnect', handler as EventListener); } catch (e) {}
+      // Note: we intentionally do not automatically unregister the provider-level
+      // disconnect handler here because it is registered only when a connection
+      // is active (in `connect()`) and unregistered by `doDisconnect()` once
+      // the connection is torn down. This avoids removing the handler when the
+      // UI (modal) unmounts while the device remains connected.
+    };
+  }, []);
 
   return (
     <div className="flex flex-col items-center gap-4">

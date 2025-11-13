@@ -65,6 +65,10 @@ export type ChannelDataContextType = {
   // device sample/frame) and delivered as arrays in batch callbacks.
   publishWidgetOutputs?: (widgetId: string, values: number[] | number) => void;
   subscribeToWidgetOutputs?: (widgetId: string, onValues: (vals: number[]) => void) => () => void;
+  // Register a disconnect handler for the currently-mounted connection component
+  registerConnectionDisconnect?: (fn: () => void) => () => void;
+  // Invoke any registered connection disconnect handlers (returns true if any were called)
+  disconnectActiveConnections?: () => boolean;
 };
 
 const ChannelDataContext = createContext<ChannelDataContextType | undefined>(undefined);
@@ -100,6 +104,8 @@ export const ChannelDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
   // Per-widget output buffers and subscribers (for transform nodes like envelope)
   const widgetOutputsRef = useRef<Record<string, number[]>>({});
   const widgetOutputSubscribersRef = useRef<Record<string, Set<(vals: number[]) => void>>>({});
+  // Connection disconnect handlers registry (for connection components to register their cleanup callback)
+  const connectionDisconnectHandlersRef = useRef<Set<() => void>>(new Set());
   // Track observed per-channel raw maximums to help infer the ADC range
   // when the device does not explicitly report ADC resolution. This
   // supports cases where firmware uses 10/12/14-bit ADCs but transmits
@@ -302,23 +308,7 @@ export const ChannelDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
                     const d = (cur - prev + 256) % 256
                     if (d > 1) totalMissing += (d - 1)
                   }
-                  // Always emit a debug-level summary; escalate to warn if gaps exist
-                  // if (totalMissing > 0) {
-                  //   console.warn('[ChannelData] batch detected missing samples', { batchSize: sampleBatch.length, first, last, missing: totalMissing })
-                  // } else {
-                  //   // Rate-limit positive confirmation to avoid noisy logs
-                  //   try {
-                  //     const now = Date.now()
-                  //     if (now - lastOkFlushTimeRef.current > 5000) {
-                  //       console.info('[ChannelData] batch OK: no missing samples', { batchSize: sampleBatch.length, first, last })
-                  //       lastOkFlushTimeRef.current = now
-                  //     } else {
-                  //       console.debug('[ChannelData] batch', { batchSize: sampleBatch.length, first, last })
-                  //     }
-                  //   } catch (err) {
-                  //     console.debug('[ChannelData] batch', { batchSize: sampleBatch.length, first, last })
-                  //   }
-                  // }
+                  // (debug summary logging removed)
                 } catch (err) { }
               }
             } catch (err) {
@@ -384,6 +374,27 @@ export const ChannelDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
   const subscribeToControlEvents = useCallback((onEvent: (e: { type: string; channelIndex?: number }) => void) => {
     controlSubscribersRef.current.add(onEvent);
     return () => { controlSubscribersRef.current.delete(onEvent); };
+  }, []);
+
+  // Register a connection-level disconnect handler. Returns an unregister function.
+  const registerConnectionDisconnect = useCallback((fn: () => void) => {
+    try {
+      connectionDisconnectHandlersRef.current.add(fn);
+    } catch (e) {}
+    return () => {
+      try { connectionDisconnectHandlersRef.current.delete(fn); } catch (e) {}
+    };
+  }, []);
+
+  const disconnectActiveConnections = useCallback(() => {
+    try {
+      const handlers = Array.from(connectionDisconnectHandlersRef.current);
+      if (handlers.length === 0) return false;
+      handlers.forEach(h => { try { h(); } catch (e) { /* ignore per-handler errors */ } });
+      return true;
+    } catch (e) {
+      return false;
+    }
   }, []);
 
   const publishWidgetOutputs = useCallback((widgetId: string, values: number[] | number) => {
@@ -560,16 +571,11 @@ export const ChannelDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
   }, []);
 
   return (
-    <ChannelDataContext.Provider value={{ samples: snapshot, addSample, addSampleRef, clearSamples, setRegisteredChannels, subscribeToSampleBatches, subscribeToControlEvents, setChannelFilters, setChannelSamplingRate, samplingRate, setSamplingRate, adcBits, setAdcBits, publishWidgetOutputs, subscribeToWidgetOutputs }}>
+    <ChannelDataContext.Provider value={{ samples: snapshot, addSample, addSampleRef, clearSamples, setRegisteredChannels, subscribeToSampleBatches, subscribeToControlEvents, setChannelFilters, setChannelSamplingRate, samplingRate, setSamplingRate, adcBits, setAdcBits, publishWidgetOutputs, subscribeToWidgetOutputs, registerConnectionDisconnect, disconnectActiveConnections }}>
       {children}
     </ChannelDataContext.Provider>
   );
 };
-
-// Cleanup any pending rAF on unmount — (not strictly required but tidy)
-// Note: the provider is long-lived in our app, but add for completeness.
-// (We can't use hooks outside component, so nothing else required.)
-
 export const useChannelData = () => {
   const ctx = useContext(ChannelDataContext);
   if (!ctx) throw new Error('useChannelData must be used within ChannelDataProvider');

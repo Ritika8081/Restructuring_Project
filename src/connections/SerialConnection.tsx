@@ -33,6 +33,9 @@ export default function SerialConnection() {
   const [deviceMode, setDeviceMode] = useState<'auto' | 'r4' | '3ch'>('auto');
   
   const readerRef = useRef<any>(null)
+  const portRef = useRef<any>(null)
+  const writerRef = useRef<any>(null)
+  const unregisterDisconnectRef = useRef<(() => void) | null>(null)
   const bufferRef = useRef<number[]>([])
   const sampleIndex = useRef(0)
   const totalSamples = useRef(0)
@@ -88,6 +91,7 @@ export default function SerialConnection() {
       await selectedPort.open({ baudRate: BAUD_RATE })
       
       setDevice(selectedPort)
+      portRef.current = selectedPort
       setIsConnected(true)
       // Preconfigure parsing based on selected deviceMode (user can override auto-detect)
       try {
@@ -120,8 +124,7 @@ export default function SerialConnection() {
       } catch (e) { }
   // Let the provider know the device sampling rate so filters can be configured
   try { channelData.setSamplingRate && channelData.setSamplingRate(sampleRateRef.current); } catch (e) {}
-      readerActiveRef.current = true
-      
+    readerActiveRef.current = true
 
   // Start reading data (this will also inspect initial text responses like WHORU)
   startReading(selectedPort)
@@ -136,6 +139,14 @@ export default function SerialConnection() {
       }, 1000)
       
   setReceivedData(['Connected! Starting data collection...'])
+
+      // Register disconnect handler in provider so page-level disconnects work
+      try {
+        if (channelData && typeof channelData.registerConnectionDisconnect === 'function') {
+          unregisterDisconnectRef.current = channelData.registerConnectionDisconnect(doDisconnect);
+          console.info('[Serial] registered disconnect handler in context');
+        }
+      } catch (e) {}
 
     } catch (error) {
       console.error('Serial connection failed:', error)
@@ -235,6 +246,63 @@ export default function SerialConnection() {
       }
     }
   }
+
+  // Graceful disconnect triggered by app
+  const doDisconnect = async () => {
+    console.info('[Serial][doDisconnect] start');
+    try {
+      // Stop reader
+      try {
+        readerActiveRef.current = false;
+        if (readerRef.current) {
+          console.info('[Serial][doDisconnect] cancelling reader');
+          try { await readerRef.current.cancel(); } catch (e) { console.warn('[Serial] reader.cancel error', e); }
+          try { readerRef.current.releaseLock(); } catch (e) { console.warn('[Serial] reader.releaseLock error', e); }
+          readerRef.current = null;
+        }
+      } catch (e) { console.warn('[Serial] reader cleanup error', e); }
+
+      // Attempt to send STOP and close writer
+      try {
+        const port = portRef.current;
+        if (port && port.writable) {
+          try {
+            console.info('[Serial][doDisconnect] sending STOP');
+            const writer = port.writable.getWriter();
+            try { await writer.write(new TextEncoder().encode('STOP\n')); } catch (e) { console.warn('[Serial] writer.write STOP error', e); }
+            try { writer.releaseLock(); } catch (e) { console.warn('[Serial] writer.releaseLock error', e); }
+          } catch (e) { console.warn('[Serial] writer error', e); }
+        }
+      } catch (e) { console.warn('[Serial] stop/send error', e); }
+
+      // Close port
+      try {
+        if (portRef.current) {
+          console.info('[Serial][doDisconnect] closing port');
+          try { await portRef.current.close(); } catch (e) { console.warn('[Serial] port.close error', e); }
+          portRef.current = null;
+        }
+      } catch (e) { console.warn('[Serial] port close error', e); }
+
+      try { setIsConnected(false); } catch (e) {}
+      try { channelData.clearSamples && channelData.clearSamples(); } catch (e) { console.warn('[Serial] clearSamples error', e); }
+      console.info('[Serial][doDisconnect] done');
+      try { if (unregisterDisconnectRef.current) { unregisterDisconnectRef.current(); unregisterDisconnectRef.current = null; } } catch (e) {}
+    } catch (err) {
+      console.error('Error during serial disconnect', err)
+    }
+  }
+
+  useEffect(() => {
+    const handler = () => { try { console.info('[Serial] received app:disconnect'); } catch (e) {} ; doDisconnect(); };
+    try { window.addEventListener('app:disconnect', handler as EventListener); } catch (e) {}
+    return () => {
+      try { window.removeEventListener('app:disconnect', handler as EventListener); } catch (e) {}
+      // See note in BLE connection: we register the provider-level disconnect
+      // handler when a connection is established (in `connect()`), and it is
+      // unregistered by `doDisconnect()` after the connection is torn down.
+    };
+  }, []);
 
   const handleDataReceived = () => {
     const buffer = bufferRef.current

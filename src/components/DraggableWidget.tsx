@@ -641,18 +641,7 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
                             // (not when it's a Plot arranged with a channelIndex).
                             const allowDevice = connChannels.length > 0 || (isChannelWidget && widget.type !== 'basic');
 
-                            // Debug: log why this BasicGraph is allowed to consume device data
-                            // (temporary; remove after troubleshooting)
-                            // try {
-                            //     // use console.debug so normal logs stay clean
-                            //     console.debug('[DraggableWidget] BasicGraph render', {
-                            //         widgetId: widget.id,
-                            //         allowDevice,
-                            //         finalChannels,
-                            //         incomingConnections,
-                            //         isChannelWidget,
-                            //     });
-                            // } catch (err) {}
+                            // (debug logging removed)
 
                             return (
                                 <div className="w-full h-full overflow-hidden flex items-center justify-center p-0.5">
