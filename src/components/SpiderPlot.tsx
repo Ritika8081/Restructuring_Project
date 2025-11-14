@@ -9,7 +9,7 @@
  *
  * Exports: default SpiderPlot React component
  */
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { WebglPlot, WebglLine, ColorRGBA } from 'webgl-plot';
 import { useChannelData } from '@/lib/channelDataContext';
 
@@ -36,6 +36,9 @@ interface SpiderPlotProps {
     backgroundColor?: string;
     webLevels?: number;
     animated?: boolean;
+    // Optional widget id: when provided the component will publish
+    // computed bandpower values via channelData.publishWidgetOutputs(widgetId, values)
+    widgetId?: string;
 }
 
 const SpiderPlot: React.FC<SpiderPlotProps> = ({
@@ -55,6 +58,8 @@ const SpiderPlot: React.FC<SpiderPlotProps> = ({
     backgroundColor = 'rgba(131, 128, 128, 0.02)',
     webLevels = 5,
     animated = true
+    ,
+    widgetId
 }) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const plotRef = useRef<WebglPlot | null>(null);
@@ -62,6 +67,7 @@ const SpiderPlot: React.FC<SpiderPlotProps> = ({
     const dataUpdateRef = useRef<NodeJS.Timeout | null>(null);
     const [isInitialized, setIsInitialized] = useState(false);
     const [animatedData, setAnimatedData] = useState<SpiderPlotData[]>([]);
+    const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
 
     // --- live data worker integration -------------------------------------------------
     // Configuration: choose channel index (0 = ch0) and FFT parameters
@@ -73,7 +79,7 @@ const SpiderPlot: React.FC<SpiderPlotProps> = ({
 
     const workerRef = useRef<Worker | null>(null);
     const lastPostRef = useRef<number>(0);
-    const { samples } = useChannelData();
+    const { samples, publishWidgetOutputs } = useChannelData();
     const hasLiveData = !!(samples && samples.length >= FFT_SIZE);
     // -------------------------------------------------------------------------------
 
@@ -140,6 +146,15 @@ const SpiderPlot: React.FC<SpiderPlotProps> = ({
                 maxValue: 100
             }));
             setAnimatedData(newData);
+            // Publish computed band values when a widgetId is provided so downstream
+            // nodes can subscribe using the channel data provider.
+            try {
+                if (typeof publishWidgetOutputs === 'function' && widgetId) {
+                    const wid = String(widgetId);
+                    const vals = newData.map(d => d.value);
+                    publishWidgetOutputs(wid, vals);
+                }
+            } catch (err) { /* ignore publish errors */ }
         };
 
         w.addEventListener('message', handleMessage);
@@ -174,6 +189,17 @@ const SpiderPlot: React.FC<SpiderPlotProps> = ({
     }, [samples]);
 
     const plotData = animatedData;
+
+    // Determine the dominant band for a small badge overlay
+    const dominant = useMemo(() => {
+        if (!plotData || plotData.length === 0) return null;
+        let max = -Infinity;
+        let idx = 0;
+        for (let i = 0; i < plotData.length; i++) {
+            if ((plotData[i].value ?? 0) > max) { max = plotData[i].value ?? 0; idx = i; }
+        }
+        return { index: idx, label: plotData[idx].label, value: Math.round(plotData[idx].value ?? 0) };
+    }, [plotData]);
 
     // Convert hex color to ColorRGBA
     const hexToColorRGBA = (hex: string, alpha: number = 1.0): ColorRGBA => {
@@ -446,7 +472,7 @@ const SpiderPlot: React.FC<SpiderPlotProps> = ({
     return (
         <div 
             className={`relative ${className}`} 
-            style={{ width, height, backgroundColor, borderRadius: '8px', overflow: 'hidden' }}
+            style={{ width, height, borderRadius: '10px', overflow: 'hidden', background: `linear-gradient(180deg, ${backgroundColor} 0%, rgba(255,255,255,0.6) 100%)` }}
         >
             <canvas
                 ref={canvasRef}
@@ -456,6 +482,8 @@ const SpiderPlot: React.FC<SpiderPlotProps> = ({
                     height: '100%',
                     backgroundColor: 'transparent'
                 }}
+                // enable pointer events on canvas for future hover interactions
+                onMouseLeave={() => setHoveredIndex(null)}
             />
             
             {/* HTML Labels Overlay */}
@@ -497,6 +525,28 @@ const SpiderPlot: React.FC<SpiderPlotProps> = ({
                     ))}
                 </div>
             )}
+
+            {/* Dominant band badge */}
+            {dominant && (
+                <div style={{ position: 'absolute', left: 12, top: 12, background: 'rgba(255,255,255,0.9)', padding: '6px 8px', borderRadius: 8, display: 'flex', alignItems: 'center', boxShadow: '0 6px 18px rgba(2,6,23,0.06)' }}>
+                    <div style={{ width: 10, height: 10, borderRadius: 3, background: getBrainwaveColor(dominant.label), marginRight: 8 }} />
+                    <div style={{ fontSize: 12, fontWeight: 700, color: '#0f172a' }}>{dominant.label}</div>
+                    <div style={{ marginLeft: 8, fontSize: 12, color: '#475569', fontWeight: 600 }}>{dominant.value}</div>
+                </div>
+            )}
+
+            {/* Legend (swatches + values) */}
+            <div style={{ position: 'absolute', left: 0, right: 0, bottom: 6, display: 'flex', justifyContent: 'center', pointerEvents: 'auto' }}>
+                <div style={{ display: 'flex', gap: 8, padding: '6px 8px', borderRadius: 999, background: 'rgba(255,255,255,0.6)', backdropFilter: 'blur(6px)', boxShadow: '0 6px 18px rgba(2,6,23,0.06)' }}>
+                    {plotData.map((d, i) => (
+                        <div key={`legend-${i}`} onMouseEnter={() => setHoveredIndex(i)} onMouseLeave={() => setHoveredIndex(null)} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '2px 6px', borderRadius: 6, cursor: 'default', transform: hoveredIndex === i ? 'scale(1.05)' : 'scale(1)', transition: 'transform 180ms ease' }}>
+                            <div style={{ width: 10, height: 10, borderRadius: 3, background: getBrainwaveColor(d.label) }} />
+                            <div style={{ fontSize: 12, fontWeight: 600, color: hoveredIndex === i ? '#0f172a' : '#374151' }}>{d.label}</div>
+                            <div style={{ fontSize: 12, fontWeight: 700, color: '#0f172a', minWidth: 30, textAlign: 'right' }}>{Math.round(d.value)}</div>
+                        </div>
+                    ))}
+                </div>
+            </div>
 
             {/* Animation indicator */}
             {animated && (

@@ -26,8 +26,10 @@ const CandleChart: React.FC<CandleChartProps> = ({
   height = '100%',
   betaPower = 0,
   isFullPage = false,
-  threshold = 10,
-  minVisible = 0.05,
+  // Lower default threshold so small beta values produce visible flame
+  threshold = 0,
+  // Slightly larger minimum so very small signals still show a hint of flame
+  minVisible = 0.06,
   backgroundColor = 'transparent',
 }) => {
   const clampedThreshold = Math.max(0, Math.min(100, threshold));
@@ -35,9 +37,11 @@ const CandleChart: React.FC<CandleChartProps> = ({
 
   // Map betaPower to a 0..1 brightness value relative to threshold
   const raw = typeof betaPower === 'number' ? betaPower : 0;
-  const scaled = raw <= clampedThreshold ? 0 : (raw - clampedThreshold) / Math.max(1, (100 - clampedThreshold));
+  const linear = raw <= clampedThreshold ? 0 : (raw - clampedThreshold) / Math.max(1, (100 - clampedThreshold));
+  // Apply a mild nonlinear curve to amplify low values (sqrt-like)
+  const curved = linear > 0 ? Math.pow(linear, 0.7) : 0;
   // final brightness in [0,1], clamped and including minVisible when >0
-  const brightness = scaled > 0 ? Math.max(clampedMinVisible, Math.min(1, scaled)) : 0;
+  const brightness = curved > 0 ? Math.max(clampedMinVisible, Math.min(1, curved)) : 0;
   const [displayBrightness, setDisplayBrightness] = useState(0);
 
   useEffect(() => {
@@ -54,22 +58,17 @@ const CandleChart: React.FC<CandleChartProps> = ({
     return () => clearInterval(timer);
   }, [betaPower]);
 
+  // Deterministic flame path generator (no randomness) — simpler and cheaper
   const generateFlamePath = (w = 200, h = 300) => {
     const midX = w / 2;
     const topY = 40;
     const bottomY = h - 30;
-    const controlOffset = 20 + (Math.random() - 0.5) * 10 * displayBrightness;
-    const leftX = midX - 30 - Math.random() * 10 * displayBrightness;
-    const rightX = midX + 30 + Math.random() * 10 * displayBrightness;
+    // control offset proportional to brightness to make flame taller/wider
+    const controlOffset = 20 + displayBrightness * 18;
+    const leftX = midX - 30 - displayBrightness * 8;
+    const rightX = midX + 30 + displayBrightness * 8;
 
-    return `
-      M ${midX} ${topY}
-      C ${midX - controlOffset} ${topY + 40}, ${leftX} ${topY + 90}, ${leftX} ${topY + 160}
-      C ${leftX} ${topY + 200}, ${midX} ${bottomY - 40}, ${midX} ${bottomY}
-      C ${midX} ${bottomY - 40}, ${rightX} ${topY + 200}, ${rightX} ${topY + 160}
-      C ${rightX} ${topY + 90}, ${midX + controlOffset} ${topY + 40}, ${midX} ${topY}
-      Z
-    `;
+    return `M ${midX} ${topY} C ${midX - controlOffset} ${topY + 40}, ${leftX} ${topY + 90}, ${leftX} ${topY + 160} C ${leftX} ${topY + 200}, ${midX} ${bottomY - 40}, ${midX} ${bottomY} C ${midX} ${bottomY - 40}, ${rightX} ${topY + 200}, ${rightX} ${topY + 160} C ${rightX} ${topY + 90}, ${midX + controlOffset} ${topY + 40}, ${midX} ${topY} Z`;
   };
 
   return (
@@ -99,38 +98,26 @@ const CandleChart: React.FC<CandleChartProps> = ({
           >
             <defs>
               <linearGradient id="outerFlame" x1="0" x2="0" y1="0" y2="1">
-                <stop offset="0%" stopColor={`rgba(255,140,0, ${displayBrightness * 0.7})`} />
-                <stop offset="100%" stopColor={`rgba(255,69,0, ${displayBrightness * 0.25})`} />
+                <stop offset="0%" stopColor={`rgba(255,140,0, ${Math.min(1, displayBrightness * 1.0)})`} />
+                <stop offset="100%" stopColor={`rgba(255,69,0, ${Math.min(1, displayBrightness * 0.6)})`} />
               </linearGradient>
               <linearGradient id="innerFlame" x1="0" x2="0" y1="0" y2="1">
-                <stop offset="0%" stopColor={`rgba(255,225,120, ${displayBrightness * 0.95})`} />
-                <stop offset="100%" stopColor={`rgba(255,165,0, ${displayBrightness * 0.6})`} />
+                <stop offset="0%" stopColor={`rgba(255,225,120, ${Math.min(1, displayBrightness * 1.0)})`} />
+                <stop offset="100%" stopColor={`rgba(255,165,0, ${Math.min(1, displayBrightness * 0.8)})`} />
               </linearGradient>
-              <filter id="softBlur">
-                <feGaussianBlur stdDeviation="6" />
-              </filter>
-              <filter id="glow">
-                <feGaussianBlur stdDeviation="3" result="coloredBlur" />
-                <feMerge>
-                  <feMergeNode in="coloredBlur" />
-                  <feMergeNode in="SourceGraphic" />
-                </feMerge>
-              </filter>
             </defs>
 
             <path
               d={generateFlamePath()}
               fill="url(#outerFlame)"
-              filter="url(#softBlur)"
               className="transition-all duration-300"
-              style={{ opacity: Math.min(1, displayBrightness) * 0.8 }}
+              style={{ opacity: Math.min(1, displayBrightness) * 0.95 }}
             />
             <path
               d={generateFlamePath()}
               fill="url(#innerFlame)"
-              filter="url(#glow)"
               className="transition-all duration-300"
-              style={{ opacity: Math.min(1, displayBrightness) }}
+              style={{ opacity: Math.min(1, displayBrightness) * 1.0 }}
             />
           </svg>
         </div>
@@ -151,7 +138,7 @@ const CandleChart: React.FC<CandleChartProps> = ({
                 transform: isFullPage ? 'scale(1.15)' : 'scale(1)',
               }}
             >
-              {Number.isFinite(betaPower) ? String(Math.floor(betaPower)).padStart(2, '0') : '00'}
+              {Number.isFinite(betaPower) ? String(Math.round(betaPower)).padStart(2, '0') : '00'}
             </div>
           </div>
           <div className="absolute inset-0 bg-white/5 rounded-b-lg" />

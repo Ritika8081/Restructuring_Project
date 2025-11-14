@@ -39,6 +39,10 @@ type DraggableWidgetProps = {
 };
 
 const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onRemove, gridSettings, dragState, setDragState, onUpdateWidget, children, incomingConnections = [] }) => {
+    // Debug: log incoming connections for this dashboard widget to help trace flow wiring
+    useEffect(() => {
+        try { console.debug(`[DraggableWidget:${widget.id}] incomingConnections`, incomingConnections); } catch (e) { }
+    }, [widget.id, incomingConnections]);
     // Widget-specific channel state (for basic signal widgets)
     // Prefer explicit `widget.channelIndex` (set by the arranger) and fall back to parsing widget.id
     const [widgetChannels, setWidgetChannels] = useState<any[]>(() => {
@@ -101,7 +105,53 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
     }, [widget.id, (widget as any).channelIndex]);
 
     // Global channel samples from context (used by multiple widget render paths)
-    const { samples, subscribeToWidgetOutputs, samplingRate } = useChannelData();
+    const { samples, subscribeToWidgetOutputs, samplingRate, publishWidgetOutputs } = useChannelData();
+
+    // Candle widget: prefer published bandpower (beta) values from upstream
+    // bandpower/statistic widgets. If the upstream source is a raw channel
+    // (channel-#) we still compute beta from recent samples as a fallback.
+    const [candleBeta, setCandleBeta] = React.useState<number>(0);
+    React.useEffect(() => {
+        if (widget.type !== 'candle') return;
+        try {
+            setCandleBeta(0);
+            if (!incomingConnections || incomingConnections.length === 0) return;
+            const src = String(incomingConnections[0] || '');
+            // Subscribe to upstream publishes regardless of whether the source
+            // is a widget instance or a channel; the provider/router now
+            // ensures channels and bandpower widgets publish a canonical
+            // numeric beta percent where applicable.
+            if (!subscribeToWidgetOutputs) return;
+            const unsub = subscribeToWidgetOutputs(src, (vals) => {
+                try {
+                    try { console.debug(`[DraggableWidget:${widget.id}] candle subscriber received`, { src, vals }); } catch (e) { }
+                    if (!vals || vals.length === 0) return;
+                    const last = vals[vals.length - 1];
+                    let v: number | undefined = undefined;
+                    // Strict behavior: accept either a numeric publish or an
+                    // array-shaped band vector where index 1 is Beta. Do NOT
+                    // fallback to index 0 or coerce other shapes — require
+                    // upstream to publish explicit Beta values for Candle.
+                    if (typeof last === 'number') v = last as number;
+                    else if (Array.isArray(last) && last.length > 1 && typeof last[1] === 'number') {
+                        v = last[1] as number;
+                    } else {
+                        // unknown shape — ignore
+                        return;
+                    }
+
+                    try { console.debug(`[DraggableWidget:${widget.id}] candle computed beta (raw)`, v); } catch (e) { }
+                    // Normalize relative fractions to percent and clamp
+                    let numeric = Number(v) || 0;
+                    if (numeric > 0 && numeric <= 1) numeric = numeric * 100;
+                    numeric = Math.max(0, Math.min(100, numeric));
+                    try { console.debug(`[DraggableWidget:${widget.id}] candle computed beta (scaled %)`, numeric); } catch (e) { }
+                    setCandleBeta(numeric);
+                } catch (err) { /* ignore per-callback errors */ }
+            });
+            return () => { try { if (unsub) unsub(); } catch (e) { } };
+        } catch (err) { /* swallow */ }
+    }, [widget.type, JSON.stringify(incomingConnections || []), subscribeToWidgetOutputs]);
 
     // FFT input data computed from the first incoming channel connection (if any)
     const [fftInputData, setFftInputData] = useState<number[] | undefined>(undefined);
@@ -375,39 +425,11 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
     // Bandpower state for statistic widgets
     const [bandStats, setBandStats] = React.useState<Array<{ label: string; value: number }>>([]);
 
-    // If this basic widget receives upstream widget outputs (non-channel ids),
-    // subscribe to those outputs and push values into the BasicGraph via
-    // its imperative `updateData` API so users can connect any widget output
-    // to this plot without changing code elsewhere.
-    useEffect(() => {
-        if (widget.type !== 'basic') return;
-        if (!incomingConnections || incomingConnections.length === 0) return;
-        const sources = incomingConnections.filter(id => { try { return !String(id).startsWith('channel-'); } catch (e) { return false; } });
-        if (sources.length === 0) return;
-        if (!subscribeToWidgetOutputs) return;
-
-        const unsubs: Array<() => void> = [];
-        for (const s of sources) {
-            try {
-                const unsub = subscribeToWidgetOutputs(String(s), (vals) => {
-                    try {
-                        if (!basicGraphRef.current) return;
-                        for (const v of vals) {
-                            if (typeof v === 'number') {
-                                // push as single-element array so selectedChannels maps it
-                                try { basicGraphRef.current.updateData([v]); } catch (e) { /* ignore */ }
-                            } else if (Array.isArray(v)) {
-                                try { basicGraphRef.current.updateData(v as any); } catch (e) { }
-                            }
-                        }
-                    } catch (err) { /* ignore per-callback errors */ }
-                });
-                if (unsub) unsubs.push(unsub);
-            } catch (err) { /* ignore subscribe errors */ }
-        }
-
-        return () => { for (const u of unsubs) try { u(); } catch (e) { } };
-    }, [widget.type, incomingConnections, subscribeToWidgetOutputs]);
+    // NOTE: BasicGraph now subscribes directly to upstream widget outputs when
+    // `incomingConnections` is provided. We previously forwarded upstream widget
+    // streams here into BasicGraph via its imperative API, which caused duplicate
+    // subscriptions and doubled samples. That forwarding path was removed to
+    // avoid duplication; BasicGraph handles widget-output subscriptions itself.
 
     // Compute band powers for statistic/bargraph widgets from upstream sources
     useEffect(() => {
@@ -432,11 +454,16 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
                 const srcIdx = start + (i - offset);
                 input[i] = (srcIdx >= start && srcIdx < recent.length) ? ((recent[srcIdx] as any)[key] ?? 0) : 0;
             }
-            try {
-                const { relative } = computeBandPowers(input, sr, fftSize);
-                const data = Object.keys(BANDS).map(b => ({ label: b, value: (relative as any)[b] * 100 }));
-                setBandStats(data);
-            } catch (err) { /* ignore */ }
+                try {
+                    const { relative } = computeBandPowers(input, sr, fftSize);
+                    const data = Object.keys(BANDS).map(b => ({ label: b, value: (relative as any)[b] * 100 }));
+                    setBandStats(data);
+                    // Publish beta band (as single numeric value) for other widgets to subscribe
+                    try {
+                        const betaVal = ((relative as any).beta || 0) * 100;
+                        if (publishWidgetOutputs) publishWidgetOutputs(String(widget.id), betaVal);
+                    } catch (e) { /* ignore publish errors */ }
+                } catch (err) { /* ignore */ }
             return;
         }
 
@@ -444,19 +471,51 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
         if (!subscribeToWidgetOutputs) return;
         const buffer: number[] = new Array(fftSize).fill(0);
         let idx = 0;
+        const bandKeys = Object.keys(BANDS);
         const unsub = subscribeToWidgetOutputs(src, (vals) => {
             try {
+                // If upstream publisher sends full band arrays (e.g. SpiderPlot publishes [a,b,g,t,d])
+                // handle that shape directly: map into bandStats and publish beta. Otherwise
+                // treat values as a numeric stream and build a rolling buffer as before.
+                let handledArray = false;
                 for (const v of vals) {
+                    if (Array.isArray(v) && v.length >= bandKeys.length && v.every(el => typeof el === 'number')) {
+                        // Map published band-array into StatisticGraph-compatible data
+                        const arr = v as number[];
+                        const data = bandKeys.map((b, i) => ({ label: b, value: (arr[i] ?? 0) * 100 }));
+                        setBandStats(data);
+                        // Publish beta band (index 'beta' if present)
+                        try {
+                            const betaIdx = bandKeys.indexOf('beta');
+                            const betaVal = betaIdx >= 0 ? ((arr[betaIdx] ?? 0) * 100) : 0;
+                            if (publishWidgetOutputs) publishWidgetOutputs(String(widget.id), betaVal);
+                        } catch (e) { /* ignore publish errors */ }
+                        handledArray = true;
+                        // continue processing other vals but don't append arrays into scalar buffer
+                        continue;
+                    }
+
+                    // Fallback: numeric streaming values
                     buffer[idx] = typeof v === 'number' ? v : 0;
                     idx = (idx + 1) % fftSize;
                 }
-                // Build aligned signal
-                const signal: number[] = new Array(fftSize);
-                let p = idx;
-                for (let i = 0; i < fftSize; i++) { signal[i] = buffer[p]; p = (p + 1) % fftSize; }
-                const { relative } = computeBandPowers(signal, sr, fftSize);
-                const data = Object.keys(BANDS).map(b => ({ label: b, value: (relative as any)[b] * 100 }));
-                setBandStats(data);
+
+                // If we handled at least one full band-array, we already updated bandStats above.
+                // If not, compute bandpowers from the rolling numeric buffer as before.
+                if (!handledArray) {
+                    // Build aligned signal
+                    const signal: number[] = new Array(fftSize);
+                    let p = idx;
+                    for (let i = 0; i < fftSize; i++) { signal[i] = buffer[p]; p = (p + 1) % fftSize; }
+                    const { relative } = computeBandPowers(signal, sr, fftSize);
+                    const data = bandKeys.map(b => ({ label: b, value: (relative as any)[b] * 100 }));
+                    setBandStats(data);
+                    // Publish beta band (as single numeric value) for other widgets to subscribe
+                    try {
+                        const betaVal = ((relative as any).beta || 0) * 100;
+                        if (publishWidgetOutputs) publishWidgetOutputs(String(widget.id), betaVal);
+                    } catch (e) { /* ignore publish errors */ }
+                }
             } catch (err) { /* ignore per-callback errors */ }
         });
         return () => { try { unsub(); } catch (e) { } };
@@ -486,6 +545,11 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
                         </div>
                     }
                 >
+                    {/* Visible debug overlay showing upstream incomingConnections */}
+                    <div style={{ position: 'absolute', right: 6, top: 6, zIndex: 60, background: 'rgba(0,0,0,0.06)', padding: '4px 6px', borderRadius: 6, fontSize: 11 }}>
+                        <div style={{ fontWeight: 600, color: '#111' }}>{`in: ${incomingConnections ? incomingConnections.length : 0}`}</div>
+                        <div style={{ maxWidth: 220, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', color: '#333' }}>{(incomingConnections || []).join(', ') || '—'}</div>
+                    </div>
                     {/* Widget content rendering */}
                     {widget.type === 'spiderplot' ? (
                             (() => {
@@ -516,6 +580,7 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
                                     animated={true}
                                     backgroundColor="rgba(16, 185, 129, 0.02)"
                                     data={axisData}
+                                    widgetId={widget.id}
                                 />
                             );
                         })()
@@ -574,24 +639,20 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
                     ) : widget.type === 'candle' ? (
                         <div className="w-full h-full overflow-hidden flex items-center justify-center p-0.5">
                             {(() => {
-                                // Determine betaPower from incoming connection
+                                // Determine betaPower for Candle. Prefer published upstream
+                                // beta value (candleBeta) when the source is another widget
+                                // that publishes bandpower. If the upstream source is a
+                                // raw channel, fall back to computing beta from recent samples.
                                 let betaValue = 0;
                                 if (incomingConnections && incomingConnections.length > 0) {
                                     const src = incomingConnections[0];
-                                    if (String(src).startsWith('filter-')) {
-                                        // Unknown/non-channel source: treat as zero
-                                        betaValue = 0;
+                                    const s = String(src);
+                                    if (!s.startsWith('channel-')) {
+                                        // Use subscribed published value when available
+                                        betaValue = Number(candleBeta) || 0;
                                     } else {
-                                        // assume channel-x
-                                        const m = String(src).match(/channel-(\d+)/i);
-                                        const chIndex = m ? Math.max(0, parseInt(m[1], 10) - 1) : 0;
-                                        const key = `ch${chIndex}`;
-                                        const recent = samples.slice(-128);
-                                        if (recent.length > 0) {
-                                            const vals = recent.map(s => (s as any)[key] ?? 0) as number[];
-                                            const rms = Math.sqrt(vals.reduce((acc: number, v: number) => acc + v * v, 0) / vals.length);
-                                            betaValue = Math.min(100, rms * 100);
-                                        }
+                                        // Channel or other source: rely on subscribed published value
+                                        betaValue = Number(candleBeta) || 0;
                                     }
                                 }
                                 return <CandleChart width={availableWidth - 4} height={availableHeight - 4} betaPower={betaValue} />;
@@ -635,7 +696,21 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
                             // If there are no incoming channel connections, but the widget itself
                             // is channel-sourced (arranger assigned) AND it's not a Plot
                             // (basic) widget, fall back to widgetChannels.
-                            const finalChannels = connChannels.length > 0 ? connChannels : (isChannelWidget && widget.type !== 'basic' ? widgetChannels : []);
+                            // If there are explicit channel connections use them. Otherwise,
+                            // when the widget is an aggregated/basic plot and has non-channel
+                            // upstream sources (e.g. Envelope), provide a default single
+                            // plotting channel so the BasicGraph has a target to draw into.
+                            let finalChannels: any[] = [];
+                            if (connChannels.length > 0) {
+                                finalChannels = connChannels;
+                            } else if (isChannelWidget && widget.type !== 'basic') {
+                                finalChannels = widgetChannels;
+                            } else if (incomingConnections && incomingConnections.length > 0) {
+                                // upstream exists but it's not a channel -> plot as single virtual channel
+                                finalChannels = [{ id: 'ch0', name: 'CH 0', color: '#10B981', visible: true }];
+                            } else {
+                                finalChannels = [];
+                            }
                             // Allow device samples only when the widget has an incoming
                             // channel connection or when it is an actual channel widget
                             // (not when it's a Plot arranged with a channelIndex).
@@ -669,6 +744,7 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
                                         // imperative `updateData` API. The `selectedChannels` prop maps
                                         // incoming array indices to plotted channels.
                                         selectedChannels={[0]}
+                                        incomingConnections={incomingConnections}
                                     />
                                 </div>
                             );

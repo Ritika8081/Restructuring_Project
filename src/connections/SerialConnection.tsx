@@ -40,6 +40,9 @@ export default function SerialConnection() {
   const sampleIndex = useRef(0)
   const totalSamples = useRef(0)
   const readerActiveRef = useRef(false)
+  // Buffer incoming textual/log messages to avoid frequent setState calls
+  const receivedDataRef = useRef<string[]>([])
+  const flushLogsTimeoutRef = useRef<any>(null)
   // Debug helpers: log raw assembly of hi/lo bytes for the first few
   // received packets. We do NOT mutate or rescale assembled sample
   // values here; the provider is responsible for normalization and
@@ -53,6 +56,29 @@ export default function SerialConnection() {
   const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   // Keep last seen text to avoid appending identical messages repeatedly
   const lastReceivedTextRef = useRef<string | null>(null);
+
+  // Helper: schedule flush of buffered logs into React state (debounced)
+  const scheduleFlushLogs = (delay = 200) => {
+    if (flushLogsTimeoutRef.current) return
+    flushLogsTimeoutRef.current = setTimeout(() => {
+      try {
+        setReceivedData(prev => {
+          const combined = [...prev, ...receivedDataRef.current]
+          // Keep only last 10 log entries
+          const trimmed = combined.slice(-10)
+          return trimmed
+        })
+      } catch (e) {}
+      receivedDataRef.current = []
+      clearTimeout(flushLogsTimeoutRef.current)
+      flushLogsTimeoutRef.current = null
+    }, delay)
+  }
+
+  const pushLog = (msg: string) => {
+    receivedDataRef.current.push(msg)
+    scheduleFlushLogs()
+  }
 
   // Device constants matching firmware (use refs so we can adapt dynamically)
   const BAUD_RATE = 230400
@@ -124,10 +150,13 @@ export default function SerialConnection() {
       } catch (e) { }
   // Let the provider know the device sampling rate so filters can be configured
   try { channelData.setSamplingRate && channelData.setSamplingRate(sampleRateRef.current); } catch (e) {}
-    readerActiveRef.current = true
-
-  // Start reading data (this will also inspect initial text responses like WHORU)
-  startReading(selectedPort)
+    // Start reading data (this will also inspect initial text responses like WHORU)
+    if (!readerActiveRef.current) {
+      readerActiveRef.current = true
+      startReading(selectedPort)
+    } else {
+      console.info('[Serial] reader already active - skipping startReading')
+    }
       
       // Send commands automatically
       setTimeout(async () => {
@@ -138,13 +167,18 @@ export default function SerialConnection() {
         await sendCommand(selectedPort, "START")
       }, 1000)
       
+  // Seed initial connection message immediately
   setReceivedData(['Connected! Starting data collection...'])
 
       // Register disconnect handler in provider so page-level disconnects work
       try {
         if (channelData && typeof channelData.registerConnectionDisconnect === 'function') {
-          unregisterDisconnectRef.current = channelData.registerConnectionDisconnect(doDisconnect);
-          console.info('[Serial] registered disconnect handler in context');
+          if (!unregisterDisconnectRef.current) {
+            unregisterDisconnectRef.current = channelData.registerConnectionDisconnect(doDisconnect);
+            console.info('[Serial] registered disconnect handler in context');
+          } else {
+            console.info('[Serial] disconnect handler already registered');
+          }
         }
       } catch (e) {}
 
@@ -177,7 +211,7 @@ export default function SerialConnection() {
               // frequent state churn and render storms.
               if (lastReceivedTextRef.current !== trimmed) {
                 lastReceivedTextRef.current = trimmed;
-                setReceivedData(prev => [...prev.slice(-10), `${timestamp}: ${trimmed}`]) // Keep only last 10 log entries
+                pushLog(`${timestamp}: ${trimmed}`)
               }
               // Auto-detect UNO R4 responses (firmware responds with "UNO-R4") and adjust parsing
               try {
@@ -200,7 +234,7 @@ export default function SerialConnection() {
                     try { channelData.setAdcBits && channelData.setAdcBits(14); } catch (e) {}
                     console.info('[Serial] Detected device: UNO-R4');
                     setDetectedDeviceType('UNO-R4');
-                    setReceivedData(prev => [...prev.slice(-10), `${timestamp}: Detected UNO-R4, using ${numChannelsRef.current} channels @ ${sampleRateRef.current}Hz`]);
+                    pushLog(`${timestamp}: Detected UNO-R4, using ${numChannelsRef.current} channels @ ${sampleRateRef.current}Hz`);
                   }
                 } else if (t.includes('NPG') || t.includes('NPG-LITE') || t.includes('NPG LITE') || t.includes('LITE')) {
                   // NPG Lite (legacy) response - assume 3 channels at 500Hz unless overridden
@@ -216,7 +250,7 @@ export default function SerialConnection() {
                     } catch (e) {}
                     console.info('[Serial] Detected device: NPG-Lite');
                     setDetectedDeviceType('NPG-Lite');
-                    setReceivedData(prev => [...prev.slice(-10), `${timestamp}: Detected NPG-Lite, using ${numChannelsRef.current} channels @ ${sampleRateRef.current}Hz`]);
+                    pushLog(`${timestamp}: Detected NPG-Lite, using ${numChannelsRef.current} channels @ ${sampleRateRef.current}Hz`);
                   }
                 }
               } catch (e) {

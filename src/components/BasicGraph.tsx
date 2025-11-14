@@ -67,6 +67,10 @@ interface BasicGraphRealtimeProps {
   /** Number of samples to apply to buffers each animation frame (per channel). */
   samplesPerFrame?: number;
   selectedChannels?: number[];
+  /** Optional upstream widget id to subscribe to (e.g. an Envelope widget id) */
+  inputWidgetId?: string;
+  /** If the flow wiring attaches upstream sources via incomingConnections, read the first one and subscribe */
+  incomingConnections?: string[];
 }
 
 // DEFAULT_COLORS removed (not used in this component)
@@ -295,6 +299,7 @@ const BasicGraphRealtime = forwardRef((props: BasicGraphRealtimeProps, ref) => {
   // This separation keeps parsing (incoming batches) and rendering decoupled
   // and lets the provider coalesce high-frequency packets without causing
   // a render storm.
+    const lastRenderLogRef = { current: 0 as number } as { current: number };
     const render = () => {
       animationRef.current = requestAnimationFrame(render);
 
@@ -325,6 +330,22 @@ const BasicGraphRealtime = forwardRef((props: BasicGraphRealtimeProps, ref) => {
           // swallow per-channel errors
         }
       });
+
+      // Rate-limited debug logging for pending queues / line presence
+      try {
+        const now = Date.now();
+        if (now - lastRenderLogRef.current > 500) {
+          lastRenderLogRef.current = now;
+          try {
+            const pendingSummary = visibleChannels.map(ch => {
+              const q = pendingPerChannel.current.get(ch.id) || [];
+              const hasLine = !!linesRef.current.get(ch.id);
+              return `${ch.id}:pending=${q.length},line=${hasLine}`;
+            }).join(' | ');
+            console.debug && console.debug(`[BasicGraph:${instanceId ?? 'anon'}] render pending: ${pendingSummary}`);
+          } catch (e) { /* ignore logging errors */ }
+        }
+      } catch (e) { /* ignore */ }
 
   // Render each visible channel's plot. We call `plot.update()` before
   // `plot.draw()` to ensure the WebGL buffers are in sync with line data.
@@ -375,8 +396,8 @@ const BasicGraphRealtime = forwardRef((props: BasicGraphRealtimeProps, ref) => {
   // ChannelSample objects; it MUST NOT call `addSample` back into the
   // provider (that would create a feedback loop). The subscription returns
   // an unsubscribe function which we call on cleanup.
-  const { subscribeToSampleBatches } = useChannelData();
-  const { subscribeToControlEvents, publishWidgetOutputs } = useChannelData();
+  const { subscribeToSampleBatches, subscribeToControlEvents, publishWidgetOutputs, subscribeToWidgetOutputs } = useChannelData();
+  const { inputWidgetId, incomingConnections } = props as any;
   useEffect(() => {
     if (!allowDeviceSamples) return;
 
@@ -551,6 +572,104 @@ const BasicGraphRealtime = forwardRef((props: BasicGraphRealtimeProps, ref) => {
   } catch (e) { /* ignore */ }
   return () => { unsub(); };
   }, [allowDeviceSamples, subscribeToSampleBatches, channels, bufferSize]);
+
+  // Subscribe to upstream widget outputs. Support multiple upstream sources
+  // (incomingConnections) by subscribing to each and merging their latest
+  // frames into a single perSampleValues array in the order of the
+  // `incomingConnections` list. This lets the plot show one trace per
+  // upstream source (or per-element when an upstream source publishes an
+  // array).
+  useEffect(() => {
+    const sources: string[] = inputWidgetId ? [String(inputWidgetId)] : (incomingConnections || []).map(String);
+    if (!subscribeToWidgetOutputs || sources.length === 0) {
+      if (process.env.NODE_ENV !== 'production') console.debug(`[BasicGraph:${instanceId ?? 'anon'}] no upstream widget(s) to subscribe (inputWidgetId/incomingConnections)`);
+      return;
+    }
+
+    console.debug(`[BasicGraph:${instanceId ?? 'anon'}] subscribing to upstream widget sources ->`, sources);
+
+    // Maintain latest value per source
+    const latestPerSource = new Map<string, any>();
+
+    const unsubs: Array<() => void> = [];
+    for (const src of sources) {
+      try {
+        console.debug(`[BasicGraph:${instanceId ?? 'anon'}] subscribeToWidgetOutputs ->`, src);
+        const unsub = subscribeToWidgetOutputs(String(src), (vals: any[]) => {
+          try {
+            if (!vals || vals.length === 0) return;
+            const latest = vals[vals.length - 1];
+            latestPerSource.set(src, latest);
+            console.debug(`[BasicGraph:${instanceId ?? 'anon'}] widget outputs received from ${src}:`, vals.length, 'items. latest=', latest);
+
+            // Build a combined perSampleValues array by iterating sources in order
+            const perSampleValues: number[] = [];
+            for (const s of sources) {
+              const val = latestPerSource.get(s);
+              if (val === undefined) {
+                perSampleValues.push(0);
+              } else if (Array.isArray(val)) {
+                for (const el of val) perSampleValues.push(normalizeOrPassThrough(el as any));
+              } else {
+                perSampleValues.push(normalizeOrPassThrough(val as any));
+              }
+            }
+
+            try { console.debug(`[BasicGraph:${instanceId ?? 'anon'}] latestPerSource keys=`, Array.from(latestPerSource.keys()), 'perSampleValues.len=', perSampleValues.length, 'perSampleValues=', perSampleValues); } catch(e) { }
+
+            // If the combined publisher is sending more elements than current
+            // plotted channels, extend plotted channels immediately via a
+            // local list so enqueueing happens in this same tick.
+            let plotChannels = channels;
+            if (perSampleValues.length > channels.length) {
+              try {
+                const additional = perSampleValues.length - channels.length;
+                if (additional > 0) {
+                  const colors = ['#10B981', '#3B82F6', '#F59E0B', '#EF4444', '#8B5CF6', '#06B6D4'];
+                  const newChannels = channels.slice();
+                  // Ensure newly-created channel ids are unique. Find the next
+                  // free numeric index and allocate ids ch{n} that don't collide
+                  // with existing channel ids (this prevents duplicate React keys).
+                  const existing = new Set(newChannels.map(c => String(c.id)));
+                  const allocateIndex = () => {
+                    let n = 0;
+                    while (existing.has(`ch${n}`)) n++;
+                    existing.add(`ch${n}`);
+                    return n;
+                  };
+                  for (let i = channels.length; i < perSampleValues.length; i++) {
+                    const idx = allocateIndex();
+                    newChannels.push({ id: `ch${idx}`, name: `CH ${idx}`, color: colors[idx % colors.length], visible: true });
+                  }
+                  plotChannels = newChannels;
+                  try { setChannels(newChannels); } catch (e) { /* ignore */ }
+                }
+              } catch (err) { /* ignore */ }
+            }
+
+            // Enqueue into pendingPerChannel for each plotted channel (use local list)
+            for (let i = 0; i < plotChannels.length; i++) {
+              const ch = plotChannels[i];
+              if (!ch || !ch.visible) continue;
+              const v = perSampleValues.length > i ? perSampleValues[i] : perSampleValues[0] || 0;
+              const q = pendingPerChannel.current.get(ch.id) || [];
+              q.push(v);
+              if (q.length > bufferSize * 4) q.splice(0, q.length - bufferSize * 4);
+              pendingPerChannel.current.set(ch.id, q);
+              if (i === 0) console.debug(`[BasicGraph:${instanceId ?? 'anon'}] enqueued -> ch:${ch.id} qlen=${q.length} (perSampleValues.len=${perSampleValues.length}, plotChannels.len=${plotChannels.length})`);
+            }
+          } catch (err) {
+            // swallow per-callback errors
+          }
+        });
+        if (unsub) unsubs.push(unsub);
+      } catch (err) {
+        // ignore subscribe errors
+      }
+    }
+
+    return () => { for (const u of unsubs) try { u(); } catch (e) { } };
+  }, [subscribeToWidgetOutputs, inputWidgetId, JSON.stringify(incomingConnections || []), channels, bufferSize, instanceId]);
 
   // Expose an imperative `updateData` API. This allows callers to push a
   // single sample object or an array of numbers directly into the plot.

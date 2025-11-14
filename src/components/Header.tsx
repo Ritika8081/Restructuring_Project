@@ -38,7 +38,7 @@ const Header: React.FC = () => {
                             style={{ marginLeft: '8px' }}
                         >
                             <span className="text-lg mr-2">⚙️</span>
-                            <span className="hidden sm:inline">Configure Flow</span>
+                            <span className="hidden sm:inline">Edit Flow</span>
                         </button>
 
                         {/* Docs button - opens the documentation modal for contributors */}

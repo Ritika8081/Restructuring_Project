@@ -64,7 +64,9 @@ export type ChannelDataContextType = {
   // by widget id. Values are pushed as number samples (one per incoming
   // device sample/frame) and delivered as arrays in batch callbacks.
   publishWidgetOutputs?: (widgetId: string, values: number[] | number) => void;
-  subscribeToWidgetOutputs?: (widgetId: string, onValues: (vals: number[]) => void) => () => void;
+  // Subscribers receive an array of recent entries where each entry is either
+  // a number (single-channel sample) or a number[] (multi-channel frame).
+  subscribeToWidgetOutputs?: (widgetId: string, onValues: (vals: Array<number | number[]>) => void) => () => void;
   // Register a disconnect handler for the currently-mounted connection component
   registerConnectionDisconnect?: (fn: () => void) => () => void;
   // Invoke any registered connection disconnect handlers (returns true if any were called)
@@ -102,8 +104,9 @@ export const ChannelDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
   const subscribersRef = useRef<Set<(s: ChannelSample[]) => void>>(new Set());
   const controlSubscribersRef = useRef<Set<(e: { type: string; channelIndex?: number }) => void>>(new Set());
   // Per-widget output buffers and subscribers (for transform nodes like envelope)
-  const widgetOutputsRef = useRef<Record<string, number[]>>({});
-  const widgetOutputSubscribersRef = useRef<Record<string, Set<(vals: number[]) => void>>>({});
+  // Each entry is either a number or an array of numbers (for multi-channel outputs).
+  const widgetOutputsRef = useRef<Record<string, Array<number | number[]>>>({});
+  const widgetOutputSubscribersRef = useRef<Record<string, Set<(vals: Array<number | number[]>) => void>>>({});
   // Connection disconnect handlers registry (for connection components to register their cleanup callback)
   const connectionDisconnectHandlersRef = useRef<Set<() => void>>(new Set());
   // Track observed per-channel raw maximums to help infer the ADC range
@@ -399,10 +402,32 @@ export const ChannelDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
   const publishWidgetOutputs = useCallback((widgetId: string, values: number[] | number) => {
     try {
-      const arr = Array.isArray(values) ? values : [values];
+      try { console.debug('[ChannelData] publishWidgetOutputs', { widgetId, values }); } catch (e) { }
       if (!widgetOutputsRef.current[widgetId]) widgetOutputsRef.current[widgetId] = [];
-      // Append and keep only the last 1024 values to bound memory
-      widgetOutputsRef.current[widgetId].push(...arr);
+      // If caller provided an array, store the array as a single entry so
+      // subscribers receive an array entry (multi-channel frame). If a single
+      // number is provided, store it as a number entry.
+      if (Array.isArray(values)) {
+        // store the original array frame
+        widgetOutputsRef.current[widgetId].push(values.slice());
+        // If this looks like a bandpower vector (e.g. [Alpha, Beta, ...])
+        // append a normalized numeric beta-percent entry so consumers that
+        // expect a single numeric value (like Candle) receive a clear
+        // canonical value and don't need to guess the shape.
+        try {
+          const betaRaw = values.length > 1 ? values[1] : undefined;
+          if (typeof betaRaw === 'number') {
+            let betaNum = betaRaw;
+            // If beta is a relative fraction (0..1) convert to percent
+            if (betaNum > 0 && betaNum <= 1) betaNum = betaNum * 100;
+            betaNum = Math.max(0, Math.min(100, Number(betaNum) || 0));
+            widgetOutputsRef.current[widgetId].push(betaNum);
+          }
+        } catch (e) { /* ignore normalization errors */ }
+      } else {
+        widgetOutputsRef.current[widgetId].push(values as number);
+      }
+      // Append and keep only the last 1024 frames/values to bound memory
       if (widgetOutputsRef.current[widgetId].length > 1024) {
         widgetOutputsRef.current[widgetId] = widgetOutputsRef.current[widgetId].slice(-1024);
       }
@@ -415,7 +440,7 @@ export const ChannelDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
     } catch (err) { /* swallow */ }
   }, []);
 
-  const subscribeToWidgetOutputs = useCallback((widgetId: string, onValues: (vals: number[]) => void) => {
+  const subscribeToWidgetOutputs = useCallback((widgetId: string, onValues: (vals: Array<number | number[]>) => void) => {
     try {
       if (!widgetOutputSubscribersRef.current[widgetId]) widgetOutputSubscribersRef.current[widgetId] = new Set();
       widgetOutputSubscribersRef.current[widgetId].add(onValues);

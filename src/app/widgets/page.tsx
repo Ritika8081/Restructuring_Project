@@ -130,6 +130,130 @@ const Widgets: React.FC = () => {
     // Local state for the in-flow connection mini-widget (connect/disconnect)
     const [connActive, setConnActive] = useState<boolean>(false);
     const channelData = useChannelData();
+    // Forwarding subscriptions for runtime push-flow (map 'from->to' -> unsubscribe)
+    const forwardingUnsubsRef = useRef<Record<string, () => void>>({});
+    // Keep a ref copy of connections so setup/teardown callbacks declared
+    // earlier can access the latest connections without dependency ordering issues.
+    const connectionsRef = useRef<Array<{ from: string, to: string }>>([]);
+    // Keep a ref copy of current dashboard widgets so early-declared
+    // callbacks (like setupPushForwarding) can resolve instance ids
+    // without depending on the `widgets` state (avoids TDZ issues).
+    const widgetsRef = useRef<Widget[]>([]);
+
+    // Setup forwarding subscriptions that implement runtime.push semantics:
+    // when a source widget publishes outputs, forward them to each connected
+    // target widget by calling publishWidgetOutputs(targetId, values).
+    const setupPushForwarding = useCallback(() => {
+        try {
+            // Clear any existing forwarders first
+            try {
+                const entries = Object.values(forwardingUnsubsRef.current || {});
+                for (const u of entries) try { u(); } catch (e) { }
+            } catch (e) { }
+            forwardingUnsubsRef.current = {};
+            if (!channelData) return;
+            const { subscribeToWidgetOutputs, publishWidgetOutputs } = channelData as any;
+            if (typeof subscribeToWidgetOutputs !== 'function' || typeof publishWidgetOutputs !== 'function') return;
+
+            // For every connection where the source is a widget (not a channel),
+            // subscribe to its outputs and forward into the target's widget output buffer.
+            const conns = connectionsRef.current || [];
+            // Build a map of channel sources -> targets so we can create a
+            // single subscription per channel that forwards samples to all
+            // connected downstream widgets (fan-out behavior).
+            const channelMap: Record<string, string[]> = {};
+            for (const c of conns) {
+                try {
+                    const from = String(c.from || '');
+                    const to = String(c.to || '');
+                    if (!from || !to) continue;
+                    if (from.startsWith('channel-')) {
+                        // accumulate channel -> [targets]
+                        channelMap[from] = channelMap[from] || [];
+                        if (!channelMap[from].includes(to)) channelMap[from].push(to);
+                        continue;
+                    }
+                    // Resolve publisher instance ids. Flow connections may refer
+                    // to the base node id (e.g. 'bandpower') while the actual
+                    // dashboard widget instance id is 'bandpower-<inst>'. Find
+                    // matching widgets and subscribe to their outputs so the
+                    // flow wires work regardless of whether the connection was
+                    // created against a base node id or an instance id.
+                    const publisherIds: string[] = [];
+                    try {
+                        // If any widget exactly matches the from id, prefer it
+                        const exact = widgetsRef.current.find(w => String(w.id) === from);
+                        if (exact) publisherIds.push(String(exact.id));
+                        else {
+                            const base = String(from).split('-')[0];
+                            const matches = widgetsRef.current.filter(w => String(w.id).split('-')[0] === base).map(w => String(w.id));
+                            if (matches.length > 0) publisherIds.push(...matches);
+                        }
+                    } catch (e) {
+                        // ignore resolution errors and fall back to raw id
+                    }
+
+                    if (publisherIds.length === 0) publisherIds.push(from);
+
+                    for (const pubId of publisherIds) {
+                        try { console.debug('[Flow] forward subscribe', { from: pubId, to }); } catch (e) { }
+                        const key = `${pubId}=>${to}`;
+                        if (forwardingUnsubsRef.current[key]) continue;
+                        const unsub = subscribeToWidgetOutputs(pubId, (vals: Array<number | number[]>) => {
+                            try {
+                                try { console.debug('[Flow] forward payload', { from: pubId, to, vals }); } catch (e) { }
+                                publishWidgetOutputs(to, Array.isArray(vals) && vals.length === 1 ? vals[0] as any : vals.slice());
+                            } catch (err) { /* swallow per-forward errors */ }
+                        });
+                        if (unsub) forwardingUnsubsRef.current[key] = unsub;
+                    }
+                } catch (err) { /* ignore per-connection errors */ }
+            }
+
+            // Create one sample-batch subscription per channel source and forward
+            // the channel's latest processed value to all its targets. This
+            // enables a single channel to feed multiple downstream widgets.
+            try {
+                const { subscribeToSampleBatches } = channelData as any;
+                for (const ch of Object.keys(channelMap)) {
+                    try {
+                        const targets = channelMap[ch] || [];
+                        if (!targets || targets.length === 0) continue;
+                        const chKey = `${ch}=>${targets.join(',')}`;
+                        if (forwardingUnsubsRef.current[chKey]) continue;
+                        // Parse channel index
+                        const m = String(ch).match(/channel-(\d+)/i);
+                        const chIdx = m ? Math.max(0, parseInt(m[1], 10)) : 0;
+                        const unsub = subscribeToSampleBatches((batch: Array<any>) => {
+                            try {
+                                if (!batch || batch.length === 0) return;
+                                const last = batch[batch.length - 1] as any;
+                                const key = `ch${chIdx}`;
+                                let v: any = undefined;
+                                if (last && last[key] !== undefined) v = last[key];
+                                else if (last && (last as any)._raw && (last as any)._raw[key] !== undefined) v = Number((last as any)._raw[key]);
+                                else v = 0;
+                                for (const t of targets) {
+                                    try { publishWidgetOutputs(t, v); } catch (e) { }
+                                }
+                            } catch (err) { /* swallow per-batch errors */ }
+                        });
+                        if (unsub) forwardingUnsubsRef.current[chKey] = unsub;
+                    } catch (err) { /* ignore per-channel errors */ }
+                }
+            } catch (err) { /* ignore sample subscription errors */ }
+        } catch (err) {
+            try { console.warn('[Flow] setupPushForwarding failed', err); } catch (e) { }
+        }
+    }, [channelData]);
+
+    const teardownPushForwarding = useCallback(() => {
+        try {
+            const entries = Object.values(forwardingUnsubsRef.current || {});
+            for (const u of entries) try { u(); } catch (e) { }
+        } catch (err) { }
+        forwardingUnsubsRef.current = {};
+    }, []);
     const lastSampleAtRef = useRef<number>(0);
     // Subscribe to provider sample batches to infer whether a device is actively streaming.
     useEffect(() => {
@@ -463,6 +587,21 @@ const Widgets: React.FC = () => {
     // Action to arrange/expand the flow into dashboard widgets (Play)
     const playFlow = () => {
         try { markFlowSeen(); } catch (err) { setShowFlowModal(false); }
+
+        // Debug: print current flowchart connections when the user clicks Play
+        try {
+            if (connections && connections.length > 0) {
+                console.group('[Flow] playFlow - connections');
+                try { console.table(connections); } catch (e) { console.log('connections:', connections); }
+                // also log a raw copy to avoid accidental mutation issues when inspecting
+                try { console.log('connections (raw):', JSON.parse(JSON.stringify(connections))); } catch (e) { /* ignore */ }
+                console.groupEnd();
+            } else {
+                console.debug('[Flow] playFlow - no connections to print');
+            }
+        } catch (err) {
+            console.warn('[Flow] playFlow - failed to print connections', err);
+        }
         // Arrange selected widgets to fill dashboard space using grid, offset by header
         setWidgets(prev => {
             const typeMap: Record<string, string> = {
@@ -500,7 +639,10 @@ const Widgets: React.FC = () => {
             const availableRows = rows - offsetCells;
             const dynamicWidgetWidth = Math.max(3, Math.floor(availableCols / gridCols));
             const dynamicWidgetHeight = Math.max(3, Math.floor(availableRows / gridRows));
-            const widgetTypes = selectedWidgets.filter(opt => !(typeof opt.id === 'string' && opt.id.startsWith('channel-')) && opt.type !== 'filter');
+            // Exclude non-visual flow nodes (filters, transforms like 'envelope')
+            // from being materialized as dashboard widgets. Envelope should only
+            // operate on channel data in the flow and not create a dashboard widget.
+            const widgetTypes = selectedWidgets.filter(opt => !(typeof opt.id === 'string' && opt.id.startsWith('channel-')) && opt.type !== 'filter' && opt.type !== 'envelope');
             const allInstanceIds = new Set<string>();
             for (const opt of widgetTypes) {
                 if (opt.type === 'basic') {
@@ -593,7 +735,19 @@ const Widgets: React.FC = () => {
 
             return newWidgets;
         });
+        // After arranging widgets, wire up runtime push-forwarding so published
+        // widget outputs are forwarded along connections.
+        try {
+            setupPushForwarding();
+        } catch (err) { /* ignore */ }
     };
+
+    // Ensure forwarding subscriptions are torn down when the component unmounts
+    useEffect(() => {
+        return () => {
+            try { teardownPushForwarding(); } catch (e) { }
+        };
+    }, [teardownPushForwarding]);
 
     // Debug: log modalPositions and flowScale when they change to help diagnose
     // issues where stored positions don't match the visual scaled surface.
@@ -888,6 +1042,9 @@ const Widgets: React.FC = () => {
     // Connections between widgets (user-created)
     const [connections, setConnections] = useState<Array<{ from: string, to: string }>>([]);
 
+    // Keep connectionsRef.current synchronized so push-forwarding can read latest
+    useEffect(() => { connectionsRef.current = connections; }, [connections]);
+
     // Debug: Log connections and channel->plot mappings so we can confirm
     // whether Plot instances (in the Plots box) have incoming channel links.
     useEffect(() => {
@@ -1047,7 +1204,7 @@ const Widgets: React.FC = () => {
     });
 
     // Refs for performance
-    const widgetsRef = useRef<Widget[]>(widgets);
+    // widgetsRef declared earlier so callbacks defined above can use it.
     const gridSettingsRef = useRef<GridSettings>(gridSettings);
     // Flag to indicate an input handled mouseup and finalized the connection
     const inputHandledRef = useRef(false);
@@ -3091,8 +3248,20 @@ const Widgets: React.FC = () => {
                         // ensures dashboard Plot widgets see channel-IDs even when
                         // a filter node is placed in the path (channel -> filter -> plot).
                         const getUpstreamSources = (wId: string) => {
-                            // Direct connections to this dashboard widget id
-                            const direct = connections.filter(c => c.to === wId).map(c => c.from);
+                            // Direct connections to this dashboard widget id. Also accept
+                            // connections created against the base flow-node id (e.g.
+                            // 'bandpower' or 'spiderplot') by comparing the prefix
+                            // before the first '-' so flow-node instances map to
+                            // dashboard widget instances created during Play.
+                            const baseTarget = String(wId || '').split('-')[0];
+                            const direct = connections.filter(c => {
+                                try {
+                                    if (c.to === wId) return true;
+                                    const toBase = String(c.to || '').split('-')[0];
+                                    if (toBase && baseTarget && toBase === baseTarget) return true;
+                                } catch (err) { }
+                                return false;
+                            }).map(c => c.from);
                             const expanded: string[] = [];
 
                             // Expand direct sources: inline channels, unwrap filters -> channels, and keep other ids
@@ -3196,6 +3365,22 @@ const Widgets: React.FC = () => {
                     {/* Popover rendered outside the widget, anchored near the connection controls */}
                 </div>
             </div>
+
+            {/* When the flow modal is closed we still need transform nodes (like Envelope)
+                to remain active so they can publish outputs into the provider. Render
+                envelope instances invisibly when the Flow modal is not open so their
+                subscriptions remain active even while the user is viewing the dashboard. */}
+            {!showFlowModal && (
+                <div style={{ display: 'none' }} aria-hidden>
+                    {flowOptions && flowOptions.filter((opt: any) => opt.type === 'envelope').map((opt: any) => (
+                        <Envelope
+                            key={`hidden-envelopes-${opt.id}`}
+                            id={opt.id}
+                            incomingConnections={connections.filter((c: any) => c.to === opt.id).map((c: any) => c.from)}
+                        />
+                    ))}
+                </div>
+            )}
 
             <Toast toast={toast} onClose={hideToast} />
             <ConfirmModal confirm={confirm} />
