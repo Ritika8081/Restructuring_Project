@@ -117,10 +117,8 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
             setCandleBeta(0);
             if (!incomingConnections || incomingConnections.length === 0) return;
             const src = String(incomingConnections[0] || '');
-            // Subscribe to upstream publishes regardless of whether the source
-            // is a widget instance or a channel; the provider/router now
-            // ensures channels and bandpower widgets publish a canonical
-            // numeric beta percent where applicable.
+            // If source is a channel, don't subscribe here; keep fallback logic
+            if (src.startsWith('channel-')) return;
             if (!subscribeToWidgetOutputs) return;
             const unsub = subscribeToWidgetOutputs(src, (vals) => {
                 try {
@@ -651,8 +649,16 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
                                         // Use subscribed published value when available
                                         betaValue = Number(candleBeta) || 0;
                                     } else {
-                                        // Channel or other source: rely on subscribed published value
-                                        betaValue = Number(candleBeta) || 0;
+                                        // Channel source: compute RMS-based proxy for beta
+                                        const m = s.match(/channel-(\d+)/i);
+                                        const chIndex = m ? Math.max(0, parseInt(m[1], 10) - 1) : 0;
+                                        const key = `ch${chIndex}`;
+                                        const recent = samples.slice(-128);
+                                        if (recent.length > 0) {
+                                            const vals = recent.map(s => (s as any)[key] ?? 0) as number[];
+                                            const rms = Math.sqrt(vals.reduce((acc: number, v: number) => acc + v * v, 0) / vals.length);
+                                            betaValue = Math.min(100, rms * 100);
+                                        }
                                     }
                                 }
                                 return <CandleChart width={availableWidth - 4} height={availableHeight - 4} betaPower={betaValue} />;

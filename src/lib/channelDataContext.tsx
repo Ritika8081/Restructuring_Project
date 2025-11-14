@@ -107,6 +107,10 @@ export const ChannelDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
   // Each entry is either a number or an array of numbers (for multi-channel outputs).
   const widgetOutputsRef = useRef<Record<string, Array<number | number[]>>>({});
   const widgetOutputSubscribersRef = useRef<Record<string, Set<(vals: Array<number | number[]>) => void>>>({});
+  // Guard against re-entrant publishes that can create synchronous publish->subscribe
+  // cycles (widget A forwards to B and B forwards back to A). We short-circuit
+  // re-entrant publishes per-widget id to avoid infinite synchronous loops.
+  const publishingGuardRef = useRef<Set<string>>(new Set());
   // Connection disconnect handlers registry (for connection components to register their cleanup callback)
   const connectionDisconnectHandlersRef = useRef<Set<() => void>>(new Set());
   // Track observed per-channel raw maximums to help infer the ADC range
@@ -403,6 +407,13 @@ export const ChannelDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
   const publishWidgetOutputs = useCallback((widgetId: string, values: number[] | number) => {
     try {
       try { console.debug('[ChannelData] publishWidgetOutputs', { widgetId, values }); } catch (e) { }
+      // Prevent synchronous re-entrant publishes for the same widget id which
+      // can cause deep recursion and React "Maximum update depth exceeded".
+      if (publishingGuardRef.current.has(widgetId)) {
+        try { console.warn('[ChannelData] re-entrant publish skipped', widgetId); } catch (e) { }
+        return;
+      }
+      publishingGuardRef.current.add(widgetId);
       if (!widgetOutputsRef.current[widgetId]) widgetOutputsRef.current[widgetId] = [];
       // If caller provided an array, store the array as a single entry so
       // subscribers receive an array entry (multi-channel frame). If a single
@@ -433,10 +444,21 @@ export const ChannelDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
       }
       const subs = widgetOutputSubscribersRef.current[widgetId];
       if (subs && subs.size > 0) {
-        // Deliver a shallow copy
+        // Deliver a shallow copy. Call subscribers asynchronously to break
+        // synchronous cycles and allow React to batch updates.
         const copy = widgetOutputsRef.current[widgetId].slice();
-        subs.forEach(s => { try { s(copy); } catch (e) { /* ignore */ } });
+        try {
+          // Use microtask to keep ordering but avoid deep sync recursion
+          Promise.resolve().then(() => {
+            subs.forEach(s => { try { s(copy); } catch (e) { /* ignore */ } });
+          });
+        } catch (e) {
+          // Fallback to synchronous delivery if microtask scheduling fails
+          subs.forEach(s => { try { s(copy); } catch (e) { /* ignore */ } });
+        }
       }
+      // Remove publishing guard (done after scheduling delivery)
+      publishingGuardRef.current.delete(widgetId);
     } catch (err) { /* swallow */ }
   }, []);
 

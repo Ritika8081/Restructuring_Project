@@ -33,28 +33,21 @@ export class FFT {
     let j = 0;
     for (let i = 0; i < n - 1; i++) {
       if (i < j) {
-        const tmpR = real[i];
-        const tmpI = imag[i];
-        real[i] = real[j];
-        imag[i] = imag[j];
-        real[j] = tmpR;
-        imag[j] = tmpI;
+        [real[i], real[j]] = [real[j], real[i]];
+        [imag[i], imag[j]] = [imag[j], imag[i]];
       }
-      let k = n >> 1;
-      while (k <= j) {
-        j -= k;
-        k >>= 1;
-      }
+      let k = n/2;
+      while (k <= j) { j -= k; k /= 2; }
       j += k;
     }
-    for (let len = 2; len <= n; len <<= 1) {
-      const half = len >> 1;
+    for (let len = 2; len <= n; len *= 2) {
+      const half = len/2;
       for (let i = 0; i < n; i += len) {
         for (let j = i, k = 0; j < i + half; j++, k++) {
-          const tRe = real[j + half] * this.cosTable[(this.size / len) * k] - imag[j + half] * this.sinTable[(this.size / len) * k];
-          const tIm = real[j + half] * this.sinTable[(this.size / len) * k] + imag[j + half] * this.cosTable[(this.size / len) * k];
-          real[j + half] = real[j] - tRe;
-          imag[j + half] = imag[j] - tIm;
+          const tRe =  real[j+half] * this.cosTable[k] - imag[j+half] * this.sinTable[k];
+          const tIm =  real[j+half] * this.sinTable[k] + imag[j+half] * this.cosTable[k];
+          real[j+half] = real[j] - tRe;
+          imag[j+half] = imag[j] - tIm;
           real[j] += tRe;
           imag[j] += tIm;
         }
