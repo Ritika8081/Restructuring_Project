@@ -1813,6 +1813,13 @@ const Widgets: React.FC = () => {
                             </div>
 
                             <div style={{ display: 'flex', gap: 12, marginBottom: 0, alignItems: 'center', flexWrap: 'wrap' }}>
+                                 {/* Play button moved into main action row */}
+                                <button
+                                    style={{ background: ACTION_COLORS.green.bg, color: ACTION_COLORS.green.text, padding: '8px 14px', borderRadius: 10, fontWeight: 700, border: 'none', cursor: 'pointer', fontSize: 14, display: 'inline-flex', alignItems: 'center', gap: 8, boxShadow: ACTION_COLORS.green.shadow, transition: 'transform 120ms ease, box-shadow 120ms ease' }}
+                                    onClick={playFlow}
+                                >
+                                    Play
+                                </button>
                                 <button
                                     style={{ background: ACTION_COLORS.primary.bg, color: ACTION_COLORS.primary.text, padding: '8px 14px', borderRadius: 10, fontWeight: 700, border: 'none', cursor: 'pointer', fontSize: 14, display: 'inline-flex', alignItems: 'center', gap: 8, boxShadow: ACTION_COLORS.primary.shadow, transition: 'transform 120ms ease, box-shadow 120ms ease' }}
                                     onClick={() => {
@@ -1845,7 +1852,6 @@ const Widgets: React.FC = () => {
                                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 3v9" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /><path d="M8 11l4-4 4 4" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /><path d="M21 21H3" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
                                     <span>Save Layout</span>
                                 </button>
-                                {/* Compact zoom controls placed next to other action buttons */}
                                 {/* Grouped zoom controls — act like a single button-group (accessible) */}
                                 <div
                                     role="group"
@@ -1870,13 +1876,7 @@ const Widgets: React.FC = () => {
                                         +
                                     </button>
                                 </div>
-                                {/* Play button moved into main action row */}
-                                <button
-                                    style={{ background: ACTION_COLORS.green.bg, color: ACTION_COLORS.green.text, padding: '8px 14px', borderRadius: 10, fontWeight: 700, border: 'none', cursor: 'pointer', fontSize: 14, display: 'inline-flex', alignItems: 'center', gap: 8, boxShadow: ACTION_COLORS.green.shadow, transition: 'transform 120ms ease, box-shadow 120ms ease' }}
-                                    onClick={playFlow}
-                                >
-                                    Play
-                                </button>
+                            
                                 {/* Left palette is now shown inside the flow area as a draggable list (see below) */}
                                 <button
                                     style={{ background: ACTION_COLORS.success.bg, color: ACTION_COLORS.success.text, padding: '8px 14px', borderRadius: 10, fontWeight: 700, border: 'none', cursor: 'pointer', fontSize: 14, display: 'inline-flex', alignItems: 'center', gap: 8, boxShadow: ACTION_COLORS.success.shadow, transition: 'transform 120ms ease, box-shadow 120ms ease' }}
@@ -1957,13 +1957,7 @@ const Widgets: React.FC = () => {
                                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 3v9" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /><path d="M8 11l4-4 4 4" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /><path d="M21 21H3" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
                                     <span>Load Layout</span>
                                 </button>
-                                {/* Make Connection button removed - using Connections list/button instead */}
-                                <button
-                                    style={{ background: ACTION_COLORS.neutral.bg, color: ACTION_COLORS.neutral.text, padding: '8px 14px', borderRadius: 10, fontWeight: 700, border: 'none', cursor: 'pointer', fontSize: 14, display: 'inline-flex', alignItems: 'center', gap: 8, boxShadow: ACTION_COLORS.neutral.shadow, transition: 'transform 120ms ease, box-shadow 120ms ease' }}
-                                    onClick={() => { setShowConnectionModal(prev => !prev); }}
-                                >
-                                    <span>Connections</span>
-                                </button>
+                               
 
                             </div>
                         </div>
@@ -2394,9 +2388,12 @@ const Widgets: React.FC = () => {
                                                                             <button
                                                                                 onClick={e => removeChannelAt(id, e)}
                                                                                 title={`Remove ${opt.label}`}
-                                                                                style={{ marginRight: 6, background: thCh.border, color: thCh.text, border: 'none', borderRadius: 3, padding: '0px 4px', cursor: 'pointer', fontWeight: 600, fontSize: 9, lineHeight: '14px', height: 16, minWidth: 16, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+                                                                                style={{ marginRight: 6, background: thCh.border, color: thCh.text, border: 'none', borderRadius: 4, padding: 1, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: svgSize, height: svgSize }}
                                                                             >
-                                                                                ×
+                                                                                <svg width="100%" height="100%" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                                                                                    <line x1="4" y1="4" x2="16" y2="16" stroke={thCh.text} strokeWidth="1.6" strokeLinecap="round" />
+                                                                                    <line x1="16" y1="4" x2="4" y2="16" stroke={thCh.text} strokeWidth="1.6" strokeLinecap="round" />
+                                                                                </svg>
                                                                             </button>
 
                                                                             <svg
@@ -2526,9 +2523,12 @@ const Widgets: React.FC = () => {
                                                                                     <button
                                                                                         onClick={e => removeChannelAt(id, e)}
                                                                                         title={`Remove ${option.label}`}
-                                                                                        style={{ marginRight: 6, background: thCh.border, color: thCh.text, border: 'none', borderRadius: 4, padding: '0px 6px', cursor: 'pointer', fontWeight: 600, fontSize: 10, lineHeight: '16px', height: 18, minWidth: 18, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+                                                                                        style={{ marginRight: 6, background: thCh.border, color: thCh.text, border: 'none', borderRadius: 4, padding: 0, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: svgSize, height: svgSize }}
                                                                                     >
-                                                                                        ×
+                                                                                        <svg width="100%" height="100%" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                                                                                            <line x1="4" y1="4" x2="16" y2="16" stroke={thCh.text} strokeWidth="1.6" strokeLinecap="round" />
+                                                                                            <line x1="16" y1="4" x2="4" y2="16" stroke={thCh.text} strokeWidth="1.6" strokeLinecap="round" />
+                                                                                        </svg>
                                                                                     </button>
                                                                                 </div>
                                                                             );
@@ -2716,9 +2716,12 @@ const Widgets: React.FC = () => {
                                                                             <button
                                                                                 onClick={e => { e.stopPropagation(); removeBasicInstance(ins.id.split('-').slice(0, 2).join('-'), ins.id); }}
                                                                                 title={`Remove ${ins.label}`}
-                                                                                style={{ marginRight: 6, background: pth.border, color: pth.text, border: 'none', borderRadius: 3, padding: '0px 4px', cursor: 'pointer', fontWeight: 600, fontSize: 9, lineHeight: '14px', height: 16, minWidth: 16, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+                                                                                style={{ marginRight: 6, background: pth.border, color: pth.text, border: 'none', borderRadius: 4, padding: 0, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: svgSize, height: svgSize }}
                                                                             >
-                                                                                ×
+                                                                                <svg width="100%" height="100%" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                                                                                    <line x1="4" y1="4" x2="16" y2="16" stroke={pth.text} strokeWidth="1.6" strokeLinecap="round" />
+                                                                                    <line x1="16" y1="4" x2="4" y2="16" stroke={pth.text} strokeWidth="1.6" strokeLinecap="round" />
+                                                                                </svg>
                                                                             </button>
                                                                             <svg
                                                                                 data-widgetid={id}
@@ -2819,9 +2822,12 @@ const Widgets: React.FC = () => {
                                                                                     <button
                                                                                         onClick={e => { e.stopPropagation(); removeBasicInstance(id.split('-').slice(0, 2).join('-'), id); }}
                                                                                         title={`Remove ${option.label}`}
-                                                                                        style={{ marginRight: 6, background: themeFor('basic').border, color: themeFor('basic').text, border: 'none', borderRadius: 3, padding: '0px 4px', cursor: 'pointer', fontWeight: 600, fontSize: 9, lineHeight: '14px', height: 16, minWidth: 16, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+                                                                                        style={{ marginRight: 6, background: themeFor('basic').border, color: themeFor('basic').text, border: 'none', borderRadius: 4, padding: 0, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: svgSize, height: svgSize }}
                                                                                     >
-                                                                                        ×
+                                                                                        <svg width="100%" height="100%" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                                                                                            <line x1="4" y1="4" x2="16" y2="16" stroke={themeFor('basic').text} strokeWidth="1.6" strokeLinecap="round" />
+                                                                                            <line x1="16" y1="4" x2="4" y2="16" stroke={themeFor('basic').text} strokeWidth="1.6" strokeLinecap="round" />
+                                                                                        </svg>
                                                                                     </button>
                                                                                 </div>
                                                                             );
@@ -3150,9 +3156,9 @@ const Widgets: React.FC = () => {
                                                 </div>
 
                                                 {/* Right area: Delete and Settings */}
-                                                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                                                     <button
-                                                        style={{ background: themeFor(opt.type).border, color: themeFor(opt.type).text, border: 'none', borderRadius: 3, padding: '0px 4px', cursor: showConnectionModal || settingsModal.show ? 'default' : 'pointer', fontWeight: 600, fontSize: 9, lineHeight: '14px', height: 16, minWidth: 16, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', pointerEvents: showConnectionModal || settingsModal.show ? 'none' : 'auto' }}
+                                                        style={{ background: themeFor(opt.type).border, color: themeFor(opt.type).text, border: 'none', borderRadius: 6,  cursor: showConnectionModal || settingsModal.show ? 'default' : 'pointer', fontWeight: 600, fontSize: 11, lineHeight: '18px', height: 22, width: 22, minWidth: 22, padding: 2, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', pointerEvents: showConnectionModal || settingsModal.show ? 'none' : 'auto' }}
                                                         onClick={() => {
                                                             if (showConnectionModal || settingsModal.show) return;
                                                             handleRemoveWidget(opt.id);
@@ -3160,27 +3166,32 @@ const Widgets: React.FC = () => {
                                                         }}
                                                         title={`Delete ${opt.label}`}
                                                     >
-                                                        ×
+                                                        <svg width="100%" height="100%" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                                            <line x1="5" y1="5" x2="15" y2="15" stroke={themeFor(opt.type).text} strokeWidth="1.6" strokeLinecap="round" />
+                                                            <line x1="15" y1="5" x2="5" y2="15" stroke={themeFor(opt.type).text} strokeWidth="1.6" strokeLinecap="round" />
+                                                        </svg>
                                                     </button>
                                                     <button
-                                                        style={{ background: themeFor(opt.type).border, color: themeFor(opt.type).text, border: 'none', borderRadius: 6, padding: '2px 4px', cursor: 'pointer', fontWeight: 500, fontSize: 11, boxShadow: themeFor(opt.type).shadow, pointerEvents: 'auto', zIndex: 100002, height: 18, width: 18, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                                                        style={{ background: themeFor(opt.type).border, color: themeFor(opt.type).text, border: 'none', borderRadius: 8,  cursor: 'pointer', fontWeight: 600, fontSize: 12, boxShadow: themeFor(opt.type).shadow, pointerEvents: 'auto', zIndex: 100002, height: 22, width: 22, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 2 }}
                                                         title="Settings"
                                                         onClick={e => {
                                                             e.stopPropagation();
                                                             openSettings(widgetId);
                                                         }}
                                                     >
-                                                        <svg width="14" height="14" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="10" cy="10" r="7" stroke={themeFor(opt.type).text} strokeWidth="1.5" /><path d="M10 7V10L12 12" stroke={themeFor(opt.type).text} strokeWidth="1.5" strokeLinecap="round" /></svg>
+                                                        <svg width="100%" height="100%" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Settings">
+                                                            <path d="M19.14 12.94a7.49 7.49 0 000-1.88l2.03-1.58a0.5 0.5 0 00.12-0.64l-1.92-3.32a0.5 0.5 0 00-0.6-0.22l-2.39 0.96a7.37 7.37 0 00-1.6-0.93l-0.36-2.54A0.5 0.5 0 0013.89 2h-3.78a0.5 0.5 0 00-0.49 0.42l-0.36 2.54c-0.57 0.22-1.1 0.5-1.6 0.93l-2.39-0.96a0.5 0.5 0 00-0.6 0.22L2.71 9.84a0.5 0.5 0 00.12 0.64L4.86 12a7.49 7.49 0 000 1.88L2.83 15.46a0.5 0.5 0 00-0.12 0.64l1.92 3.32a0.5 0.5 0 00.6 0.22l2.39-0.96c0.5 0.43 1.03 0.8 1.6 1.03l0.36 2.54c0.06 0.27 0.28 0.42 0.49 0.42h3.78c0.22 0 0.43-0.15 0.49-0.42l0.36-2.54c0.57-0.23 1.1-0.6 1.6-1.03l2.39 0.96a0.5 0.5 0 00.6-0.22l1.92-3.32a0.5 0.5 0 00-0.12-0.64l-2.03-1.58zM12 15.5A3.5 3.5 0 1112 8.5a3.5 3.5 0 010 7z" fill={themeFor(opt.type).text} />
+                                                        </svg>
                                                     </button>
 
                                                     {opt.type !== 'basic' && (
-                                                        <svg style={{ marginLeft: 8, marginRight: 0, zIndex: 100 }} width={14} height={14}>
+                                                        <svg style={{ marginLeft: 10, marginRight: 0, zIndex: 100 }} width={16} height={16}>
                                                             <svg
                                                                 data-widgetid={widgetId}
                                                                 data-handle="output"
                                                                 style={{ cursor: 'crosshair', marginLeft: 0, marginRight: 0, zIndex: 100 }}
-                                                                width={opt.type === 'basic' ? 18 : 14}
-                                                                height={opt.type === 'basic' ? 18 : 14}
+                                                                width={opt.type === 'basic' ? 22 : 16}
+                                                                height={opt.type === 'basic' ? 22 : 16}
                                                                 onMouseDown={e => {
                                                                     e.stopPropagation();
                                                                     const center = getCircleCenter(widgetId, 'output');
@@ -3194,11 +3205,11 @@ const Widgets: React.FC = () => {
                                                                         setMousePos({ x: startX, y: startY });
                                                                     }
                                                                 }}>
-                                                                <circle cx={(opt.type === 'basic' ? 18 : 14) / 2} cy={(opt.type === 'basic' ? 18 : 14) / 2} r={opt.type === 'basic' ? 3.5 : 2.5} fill="#fff" stroke="#2563eb" strokeWidth={1.1} />
+                                                                <circle cx={(opt.type === 'basic' ? 22 : 16) / 2} cy={(opt.type === 'basic' ? 22 : 16) / 2} r={opt.type === 'basic' ? 4.5 : 3.5} fill="#fff" stroke="#2563eb" strokeWidth={1.2} />
                                                             </svg>
                                                             <div
                                                                 // For Plot widgets keep the input handle inside the box, otherwise keep the existing slight overlap
-                                                                style={{ position: 'absolute', left: opt.type === 'basic' ? 8 : -7, top: '50%', transform: 'translateY(-50%)', zIndex: 100, width: opt.type === 'basic' ? 18 : 14, height: opt.type === 'basic' ? 18 : 14, cursor: drawingConnection ? 'pointer' : 'default' }}
+                                                                style={{ position: 'absolute', left: opt.type === 'basic' ? 10 : -8, top: '50%', transform: 'translateY(-50%)', zIndex: 100, width: opt.type === 'basic' ? 22 : 16, height: opt.type === 'basic' ? 22 : 16, cursor: drawingConnection ? 'pointer' : 'default' }}
                                                                 data-widgetid={widgetId}
                                                                 data-handle="input"
                                                                 onMouseUp={e => {
@@ -3216,8 +3227,8 @@ const Widgets: React.FC = () => {
                                                                     }
                                                                 }}
                                                             >
-                                                                <svg width={opt.type === 'basic' ? 18 : 14} height={opt.type === 'basic' ? 18 : 14}>
-                                                                    <circle cx={(opt.type === 'basic' ? 18 : 14) / 2} cy={(opt.type === 'basic' ? 18 : 14) / 2} r={opt.type === 'basic' ? 3.5 : 2.5} fill="#fff" stroke="#2563eb" strokeWidth={1.1} />
+                                                                <svg width={opt.type === 'basic' ? 22 : 16} height={opt.type === 'basic' ? 22 : 16}>
+                                                                    <circle cx={(opt.type === 'basic' ? 22 : 16) / 2} cy={(opt.type === 'basic' ? 22 : 16) / 2} r={opt.type === 'basic' ? 4.5 : 3.5} fill="#fff" stroke="#2563eb" strokeWidth={1.2} />
                                                                 </svg>
                                                             </div>
                                                         </svg>

@@ -59,6 +59,8 @@ export type ChannelDataContextType = {
   // observed maxima. For UNO-R4 set to 14.
   adcBits?: number;
   setAdcBits?: (bits: number) => void;
+  // Diagnostic: return a summary of configured filters and created instances
+  getFilterSummary?: () => Record<number, { enabled?: boolean, samplingRate?: number, configuredKeys: string[], instanceKeys: string[] }>;
   // Widget output publish/subscribe API: transforms can publish numeric
   // streams (e.g. envelope values) which other widgets can subscribe to
   // by widget id. Values are pushed as number samples (one per incoming
@@ -149,6 +151,29 @@ export const ChannelDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
     });
     registeredChannelIndices.current = s;
     try { console.info('[ChannelData] setRegisteredChannels', { ids, registeredIndices: Array.from(s).sort((a, b) => a - b) }); } catch (e) { }
+  }, []);
+
+  const getFilterSummary = useCallback(() => {
+    try {
+      const out: Record<number, { enabled?: boolean, samplingRate?: number, configuredKeys: string[], instanceKeys: string[] }> = {};
+      const map = channelFiltersRef.current || {};
+      Object.keys(map).forEach(k => {
+        const idx = parseInt(k, 10);
+        const cfg = (map as any)[k] || {};
+        const configuredKeys: string[] = [];
+        if (Array.isArray(cfg.filterKeys)) configuredKeys.push(...cfg.filterKeys);
+        if (cfg.filterKey) configuredKeys.push(cfg.filterKey);
+        if (!configuredKeys.length && cfg.filterType === 'notch') {
+          configuredKeys.push(`notch-${cfg.notchFreq === 60 ? 60 : 50}`);
+        }
+        const instMap = filterInstancesRef.current[idx] || {};
+        const instanceKeys = Object.keys(instMap || {}).filter(Boolean);
+        out[idx] = { enabled: cfg.enabled, samplingRate: cfg.samplingRate, configuredKeys, instanceKeys };
+      });
+      return out;
+    } catch (e) {
+      return {};
+    }
   }, []);
 
   const addSample = useCallback((sample: ChannelSample) => {
@@ -618,7 +643,7 @@ export const ChannelDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
   }, []);
 
   return (
-    <ChannelDataContext.Provider value={{ samples: snapshot, addSample, addSampleRef, clearSamples, setRegisteredChannels, subscribeToSampleBatches, subscribeToControlEvents, setChannelFilters, setChannelSamplingRate, samplingRate, setSamplingRate, adcBits, setAdcBits, publishWidgetOutputs, subscribeToWidgetOutputs, registerConnectionDisconnect, disconnectActiveConnections }}>
+    <ChannelDataContext.Provider value={{ samples: snapshot, addSample, addSampleRef, clearSamples, setRegisteredChannels, subscribeToSampleBatches, subscribeToControlEvents, setChannelFilters, setChannelSamplingRate, samplingRate, setSamplingRate, adcBits, setAdcBits, publishWidgetOutputs, subscribeToWidgetOutputs, registerConnectionDisconnect, disconnectActiveConnections, getFilterSummary }}>
       {children}
     </ChannelDataContext.Provider>
   );
