@@ -1042,6 +1042,102 @@ const Widgets: React.FC = () => {
     // Connections between widgets (user-created)
     const [connections, setConnections] = useState<Array<{ from: string, to: string }>>([]);
 
+    // Toast utility functions
+    const showToast = useCallback((message: string, type: 'success' | 'error' | 'info' = 'info') => {
+        setToast({ show: true, message, type });
+    }, []);
+
+    // Helper to add a connection with validation and auto-creation for bandpower nodes.
+    const addConnection = useCallback((from: string, to: string) => {
+        try {
+            // If the target is the base 'bandpower' palette entry, create a
+            // dedicated bandpower node instance for this connection instead of
+            // wiring multiple channels into one node.
+            const isTargetBaseBandpower = String(to) === 'bandpower';
+            const isTargetBandpowerInstance = String(to) !== 'bandpower' && String(to).split('-')[0] === 'bandpower';
+
+            // Helper to create a new bandpower flow option and position it
+            // Accept an optional `source` string to label which channel/plot this
+            // BandPower instance was created for (helps map dashboard widgets
+            // back to their originating source).
+            const createBandpowerInstance = (source?: string, initialLeft = 200, initialTop = 100) => {
+                const id = `bandpower-${Date.now().toString(36)}-${Math.random().toString(36).substr(2, 6)}`;
+                const pretty = source ? `Bandpower — ${String(source)}` : 'Bandpower';
+                setFlowOptions(prev => [...prev, { id, label: pretty, type: 'bandpower', selected: true, config: { source } }]);
+                try { setModalPositions(prev => ({ ...prev, [id]: pixelToNormalized(initialLeft, initialTop) })); } catch (e) { }
+                return id;
+            };
+
+            // If connecting to a bandpower base, create an instance per-source
+            if (isTargetBandpowerInstance) {
+                // If user is directly wiring to an existing BandPower instance,
+                // ensure only one incoming connection is allowed.
+                const already = connectionsRef.current && connectionsRef.current.some(c => c.to === to);
+                if (already) {
+                    try { showToast && showToast('This BandPower node already has an input. Create separate BandPower nodes per channel.', 'error'); } catch (e) { }
+                    return;
+                }
+                // Connect directly (single instance) if source is valid
+                if (/^channel-\d+/i.test(String(from)) || String(from).startsWith('basic-') || flowOptions.some(o => o.id === from)) {
+                    setConnections(prev => {
+                        const exists = prev.some(c => c.from === from && c.to === to);
+                        if (exists) return prev;
+                        return [...prev, { from, to }];
+                    });
+                    return;
+                }
+                try { showToast && showToast('BandPower accepts only single-channel inputs. Connect a channel or a per-channel Plot.', 'error'); } catch (e) { }
+                return;
+            }
+
+            if (isTargetBaseBandpower) {
+                // If source is an aggregated plots widget (plots-aggregated or plots-box),
+                // expand into individual plot instances and create one BandPower per plot.
+                if (String(from) === 'plots-aggregated' || String(from) === 'plots-box') {
+                    // find all plot instances derived from flowOptions
+                    const plotOptions = flowOptions.filter(o => o.type === 'basic');
+                    for (const opt of plotOptions) {
+                        const insts = (opt as any).instances || Array.from({ length: (opt.count || 1) }, (_, i) => ({ id: `${opt.id}-${i}` }));
+                        for (const ins of insts) {
+                            const newId = createBandpowerInstance(ins.id);
+                            setConnections(prev => {
+                                const exists = prev.some(c => c.from === ins.id && c.to === newId);
+                                if (exists) return prev;
+                                return [...prev, { from: ins.id, to: newId }];
+                            });
+                        }
+                    }
+                    return;
+                }
+
+                // If source is a specific channel or a per-instance plot, create a
+                // single BandPower instance and connect them.
+                    if (/^channel-\d+/i.test(String(from)) || String(from).startsWith('basic-') || flowOptions.some(o => o.id === from)) {
+                    const newId = createBandpowerInstance(from);
+                    setConnections(prev => {
+                        const exists = prev.some(c => c.from === from && c.to === newId);
+                        if (exists) return prev;
+                        return [...prev, { from, to: newId }];
+                    });
+                    return;
+                }
+
+                // Otherwise, reject the connection: BandPower accepts single-channel sources only
+                try { showToast && showToast('BandPower accepts only single-channel inputs. Connect a channel or a per-channel Plot.', 'error'); } catch (e) { }
+                return;
+            }
+
+            // Default behavior: add the connection if it doesn't already exist
+            setConnections(prev => {
+                const exists = prev.some(c => c.from === from && c.to === to);
+                if (exists) return prev;
+                return [...prev, { from, to }];
+            });
+        } catch (err) {
+            // swallow
+        }
+    }, [flowOptions, setFlowOptions, setModalPositions, showToast]);
+
     // Keep connectionsRef.current synchronized so push-forwarding can read latest
     useEffect(() => { connectionsRef.current = connections; }, [connections]);
 
@@ -1242,10 +1338,6 @@ const Widgets: React.FC = () => {
         gridSettingsRef.current = gridSettings;
     }, [gridSettings]);
 
-    // Toast utility functions
-    const showToast = useCallback((message: string, type: 'success' | 'error' | 'info' = 'info') => {
-        setToast({ show: true, message, type });
-    }, []);
 
     // Monitor screen size and adjust grid to use full viewport. Use useLayoutEffect
     // so sizing is computed before the browser paints and avoids an initial
@@ -1642,59 +1734,59 @@ const Widgets: React.FC = () => {
     }, [showToast]);
 
     // Mouse move handler for drag operations
+    // Use refs for dragState and gridSettings to avoid re-registering listeners
+    // on every small state change which previously caused render loops.
+    const dragStateRef = useRef(dragState);
+    useEffect(() => { dragStateRef.current = dragState; }, [dragState]);
+
     useEffect(() => {
         const handleMouseMove = (e: MouseEvent) => {
-            if (!dragState.isDragging || !dragState.activeWidgetId) return;
+            const ds = dragStateRef.current;
+            if (!ds || !ds.isDragging || !ds.activeWidgetId) return;
 
-            const deltaX = Math.round((e.clientX - dragState.startMouseX) / gridSettings.cellWidth);
-            const deltaY = Math.round((e.clientY - dragState.startMouseY) / gridSettings.cellHeight);
+            const gs = gridSettingsRef.current || gridSettings;
+            const deltaX = Math.round((e.clientX - ds.startMouseX) / (gs.cellWidth || 50));
+            const deltaY = Math.round((e.clientY - ds.startMouseY) / (gs.cellHeight || 50));
 
-            let newX = dragState.startX;
-            let newY = dragState.startY;
-            let newWidth = dragState.startWidth;
-            let newHeight = dragState.startHeight;
+            let newX = ds.startX;
+            let newY = ds.startY;
+            let newWidth = ds.startWidth;
+            let newHeight = ds.startHeight;
 
-            if (dragState.dragType === 'move') {
-                // Prevent widgets from moving over header
-                newX = Math.max(0, dragState.startX + deltaX);
-                newY = Math.max(0, dragState.startY + deltaY);
-            } else if (dragState.dragType === 'resize') {
-                newWidth = Math.max(1, dragState.startWidth + deltaX);
-                newHeight = Math.max(1, dragState.startHeight + deltaY);
+            if (ds.dragType === 'move') {
+                newX = Math.max(0, ds.startX + deltaX);
+                newY = Math.max(0, ds.startY + deltaY);
+            } else if (ds.dragType === 'resize') {
+                newWidth = Math.max(1, ds.startWidth + deltaX);
+                newHeight = Math.max(1, ds.startHeight + deltaY);
             }
 
-            // Apply widget-specific minimum constraints
-            const activeWidget = widgets.find(w => w.id === dragState.activeWidgetId);
+            const activeWidget = widgetsRef.current.find(w => w.id === ds.activeWidgetId);
             if (activeWidget) {
                 newWidth = Math.max(activeWidget.minWidth, newWidth);
                 newHeight = Math.max(activeWidget.minHeight, newHeight);
             }
 
-            // Enhanced boundary constraints - allow symmetric edge positioning
-            if (dragState.dragType === 'move') {
-                // Prevent widgets from moving over header
+            if (ds.dragType === 'move') {
                 const minX = 0;
-                const maxX = gridSettings.cols - newWidth;
+                const maxX = (gs.cols || 24) - newWidth;
                 const minY = 0;
-                const maxY = gridSettings.rows - newHeight;
+                const maxY = (gs.rows || 16) - newHeight;
                 newX = Math.max(minX, Math.min(newX, maxX));
                 newY = Math.max(minY, Math.min(newY, maxY));
-            } else if (dragState.dragType === 'resize') {
-                // Ensure widget doesn't exceed grid boundaries during resize
-                const maxAllowedWidth = Math.max(1, gridSettings.cols - newX);
-                const maxAllowedHeight = Math.max(1, gridSettings.rows - newY);
+            } else if (ds.dragType === 'resize') {
+                const maxAllowedWidth = Math.max(1, (gs.cols || 24) - newX);
+                const maxAllowedHeight = Math.max(1, (gs.rows || 16) - newY);
                 newWidth = Math.min(newWidth, maxAllowedWidth);
                 newHeight = Math.min(newHeight, maxAllowedHeight);
-                // Also ensure minimum sizes are respected
                 if (activeWidget) {
                     newWidth = Math.max(activeWidget.minWidth, newWidth);
                     newHeight = Math.max(activeWidget.minHeight, newHeight);
                 }
             }
 
-            // Check collision before updating
-            if (!checkCollisionAtPosition(widgets, dragState.activeWidgetId, newX, newY, newWidth, newHeight, gridSettings)) {
-                handleUpdateWidget(dragState.activeWidgetId, {
+            if (!checkCollisionAtPosition(widgetsRef.current, ds.activeWidgetId, newX, newY, newWidth, newHeight, gs)) {
+                handleUpdateWidget(ds.activeWidgetId, {
                     x: newX,
                     y: newY,
                     width: newWidth,
@@ -1704,26 +1796,17 @@ const Widgets: React.FC = () => {
         };
 
         const handleMouseUp = () => {
-            // End any active drag operation
-            setDragState(prev => ({
-                ...prev,
-                isDragging: false,
-                dragType: null,
-                activeWidgetId: null,
-            }));
+            setDragState(prev => ({ ...prev, isDragging: false, dragType: null, activeWidgetId: null }));
         };
 
-
-        if (dragState.isDragging) {
-            document.addEventListener('mousemove', handleMouseMove);
-            document.addEventListener('mouseup', handleMouseUp);
-        }
-
+        // Attach once for the component lifetime; handler reads latest state via refs
+        document.addEventListener('mousemove', handleMouseMove);
+        document.addEventListener('mouseup', handleMouseUp);
         return () => {
             document.removeEventListener('mousemove', handleMouseMove);
             document.removeEventListener('mouseup', handleMouseUp);
         };
-    }, [dragState, widgets, gridSettings, handleUpdateWidget]);
+    }, [handleUpdateWidget]);
 
     // Memoized grid lines for performance
     const GridLines = useMemo(() => {
@@ -2467,11 +2550,7 @@ const Widgets: React.FC = () => {
                                                                                             e.stopPropagation();
                                                                                             if (drawingConnection && drawingConnection.from !== id) {
                                                                                                 inputHandledRef.current = true;
-                                                                                                setConnections(prev => {
-                                                                                                    const exists = prev.some(c => c.from === drawingConnection.from && c.to === id);
-                                                                                                    if (exists) return prev;
-                                                                                                    return [...prev, { from: drawingConnection.from, to: id }];
-                                                                                                });
+                                                                                                addConnection(drawingConnection.from, id);
                                                                                                 setDrawingConnection(null);
                                                                                                 setMousePos(null);
                                                                                                 setTimeout(() => { inputHandledRef.current = false; }, 0);
@@ -2699,11 +2778,7 @@ const Widgets: React.FC = () => {
                                                                                     e.stopPropagation();
                                                                                     if (drawingConnection && drawingConnection.from !== id) {
                                                                                         inputHandledRef.current = true;
-                                                                                        setConnections(prev => {
-                                                                                            const exists = prev.some(c => c.from === drawingConnection.from && c.to === id);
-                                                                                            if (exists) return prev;
-                                                                                            return [...prev, { from: drawingConnection.from, to: id }];
-                                                                                        });
+                                                                                        addConnection(drawingConnection.from, id);
                                                                                         setDrawingConnection(null);
                                                                                         setMousePos(null);
                                                                                         setTimeout(() => { inputHandledRef.current = false; }, 0);
@@ -3042,13 +3117,9 @@ const Widgets: React.FC = () => {
                                                             height={14}
                                                             onMouseUp={e => {
                                                                 e.stopPropagation();
-                                                                if (drawingConnection && drawingConnection.from !== widgetId) {
+                                                                    if (drawingConnection && drawingConnection.from !== widgetId) {
                                                                     inputHandledRef.current = true;
-                                                                    setConnections(prev => {
-                                                                        const exists = prev.some(c => c.from === drawingConnection.from && c.to === widgetId);
-                                                                        if (exists) return prev;
-                                                                        return [...prev, { from: drawingConnection.from, to: widgetId }];
-                                                                    });
+                                                                    addConnection(drawingConnection.from, widgetId);
                                                                     setDrawingConnection(null);
                                                                     setMousePos(null);
                                                                     setTimeout(() => { inputHandledRef.current = false; }, 0);
@@ -3099,13 +3170,9 @@ const Widgets: React.FC = () => {
                                                                             style={{ cursor: 'pointer' }}
                                                                             onMouseUp={e => {
                                                                                 e.stopPropagation();
-                                                                                if (drawingConnection && drawingConnection.from !== ins.id) {
+                                                                                    if (drawingConnection && drawingConnection.from !== ins.id) {
                                                                                     inputHandledRef.current = true;
-                                                                                    setConnections(prev => {
-                                                                                        const exists = prev.some(c => c.from === drawingConnection.from && c.to === ins.id);
-                                                                                        if (exists) return prev;
-                                                                                        return [...prev, { from: drawingConnection.from, to: ins.id }];
-                                                                                    });
+                                                                                    addConnection(drawingConnection.from, ins.id);
                                                                                     setDrawingConnection(null);
                                                                                     setMousePos(null);
                                                                                     setTimeout(() => { inputHandledRef.current = false; }, 0);
@@ -3214,17 +3281,13 @@ const Widgets: React.FC = () => {
                                                                 data-handle="input"
                                                                 onMouseUp={e => {
                                                                     e.stopPropagation();
-                                                                    if (drawingConnection && drawingConnection.from !== widgetId) {
-                                                                        inputHandledRef.current = true;
-                                                                        setConnections(prev => {
-                                                                            const exists = prev.some(c => c.from === drawingConnection.from && c.to === widgetId);
-                                                                            if (exists) return prev;
-                                                                            return [...prev, { from: drawingConnection.from, to: widgetId }];
-                                                                        });
-                                                                        setDrawingConnection(null);
-                                                                        setMousePos(null);
-                                                                        setTimeout(() => { inputHandledRef.current = false; }, 0);
-                                                                    }
+                                                                        if (drawingConnection && drawingConnection.from !== widgetId) {
+                                                                            inputHandledRef.current = true;
+                                                                            addConnection(drawingConnection.from, widgetId);
+                                                                            setDrawingConnection(null);
+                                                                            setMousePos(null);
+                                                                            setTimeout(() => { inputHandledRef.current = false; }, 0);
+                                                                        }
                                                                 }}
                                                             >
                                                                 <svg width={opt.type === 'basic' ? 22 : 16} height={opt.type === 'basic' ? 22 : 16}>
@@ -3259,17 +3322,22 @@ const Widgets: React.FC = () => {
                         // ensures dashboard Plot widgets see channel-IDs even when
                         // a filter node is placed in the path (channel -> filter -> plot).
                         const getUpstreamSources = (wId: string) => {
-                            // Direct connections to this dashboard widget id. Also accept
-                            // connections created against the base flow-node id (e.g.
-                            // 'bandpower' or 'spiderplot') by comparing the prefix
-                            // before the first '-' so flow-node instances map to
-                            // dashboard widget instances created during Play.
+                            // Direct connections to this dashboard widget id.
+                            // Better match connection targets to widget instances:
+                            // - accept exact matches (c.to === wId)
+                            // - accept connections created against a flow-option id
+                            //   (e.g. c.to === 'bandpower-abc') when the widget id
+                            //   begins with that option id (e.g. 'bandpower-abc-0')
+                            // - accept connections targeting the base palette id
+                            //   (e.g. 'bandpower') as a final fallback
                             const baseTarget = String(wId || '').split('-')[0];
                             const direct = connections.filter(c => {
                                 try {
-                                    if (c.to === wId) return true;
-                                    const toBase = String(c.to || '').split('-')[0];
-                                    if (toBase && baseTarget && toBase === baseTarget) return true;
+                                    const to = String(c.to || '');
+                                    if (!to) return false;
+                                    if (to === wId) return true; // exact
+                                    if (String(wId || '').startsWith(to)) return true; // connection to flow-option id
+                                    if (to === baseTarget) return true; // user connected to palette base
                                 } catch (err) { }
                                 return false;
                             }).map(c => c.from);

@@ -439,6 +439,8 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
     const fftSize = 256;
     const sr = samplingRate || 256; // fallback
 
+    const isBandpowerWidget = String(widget.id || '').startsWith('bandpower');
+
         // If source is a channel, compute from recent samples
         if (src.startsWith('channel-')) {
             const m = src.match(/channel-(\d+)/i);
@@ -472,6 +474,16 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
         const bandKeys = Object.keys(BANDS);
         const unsub = subscribeToWidgetOutputs(src, (vals) => {
             try {
+                // Reject multi-channel frames for BandPower widgets: we expect
+                // a single numeric stream or a single flat band-array per update.
+                if (isBandpowerWidget) {
+                    for (const v of vals) {
+                        if (Array.isArray(v) && Array.isArray((v as any)[0])) {
+                            try { console.warn('[BandPower] received multi-channel frame; ignoring'); } catch (e) { }
+                            return; // ignore this update
+                        }
+                    }
+                }
                 // If upstream publisher sends full band arrays (e.g. SpiderPlot publishes [a,b,g,t,d])
                 // handle that shape directly: map into bandStats and publish beta. Otherwise
                 // treat values as a numeric stream and build a rolling buffer as before.

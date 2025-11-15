@@ -189,6 +189,34 @@ const DocModal: React.FC<{ show: boolean; onClose: () => void }> = ({ show, onCl
                                 <li>Test new adapters with recorded sample data so UI developers don't need hardware while developing.</li>
                             </ul>
                             
+                            <h4 className="text-lg font-semibold mt-4">✔ Best scalable pattern (Used in Node-RED, LabVIEW, MaxMSP, BioSignal tools)</h4>
+                            <p className="text-sm text-gray-700">Signal routing is per-channel, not per-node.</p>
+                            <p className="text-sm text-gray-700">Meaning:</p>
+                            <ul className="list-disc ml-6 text-sm text-gray-700">
+                                <li>Every processing node consumes one channel.</li>
+                                <li>If a user wants 4 channels → they drag 4 BandPower nodes (one per channel).</li>
+                            </ul>
+
+                            <p className="text-sm text-gray-700">This avoids:</p>
+                            <ul className="list-disc ml-6 text-sm text-gray-700">
+                                <li>Cross-channel interference</li>
+                                <li>Timing mismatches</li>
+                                <li>Buffer alignment issues</li>
+                                <li>UI complexity</li>
+                                <li>Routing errors</li>
+                            </ul>
+
+                            <p className="text-sm text-gray-700">Why this is good for our application:</p>
+                            <ul className="list-disc ml-6 text-sm text-gray-700">
+                                <li>Clarity & single responsibility: each processing node handles one channel, making it easy to reason about state and behavior.</li>
+                                <li>Independent timing & buffers: per-channel nodes use their own buffers and internal state, avoiding accidental misalignment when channels start or stop.</li>
+                                <li>Easy debugging and configuration: users can tweak band, window, or filter settings per-channel without affecting others.</li>
+                                <li>Scalable UI: the flow and dashboard stay predictable — adding or removing channels is explicit and localized.</li>
+                                <li>Compatibility with existing architecture: our provider already applies per-channel filters and widgets prefer published outputs from single-source nodes, so this pattern maps naturally to the codebase.</li>
+                            </ul>
+
+                            <p className="text-sm text-gray-700">Recommendation: favor one processing node per channel for most use-cases; only consolidate into multi-channel nodes when you need tight, optimized, or algorithmically coupled multi-channel processing (e.g., beamforming, PCA).</p>
+                            
                             <h4 className="text-lg font-semibold mt-4">Widget-to-widget connections (flowchart)</h4>
                             <p className="text-sm text-gray-700">
                                 Widgets expose small connection targets (the "input/output circles") in the flow editor. Connecting widgets forwards data from the source widget to the target widget. Typical behaviors:

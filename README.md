@@ -2,6 +2,38 @@
 
 A modular, drag-and-drop widget dashboard built with **Next.js**, **TypeScript**, and **Tailwind CSS**. Originally a 1000+ line monolithic component, now restructured into 8 clean, maintainable modules.
 
+## ✔ Best scalable pattern (Used in Node-RED, LabVIEW, MaxMSP, BioSignal tools)
+
+Signal routing is per-channel, not per-node.
+
+Meaning:
+
+- Every processing node consumes one channel.
+
+- If a user wants 4 channels → they drag 4 BandPower nodes (one per channel).
+
+This avoids:
+
+- Cross-channel interference
+
+- Timing mismatches
+
+- Buffer alignment issues
+
+- UI complexity
+
+- Routing errors
+
+Why this is good for our application:
+
+- Clarity & single responsibility: Each processing node handles one channel, making it easy to reason about state and behavior.
+- Independent timing & buffers: Per-channel nodes use their own buffers and internal state, avoiding accidental misalignment when channels start or stop.
+- Easy debugging and configuration: Users can tweak band, window, or filter settings per-channel without affecting others.
+- Scalable UI: The flow and dashboard stay predictable — adding or removing channels is explicit and localized.
+- Compatibility with existing architecture: Our provider already applies per-channel filters and widgets prefer published outputs from single-source nodes, so this pattern maps naturally to the codebase.
+
+Recommendation summary: favor one processing node per channel for most use-cases; only consolidate into multi-channel nodes when you need tight, optimized, or algorithmically coupled multi-channel processing (e.g., beamforming, PCA).
+
 ## 🚀 Quick Start
 
 ```bash
