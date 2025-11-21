@@ -679,17 +679,19 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
                                                         const t1 = performance.now();
                                                         console.debug(`[DraggableWidget:${widget.id}] SpiderPlot axisData computed`, { axisData: finalAxis, spiderBandArray, computeTimeMs: (performance.now() - t1) });
                                                     } catch (e) { }
-                            return (
+                                return (
                                 <SpiderPlot
-                                    width={availableWidth}
-                                    height={availableHeight}
-                                    showLabels={widget.width >= 3 && widget.height >= 3}
-                                    showValues={widget.width >= 4 && widget.height >= 4}
-                                    animated={true}
-                                    backgroundColor="rgba(2, 12, 9, 0.02)"
-                                    data={finalAxis}
-                                    widgetId={widget.id}
-                                    dottedBackground={true}   // <--- enable dotted background
+                                    {...({
+                                        width: availableWidth,
+                                        height: availableHeight,
+                                        showLabels: widget.width >= 3 && widget.height >= 3,
+                                        showValues: widget.width >= 4 && widget.height >= 4,
+                                        animated: true,
+                                        backgroundColor: "rgba(2, 12, 9, 0.02)",
+                                        data: finalAxis as any,
+                                        widgetId: widget.id,
+                                        dottedBackground: true,   // <--- enable dotted background
+                                    } as any)}
                                 />
                             );
                         })()

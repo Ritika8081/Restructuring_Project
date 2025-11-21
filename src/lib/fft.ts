@@ -9,64 +9,53 @@
  * Exports: FFT class
  */
 export class FFT {
-  size: number;
-  cosTable: Float32Array;
-  sinTable: Float32Array;
-  constructor(size: number) {
-    if ((size & (size - 1)) !== 0) {
-      throw new Error('FFT size must be a power of two');
-    }
-    this.size = size;
-    this.cosTable = new Float32Array(size / 2);
-    this.sinTable = new Float32Array(size / 2);
-    for (let i = 0; i < size / 2; i++) {
-      this.cosTable[i] = Math.cos(-2 * Math.PI * i / size);
-      this.sinTable[i] = Math.sin(-2 * Math.PI * i / size);
-    }
-  }
-
-  fft(real: Float32Array, imag: Float32Array) {
-    const n = this.size;
-    if (real.length !== n || imag.length !== n) {
-      throw new Error('real and imag arrays must have length equal to FFT size');
-    }
-    let j = 0;
-    for (let i = 0; i < n - 1; i++) {
-      if (i < j) {
-        [real[i], real[j]] = [real[j], real[i]];
-        [imag[i], imag[j]] = [imag[j], imag[i]];
+    size: number;
+    cosTable: Float32Array;
+    sinTable: Float32Array;
+    constructor(size: number) {
+      this.size = size;
+      this.cosTable = new Float32Array(size/2);
+      this.sinTable = new Float32Array(size/2);
+      for (let i = 0; i < size/2; i++) {
+        this.cosTable[i] = Math.cos(-2 * Math.PI * i / size);
+        this.sinTable[i] = Math.sin(-2 * Math.PI * i / size);
       }
-      let k = n/2;
-      while (k <= j) { j -= k; k /= 2; }
-      j += k;
     }
-    for (let len = 2; len <= n; len *= 2) {
-      const half = len/2;
-      for (let i = 0; i < n; i += len) {
-        for (let j = i, k = 0; j < i + half; j++, k++) {
-          const tRe =  real[j+half] * this.cosTable[k] - imag[j+half] * this.sinTable[k];
-          const tIm =  real[j+half] * this.sinTable[k] + imag[j+half] * this.cosTable[k];
-          real[j+half] = real[j] - tRe;
-          imag[j+half] = imag[j] - tIm;
-          real[j] += tRe;
-          imag[j] += tIm;
+    fft(real: Float32Array, imag: Float32Array) {
+      const n = this.size;
+      let j = 0;
+      for (let i = 0; i < n - 1; i++) {
+        if (i < j) {
+          [real[i], real[j]] = [real[j], real[i]];
+          [imag[i], imag[j]] = [imag[j], imag[i]];
+        }
+        let k = n/2;
+        while (k <= j) { j -= k; k/=2; }
+        j += k;
+      }
+      for (let len = 2; len <= n; len *= 2) {
+        const half = len/2;
+        for (let i = 0; i < n; i += len) {
+          for (let j = i, k = 0; j < i+half; j++, k++) {
+            const tRe =  real[j+half] * this.cosTable[k] - imag[j+half] * this.sinTable[k];
+            const tIm =  real[j+half] * this.sinTable[k] + imag[j+half] * this.cosTable[k];
+            real[j+half] = real[j] - tRe;
+            imag[j+half] = imag[j] - tIm;
+            real[j] += tRe;
+            imag[j] += tIm;
+          }
         }
       }
     }
-  }
-
-  computeMagnitudes(input: Float32Array): Float32Array {
-    if (input.length !== this.size) {
-      throw new Error('input length must equal FFT size');
+    computeMagnitudes(input: Float32Array): Float32Array {
+      const real = new Float32Array(this.size);
+      const imag = new Float32Array(this.size);
+      real.set(input);
+      this.fft(real, imag);
+      const mags = new Float32Array(this.size/2);
+      for (let i = 0; i < mags.length; i++) {
+        mags[i] = Math.hypot(real[i], imag[i]) / (this.size/2);
+      }
+      return mags;
     }
-    const real = new Float32Array(this.size);
-    const imag = new Float32Array(this.size);
-    real.set(input);
-    this.fft(real, imag);
-    const mags = new Float32Array(this.size / 2);
-    for (let i = 0; i < mags.length; i++) {
-      mags[i] = Math.hypot(real[i], imag[i]) / (this.size / 2);
-    }
-    return mags;
   }
-}
