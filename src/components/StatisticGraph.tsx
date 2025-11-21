@@ -261,7 +261,7 @@ const StatisticGraph: React.FC<StatisticGraphProps> = ({
       }
     }
 
-    try { console.debug('[StatisticGraph] draw', { dataLen: data.length, width, height, drawMs: performance.now() - t0 }); } catch (e) { }
+    // Drawing completed
 
   }, [data, type, width, height, colors, showLabels, showValues, showGrid, backgroundColor]);
 

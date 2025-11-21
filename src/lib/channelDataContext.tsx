@@ -135,8 +135,8 @@ export const ChannelDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
   // Debug flag to gate expensive per-sample logging in hot paths.
   // Set to `true` only when actively troubleshooting; keep `false`
   // in normal runs to avoid console and allocation overhead.
-  const DEBUG = true; // enabled for detailed diagnostics
-  const LOG = true;
+  const DEBUG = false;
+  const LOG = false;
   // Maximum queued, unflushed incoming samples. Protects against
   // producers faster than the RAF flush and prevents unbounded growth.
   const MAX_INCOMING_QUEUE = 5000;
@@ -499,7 +499,7 @@ export const ChannelDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
   const publishWidgetOutputs = useCallback((widgetId: string, values: number[] | number) => {
     try {
-      try { console.debug('[ChannelData] publishWidgetOutputs', { widgetId, values }); } catch (e) { }
+      if (LOG) try { console.debug('[ChannelData] publishWidgetOutputs', { widgetId, values }); } catch (e) { }
       // Prevent synchronous re-entrant publishes for the same widget id which
       // can cause deep recursion and React "Maximum update depth exceeded".
       if (publishingGuardRef.current.has(widgetId)) {

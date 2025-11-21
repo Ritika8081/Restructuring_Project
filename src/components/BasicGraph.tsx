@@ -1,5 +1,7 @@
 "use client";
 import React, { useEffect, useRef, useState, useImperativeHandle, forwardRef } from 'react';
+// Per-file logging flag for BasicGraph. Toggle when debugging rendering/subscriptions.
+const LOG = false;
 import { useChannelData } from '@/lib/channelDataContext';
 /**
  * src/components/BasicGraph.tsx
@@ -342,7 +344,7 @@ const BasicGraphRealtime = forwardRef((props: BasicGraphRealtimeProps, ref) => {
               const hasLine = !!linesRef.current.get(ch.id);
               return `${ch.id}:pending=${q.length},line=${hasLine}`;
             }).join(' | ');
-            console.debug && console.debug(`[BasicGraph:${instanceId ?? 'anon'}] render pending: ${pendingSummary}`);
+            if (LOG) console.debug && console.debug(`[BasicGraph:${instanceId ?? 'anon'}] render pending: ${pendingSummary}`);
           } catch (e) { /* ignore logging errors */ }
         }
       } catch (e) { /* ignore */ }
@@ -582,11 +584,11 @@ const BasicGraphRealtime = forwardRef((props: BasicGraphRealtimeProps, ref) => {
   useEffect(() => {
     const sources: string[] = inputWidgetId ? [String(inputWidgetId)] : (incomingConnections || []).map(String);
     if (!subscribeToWidgetOutputs || sources.length === 0) {
-      if (process.env.NODE_ENV !== 'production') console.debug(`[BasicGraph:${instanceId ?? 'anon'}] no upstream widget(s) to subscribe (inputWidgetId/incomingConnections)`);
+      if (LOG && process.env.NODE_ENV !== 'production') console.debug(`[BasicGraph:${instanceId ?? 'anon'}] no upstream widget(s) to subscribe (inputWidgetId/incomingConnections)`);
       return;
     }
 
-    console.debug(`[BasicGraph:${instanceId ?? 'anon'}] subscribing to upstream widget sources ->`, sources);
+    if (LOG) console.debug(`[BasicGraph:${instanceId ?? 'anon'}] subscribing to upstream widget sources ->`, sources);
 
     // Maintain latest value per source
     const latestPerSource = new Map<string, any>();
@@ -594,13 +596,13 @@ const BasicGraphRealtime = forwardRef((props: BasicGraphRealtimeProps, ref) => {
     const unsubs: Array<() => void> = [];
     for (const src of sources) {
       try {
-        console.debug(`[BasicGraph:${instanceId ?? 'anon'}] subscribeToWidgetOutputs ->`, src);
+        if (LOG) console.debug(`[BasicGraph:${instanceId ?? 'anon'}] subscribeToWidgetOutputs ->`, src);
         const unsub = subscribeToWidgetOutputs(String(src), (vals: any[]) => {
           try {
             if (!vals || vals.length === 0) return;
             const latest = vals[vals.length - 1];
             latestPerSource.set(src, latest);
-            console.debug(`[BasicGraph:${instanceId ?? 'anon'}] widget outputs received from ${src}:`, vals.length, 'items. latest=', latest);
+            if (LOG) console.debug(`[BasicGraph:${instanceId ?? 'anon'}] widget outputs received from ${src}:`, vals.length, 'items. latest=', latest);
 
             // Build a combined perSampleValues array by iterating sources in order
             const perSampleValues: number[] = [];
@@ -615,7 +617,7 @@ const BasicGraphRealtime = forwardRef((props: BasicGraphRealtimeProps, ref) => {
               }
             }
 
-            try { console.debug(`[BasicGraph:${instanceId ?? 'anon'}] latestPerSource keys=`, Array.from(latestPerSource.keys()), 'perSampleValues.len=', perSampleValues.length, 'perSampleValues=', perSampleValues); } catch(e) { }
+            try { if (LOG) console.debug(`[BasicGraph:${instanceId ?? 'anon'}] latestPerSource keys=`, Array.from(latestPerSource.keys()), 'perSampleValues.len=', perSampleValues.length, 'perSampleValues=', perSampleValues); } catch(e) { }
 
             // If the combined publisher is sending more elements than current
             // plotted channels, extend plotted channels immediately via a
@@ -656,7 +658,7 @@ const BasicGraphRealtime = forwardRef((props: BasicGraphRealtimeProps, ref) => {
               q.push(v);
               if (q.length > bufferSize * 4) q.splice(0, q.length - bufferSize * 4);
               pendingPerChannel.current.set(ch.id, q);
-              if (i === 0) console.debug(`[BasicGraph:${instanceId ?? 'anon'}] enqueued -> ch:${ch.id} qlen=${q.length} (perSampleValues.len=${perSampleValues.length}, plotChannels.len=${plotChannels.length})`);
+              if (i === 0 && LOG) console.debug(`[BasicGraph:${instanceId ?? 'anon'}] enqueued -> ch:${ch.id} qlen=${q.length} (perSampleValues.len=${perSampleValues.length}, plotChannels.len=${plotChannels.length})`);
             }
           } catch (err) {
             // swallow per-callback errors

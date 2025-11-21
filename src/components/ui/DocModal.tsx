@@ -140,53 +140,57 @@ const DocModal: React.FC<{ show: boolean; onClose: () => void }> = ({ show, onCl
                             <p className="text-sm text-gray-700 mb-2">
                                 Understanding how data flows through the app is essential when
                                 adding widgets, changing connection adapters, or modifying
-                                signal-processing logic. Below is the typical end-to-end flow:
+                                signal-processing logic. Below is the current end-to-end flow
+                                including recent architecture updates (workers and provider wiring):
                             </p>
 
                             <ol className="list-decimal ml-6 text-sm text-gray-700 mb-2">
                                 <li>
                                     <strong>Connection adapters</strong> (under <code>src/connections</code>)
                                     receive raw bytes/frames from the device (BLE, Serial, or network).
-                                    They parse the device-specific framing and emit a normalized
-                                    message/object into the app (for example: {`{ channelId, timestamp, samples }`} ).
+                                    They parse device framing and push normalized sample objects
+                                    into the central channel provider.
                                 </li>
                                 <li>
-                                    <strong>Channel data context</strong> (<code>src/lib/channelDataContext.tsx</code>)
-                                    is the central pub/sub point. Connection adapters push parsed
-                                    frames here. The context stores recent buffers per channel and
-                                    notifies subscribers (widgets, processors) of new data.
+                                    <strong>ChannelDataProvider</strong> (<code>src/lib/channelDataContext.tsx</code>)
+                                    is the canonical pub/sub hub. It maintains bounded per-channel
+                                    sliding buffers, applies per-channel filters, and forwards
+                                    single-sample messages to per-channel workers for CPU-bound
+                                    processing. The provider also coalesces and rate-limits
+                                    published widget outputs to avoid UI thrash.
                                 </li>
                                 <li>
-                                    <strong>Workers</strong> (for example, <code>src/workers/bandpower.worker.ts</code>)
-                                    subscribe to channel buffers or receive explicit messages from
-                                    the main thread. These handle CPU-heavy operations (FFT,
-                                    filtering, bandpower) and post processed results back via
-                                    postMessage. Processed outputs are then published to the UI
-                                    via the channel context or dispatched events.
+                                    <strong>Per-channel workers</strong> (for example, <code>src/workers/bandpower.worker.ts</code>)
+                                    handle FFT, smoothing, Welch-style PSD calculations and band
+                                    aggregation off the main thread. Workers accept streaming
+                                    single-sample posts and periodically run FFTs, returning
+                                    compact band arrays (delta/theta/alpha/beta/gamma) which
+                                    the provider republishes under widget ids like
+                                    <code>channel-band-ch{`{idx}`}</code>.
                                 </li>
                                 <li>
-                                    <strong>UI components / Widgets</strong> subscribe to the channel
-                                    context or receive processed results. Widgets should avoid
-                                    performing heavy processing on the main thread; prefer using
-                                    workers or lightweight aggregations.
+                                    <strong>Widgets / UI</strong> subscribe to the provider's
+                                    published outputs (widget ids) instead of computing band
+                                    powers on the main thread. This reduces UI lag and keeps
+                                    visuals consistent (e.g., SpiderPlot and StatisticGraph
+                                    show the same canonical band arrays).
                                 </li>
                                 <li>
-                                    <strong>Serialization & state</strong> — when storing widget
-                                    configuration or saving layouts, the app serializes the
-                                    widget props and minimal state. Types live in
-                                    <code>src/types/widget.types.ts</code>. Keep serialization
-                                    stable for backwards compatibility.
+                                    <strong>Serialization & state</strong> — widget configuration
+                                    and minimal runtime state are serialized for layout persistence.
+                                    Types live in <code>src/types/widget.types.ts</code>.
                                 </li>
                             </ol>
 
-                            <p className="text-sm text-gray-700">
-                                Practical tips:
-                            </p>
+                            <p className="text-sm text-gray-700">Practical tips and recent best practices:</p>
                             <ul className="list-disc ml-6 text-sm text-gray-700">
-                                <li>Keep connection parsing deterministic and emit a consistent shape.</li>
-                                <li>Buffer sizes: the context usually retains a sliding buffer per channel — increase only when necessary.</li>
-                                <li>Use workers for any FFT, large-window filtering, or batch processing.</li>
-                                <li>Test new adapters with recorded sample data so UI developers don't need hardware while developing.</li>
+                                <li>Prefer worker offload for FFT, large-window filters, and PSDs.</li>
+                                <li>The provider exposes a publish/subscribe API; subscribe to
+                                    published widget ids (e.g., <code>channel-band-ch0</code>).</li>
+                                <li>The provider coalesces rapid publishes (PUB_INTERVAL_MS)
+                                    and gates debug logging with internal flags to reduce overhead.</li>
+                                <li>When troubleshooting, enable per-file LOG flags rather than
+                                    leaving verbose logs enabled in production.</li>
                             </ul>
                             
                             <h4 className="text-lg font-semibold mt-4">✔ Best scalable pattern (Used in Node-RED, LabVIEW, MaxMSP, BioSignal tools)</h4>
@@ -249,10 +253,24 @@ const DocModal: React.FC<{ show: boolean; onClose: () => void }> = ({ show, onCl
                         <section id="workers" data-id="workers" className="mb-8">
                             <h3 className="text-lg font-semibold mb-2">Workers</h3>
                             <p className="text-sm text-gray-700">
-                                <code>src/workers/bandpower.worker.ts</code> contains WebWorker code for
-                                CPU-bound signal processing (bandpower). Keep heavy operations here
-                                to avoid blocking the UI thread.
+                                <code>src/workers/bandpower.worker.ts</code> implements the
+                                streaming bandpower pipeline used by the provider. Workers
+                                are responsible for buffering single-sample posts, running
+                                FFTs every N samples (configurable), computing Welch-style
+                                PSDs or simple FFT-derived magnitudes, smoothing (EMA)
+                                and returning compact band arrays (delta/theta/alpha/beta/gamma).
                             </p>
+                            <p className="text-sm text-gray-700">
+                                Key design points:
+                            </p>
+                            <ul className="list-disc ml-6 text-sm text-gray-700">
+                                <li>Workers accept streaming samples to minimize main-thread work.</li>
+                                <li>FFT instances are reused inside workers to avoid allocation churn.</li>
+                                <li>Workers return small, canonical payloads; the provider coalesces
+                                    multiple worker messages before publishing to widgets.</li>
+                                <li>Keep workers focused and return quickly from message handlers
+                                    (enqueue + short debounce) so the browser scheduler isn't blocked.</li>
+                            </ul>
                         </section>
 
                         <section id="utils" data-id="utils" className="mb-8">
@@ -276,9 +294,16 @@ const DocModal: React.FC<{ show: boolean; onClose: () => void }> = ({ show, onCl
                             <h3 className="text-lg font-semibold mb-2">Signal processing library</h3>
                             <ul className="list-disc ml-6 text-sm text-gray-700">
                                 <li><code>src/lib/filters.ts</code> — digital filter helpers.</li>
-                                <li><code>src/lib/fft.ts</code> — FFT helpers used by frequency plots.</li>
-                                <li><code>src/lib/bandpower.ts</code> — wrapper for bandpower metrics.</li>
-                                <li><code>src/lib/channelDataContext.tsx</code> — React context for streaming channel data.</li>
+                                <li><code>src/lib/fft.ts</code> — FFT helpers; the implementation has been
+                                    simplified (radix-2) and is used both in workers and for small,
+                                    read-only visualizations.</li>
+                                <li><code>src/lib/bandpower.ts</code> — wrapper/helpers for bandpower metrics; workers and
+                                    provider use these helpers to create consistent band outputs.</li>
+                                <li><code>src/lib/channelDataContext.tsx</code> — central provider for streaming channel data.
+                                    It creates per-channel workers, forwards single-sample posts, and
+                                    exposes a publish/subscribe API for widgets. The provider also
+                                    coalesces publishes and exposes internal LOG flags to silence
+                                    verbose debug output in hot paths.</li>
                             </ul>
                         </section>
 
@@ -309,7 +334,12 @@ const DocModal: React.FC<{ show: boolean; onClose: () => void }> = ({ show, onCl
                                 <li><code>Header.tsx</code> — top nav (contains Configure Flow + Docs button).</li>
                                 <li><code>WidgetPalette.tsx</code> — drag source for widgets.</li>
                                 <li><code>DraggableWidget.tsx</code> — drag/resize wrapper.</li>
-                                <li><code>BasicGraph.tsx</code>, <code>FFTPlot.tsx</code>, <code>StatisticGraph.tsx</code>, <code>SpiderPlot.tsx</code> — visualizations.</li>
+                                <li><code>BasicGraph.tsx</code>, <code>FFTPlot.tsx</code>, <code>StatisticGraph.tsx</code>, <code>SpiderPlot.tsx</code> — visualizations. Note:
+                                    <ul className="list-disc ml-6 text-sm text-gray-700">
+                                        <li><code>SpiderPlot.tsx</code> is display-only and consumes the provider's canonical band arrays so it always matches <code>StatisticGraph</code>.</li>
+                                        <li>SpiderPlot includes anti-collapse logic (circular-fill) to avoid zero-area polygons and supports an optional throttled console log controlled via props (use sparingly).</li>
+                                    </ul>
+                                </li>
                                 <li><code>ConnectionSelectorWidget.tsx</code> and <code>ConnectionDataWidget.tsx</code> — UI for connection selection and data display.</li>
                             </ul>
                         </section>

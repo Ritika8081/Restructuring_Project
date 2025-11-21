@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef } from 'react';
 
 export type SpiderDatum = { subject: string; value: number };
 
@@ -8,6 +8,8 @@ type Props = {
   colors?: string[]; // gradient stops or single color
   max?: number; // max value for radial scaling (defaults to 1)
   gridLevels?: number; // concentric polygon levels
+  logValues?: boolean; // whether to print the normalized band values to console
+  logIntervalMs?: number; // minimum ms between prints
 };
 
 const defaultBands = ['Delta', 'Theta', 'Alpha', 'Beta', 'Gamma'];
@@ -66,17 +68,54 @@ function normalizeInput(data?: SpiderDatum[] | number[] | any[]) {
   return defaultBands.map((s) => ({ subject: s, value: 0 }));
 }
 
-export default function SpiderPlot({ data, size = '100%', colors = ['#6C5CE7', '#00B894'], max = 1, gridLevels = 4 }: Props) {
+export default function SpiderPlot({ data, size = '100%', colors = ['#6C5CE7', '#00B894'], max = 1, gridLevels = 4, logValues = true, logIntervalMs = 250 }: Props) {
+  const lastLogRef = useRef<number>(0);
   const d = normalizeInput(data);
   const N = d.length;
-  const viewSize = typeof size === 'number' ? size : 240;
-  const cx = viewSize / 2;
-  const cy = viewSize / 2;
-  const radius = Math.min(cx, cy) * 0.85;
+  // Use a base logical drawing area (baseSize). When `size` is a number, we
+  // allow the SVG to be that pixel size; when `size` is '100%' we still use
+  // the baseSize for coordinate math and let the SVG scale to its container.
+  const baseSize = typeof size === 'number' ? size : 240;
+
+  // Add padding around the base drawing area to avoid label clipping. Padding
+  // scales with the baseSize so larger plots get proportionally more room.
+  const padding = Math.max(18, Math.round(baseSize * 0.12));
+  const viewWidth = baseSize + padding * 2;
+
+  // Center of the radar in view coordinates (accounting for padding)
+  const cx = padding + baseSize / 2;
+  const cy = padding + baseSize / 2;
+
+  // Radius inside the base drawing area (we keep a margin so labels can sit outside)
+  const radius = Math.min(baseSize / 2, baseSize / 2) * 0.78;
 
   const angleStep = (Math.PI * 2) / N;
 
   const maxVal = Math.max(max, ...d.map((p) => Math.abs(p.value)));
+
+  // Prepare normalized band values (0..1) for logging/inspection
+  const normalizedBands = d.map((p) => Math.max(0, Math.min(1, p.value / maxVal)));
+
+  // Throttled console output to avoid flooding the console on high-frequency updates
+  if (logValues) {
+    try {
+      const now = performance.now();
+      if (now - (lastLogRef.current || 0) >= (logIntervalMs || 250)) {
+        // Print labels and normalized band values together for clarity
+        // Example: { labels: [...], values: [...] }
+        // Use console.log deliberately (user requested visible printouts)
+        // Wrap in try/catch to avoid any accidental runtime issues
+        console.log('[SpiderPlot] bands', {
+          labels: d.map((p) => p.subject),
+          values: normalizedBands,
+          raw: d.map((p) => p.value),
+        });
+        lastLogRef.current = now;
+      }
+    } catch (e) {
+      // swallow logging errors
+    }
+  }
 
   const pointsForLevel = (level: number) => {
     const r = (radius * level) / gridLevels;
@@ -104,8 +143,19 @@ export default function SpiderPlot({ data, size = '100%', colors = ['#6C5CE7', '
 
   const stops = colors;
 
+  // Scaled sizes for stroke and font so visuals remain proportional when
+  // the component is resized via CSS (SVG scales using viewBox).
+  const strokeW = Math.max(1, Math.round(baseSize * 0.008));
+  const fontSize = Math.max(9, Math.round(baseSize * 0.045));
+
   return (
-    <svg width={size} height={size} viewBox={`0 0 ${viewSize} ${viewSize}`} preserveAspectRatio="xMidYMid meet">
+    <svg
+      width={size}
+      height={size}
+      viewBox={`0 0 ${viewWidth} ${viewWidth}`}
+      preserveAspectRatio="xMidYMid meet"
+      style={{ overflow: 'visible' }}
+    >
       <defs>
         <linearGradient id="spiderGrad" x1="0%" x2="100%" y1="0%" y2="0%">
           {stops.map((c, i) => (
@@ -122,7 +172,7 @@ export default function SpiderPlot({ data, size = '100%', colors = ['#6C5CE7', '
       <circle cx={cx} cy={cy} r={radius * 1.05} fill="url(#spiderGlow)" />
 
       {/* grid concentric polygons */}
-      <g stroke="#cbd5e1" strokeWidth={1} fill="none" opacity={0.7}>
+      <g stroke="#cbd5e1" strokeWidth={Math.max(0.5, strokeW * 0.7)} fill="none" opacity={0.7}>
         {Array.from({ length: gridLevels }, (_, li) => (
           <polygon key={li} points={pointsForLevel(gridLevels - li)} strokeDasharray={li === 0 ? '3 3' : '2 3'} />
         ))}
@@ -134,13 +184,14 @@ export default function SpiderPlot({ data, size = '100%', colors = ['#6C5CE7', '
           const a = -Math.PI / 2 + i * angleStep;
           const x = cx + radius * Math.cos(a);
           const y = cy + radius * Math.sin(a);
-          const lx = cx + (radius + 18) * Math.cos(a);
-          const ly = cy + (radius + 18) * Math.sin(a);
+          const labelDist = radius + Math.max(12, padding * 0.6);
+          const lx = cx + labelDist * Math.cos(a);
+          const ly = cy + labelDist * Math.sin(a);
           const anchor = Math.abs(Math.cos(a)) < 0.2 ? 'middle' : Math.cos(a) > 0 ? 'start' : 'end';
           return (
             <g key={p.subject}>
-              <line x1={cx} y1={cy} x2={x} y2={y} stroke="#94a3b8" strokeWidth={1} opacity={0.7} />
-              <text x={lx} y={ly} fontSize={11} fill="#334155" textAnchor={anchor} dominantBaseline="central">
+              <line x1={cx} y1={cy} x2={x} y2={y} stroke="#94a3b8" strokeWidth={Math.max(0.6, strokeW * 0.6)} opacity={0.7} />
+              <text x={lx} y={ly} fontSize={fontSize} fill="#334155" textAnchor={anchor} dominantBaseline="central">
                 {p.subject}
               </text>
             </g>
@@ -150,7 +201,7 @@ export default function SpiderPlot({ data, size = '100%', colors = ['#6C5CE7', '
 
       {/* value polygon (filled with gradient and stroked) */}
       <g>
-        <polygon points={valuePolygon()} fill="url(#spiderGrad)" fillOpacity={0.25} stroke="url(#spiderGrad)" strokeWidth={2} />
+        <polygon points={valuePolygon()} fill="url(#spiderGrad)" fillOpacity={0.25} stroke="url(#spiderGrad)" strokeWidth={Math.max(1, strokeW)} />
 
         {/* vertex dots */}
         {d.map((p, i) => {
@@ -160,7 +211,7 @@ export default function SpiderPlot({ data, size = '100%', colors = ['#6C5CE7', '
           const x = cx + r * Math.cos(a);
           const y = cy + r * Math.sin(a);
           const color = stops[i % stops.length];
-          return <circle key={i} cx={x} cy={y} r={3.5} fill={color} stroke="#fff" strokeWidth={0.8} />;
+          return <circle key={i} cx={x} cy={y} r={Math.max(2.5, strokeW * 1.6)} fill={color} stroke="#fff" strokeWidth={Math.max(0.6, strokeW * 0.4)} />;
         })}
       </g>
 

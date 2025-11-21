@@ -15,6 +15,8 @@ import { useChannelData } from '@/lib/channelDataContext';
  * Manages widget state, grid settings, drag operations, and user interactions
  */
 const Widgets: React.FC = () => {
+    // Flow debug logging (set true when troubleshooting flow wiring)
+    const FLOW_LOG = false;
 
     // Modern flat color map for flowchart widgets (distinct flat colors, no gradients)
     const THEME_COLORS: Record<string, { bg: string, text: string, border: string, shadow: string }> = {
@@ -196,12 +198,12 @@ const Widgets: React.FC = () => {
                     if (publisherIds.length === 0) publisherIds.push(from);
 
                     for (const pubId of publisherIds) {
-                        try { console.debug('[Flow] forward subscribe', { from: pubId, to }); } catch (e) { }
+                        if (FLOW_LOG) try { console.debug('[Flow] forward subscribe', { from: pubId, to }); } catch (e) { }
                         const key = `${pubId}=>${to}`;
                         if (forwardingUnsubsRef.current[key]) continue;
                         const unsub = subscribeToWidgetOutputs(pubId, (vals: Array<number | number[]>) => {
                             try {
-                                try { console.debug('[Flow] forward payload', { from: pubId, to, vals }); } catch (e) { }
+                                if (FLOW_LOG) try { console.debug('[Flow] forward payload', { from: pubId, to, vals }); } catch (e) { }
                                 publishWidgetOutputs(to, Array.isArray(vals) && vals.length === 1 ? vals[0] as any : vals.slice());
                             } catch (err) { /* swallow per-forward errors */ }
                         });
@@ -592,12 +594,12 @@ const Widgets: React.FC = () => {
         try {
             if (connections && connections.length > 0) {
                 console.group('[Flow] playFlow - connections');
-                try { console.table(connections); } catch (e) { console.log('connections:', connections); }
-                // also log a raw copy to avoid accidental mutation issues when inspecting
-                try { console.log('connections (raw):', JSON.parse(JSON.stringify(connections))); } catch (e) { /* ignore */ }
-                console.groupEnd();
+                        if (FLOW_LOG) try { console.table(connections); } catch (e) { if (FLOW_LOG) console.log('connections:', connections); }
+                // // also log a raw copy to avoid accidental mutation issues when inspecting
+                // try { console.log('connections (raw):', JSON.parse(JSON.stringify(connections))); } catch (e) { /* ignore */ }
+                // console.groupEnd();
             } else {
-                console.debug('[Flow] playFlow - no connections to print');
+                if (FLOW_LOG) console.debug('[Flow] playFlow - no connections to print');
             }
         } catch (err) {
             console.warn('[Flow] playFlow - failed to print connections', err);
@@ -958,7 +960,7 @@ const Widgets: React.FC = () => {
     // issues where stored positions don't match the visual scaled surface.
     useEffect(() => {
         try {
-            console.debug('[FlowDebug] flowScale/modalPositions', { flowScale, modalPositions });
+            if (FLOW_LOG) console.debug('[FlowDebug] flowScale/modalPositions', { flowScale, modalPositions });
         } catch (err) { /* ignore */ }
     }, [flowScale, modalPositions]);
     // Selected connection index (for arrow selection/deletion)
@@ -1156,9 +1158,9 @@ const Widgets: React.FC = () => {
             // Find all channel -> plot connections
             const channelToPlot = connections.filter(c => typeof c.from === 'string' && String(c.from).startsWith('channel-') && typeof c.to === 'string' && plotInstanceIds.includes(String(c.to)));
 
-            console.debug('[FlowDebug] connections', { total: connections.length, connections });
-            console.debug('[FlowDebug] plotInstanceIds', plotInstanceIds);
-            console.debug('[FlowDebug] channel->plot mappings', channelToPlot);
+            if (FLOW_LOG) console.debug('[FlowDebug] connections', { total: connections.length, connections });
+            if (FLOW_LOG) console.debug('[FlowDebug] plotInstanceIds', plotInstanceIds);
+            if (FLOW_LOG) console.debug('[FlowDebug] channel->plot mappings', channelToPlot);
 
             // (mapped-samples logging removed to avoid re-rendering the Flow
             // component on every incoming device sample; use ChannelData logs

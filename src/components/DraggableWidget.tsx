@@ -9,12 +9,13 @@
  * Exports: default memoized DraggableWidget
  */
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
+// Per-file logging flag. Set to `true` when actively debugging this component.
+const LOG = false;
 import SpiderPlot from '@/components/SpiderPlot';
 import CandleChart from '@/components/Candle';
 import StatisticGraph from '@/components/StatisticGraph';
 import FFTPlotRealtime from '@/components/FFTPlot';
 import BasicGraphRealtime from '@/components/BasicGraph';
-import Envelope from '@/components/Envelope';
 import ErrorBoundary from '@/components/ErrorBoundary';
 import { useChannelData } from '@/lib/channelDataContext';
 import { FFT } from '@/lib/fft';
@@ -41,7 +42,9 @@ type DraggableWidgetProps = {
 const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onRemove, gridSettings, dragState, setDragState, onUpdateWidget, children, incomingConnections = [] }) => {
     // Debug: log incoming connections for this dashboard widget to help trace flow wiring
     useEffect(() => {
-        try { console.debug(`[DraggableWidget:${widget.id}] incomingConnections`, incomingConnections); } catch (e) { }
+        if (LOG) {
+            try { console.debug(`[DraggableWidget:${widget.id}] incomingConnections`, incomingConnections); } catch (e) { }
+        }
     }, [widget.id, incomingConnections]);
     // Widget-specific channel state (for basic signal widgets)
     // Prefer explicit `widget.channelIndex` (set by the arranger) and fall back to parsing widget.id
@@ -122,7 +125,7 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
             if (!subscribeToWidgetOutputs) return;
             const unsub = subscribeToWidgetOutputs(src, (vals) => {
                 try {
-                    try { console.debug(`[DraggableWidget:${widget.id}] candle subscriber received`, { src, vals }); } catch (e) { }
+                    if (LOG) try { console.debug(`[DraggableWidget:${widget.id}] candle subscriber received`, { src, vals }); } catch (e) { }
                     if (!vals || vals.length === 0) return;
                     const last = vals[vals.length - 1];
                     let v: number | undefined = undefined;
@@ -138,12 +141,12 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
                         return;
                     }
 
-                    try { console.debug(`[DraggableWidget:${widget.id}] candle computed beta (raw)`, v); } catch (e) { }
+                    if (LOG) try { console.debug(`[DraggableWidget:${widget.id}] candle computed beta (raw)`, v); } catch (e) { }
                     // Normalize relative fractions to percent and clamp
                     let numeric = Number(v) || 0;
                     if (numeric > 0 && numeric <= 1) numeric = numeric * 100;
                     numeric = Math.max(0, Math.min(100, numeric));
-                    try { console.debug(`[DraggableWidget:${widget.id}] candle computed beta (scaled %)`, numeric); } catch (e) { }
+                    if (LOG) try { console.debug(`[DraggableWidget:${widget.id}] candle computed beta (scaled %)`, numeric); } catch (e) { }
                     setCandleBeta(numeric);
                 } catch (err) { /* ignore per-callback errors */ }
             });
@@ -195,13 +198,13 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
             input[i] = v;
         }
 
-        try {
-            const fft = new FFT(fftSize);
-            const mags = fft.computeMagnitudes(input); // Float32Array length fftSize/2
-            // Debug log to help trace why nothing is plotted
-            try { console.debug('[FFT] computed mags', { src, chIdx, recentLen: recent.length, magsLen: mags.length, firstMags: Array.from(mags.slice(0, 8)) }); } catch (e) { }
-            setFftInputData(Array.from(mags));
-        } catch (err) {
+            try {
+                const fft = new FFT(fftSize);
+                const mags = fft.computeMagnitudes(input); // Float32Array length fftSize/2
+                // Debug log to help trace why nothing is plotted
+                if (LOG) try { console.debug('[FFT] computed mags', { src, chIdx, recentLen: recent.length, magsLen: mags.length, firstMags: Array.from(mags.slice(0, 8)) }); } catch (e) { }
+                setFftInputData(Array.from(mags));
+            } catch (err) {
             // If FFT fails, clear input and log
             try { console.error('[FFT] compute failed', err); } catch (e) { }
             setFftInputData(undefined);
@@ -677,7 +680,7 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
                                                     const finalAxis = axisData && Array.isArray(axisData) ? axisData : defaultAxis;
                                                     try {
                                                         const t1 = performance.now();
-                                                        console.debug(`[DraggableWidget:${widget.id}] SpiderPlot axisData computed`, { axisData: finalAxis, spiderBandArray, computeTimeMs: (performance.now() - t1) });
+                                                        if (LOG) console.debug(`[DraggableWidget:${widget.id}] SpiderPlot axisData computed`, { axisData: finalAxis, spiderBandArray, computeTimeMs: (performance.now() - t1) });
                                                     } catch (e) { }
                                 return (
                                 <SpiderPlot
