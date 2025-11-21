@@ -1717,9 +1717,32 @@ const Widgets: React.FC = () => {
      * Update widget properties
      */
     const handleUpdateWidget = useCallback((id: string, updates: Partial<Widget>) => {
-        setWidgets(prev => prev.map(widget =>
-            widget.id === id ? { ...widget, ...updates } : widget
-        ));
+        // Avoid creating new array/object references when the updates
+        // do not actually change any widget properties. This prevents
+        // redundant re-renders and potential update loops when mouse
+        // move or other high-frequency handlers call this repeatedly
+        // with identical values.
+        setWidgets(prev => {
+            const idx = prev.findIndex(w => w.id === id);
+            if (idx === -1) return prev;
+            const old = prev[idx];
+
+            // If none of the provided update keys change the old widget,
+            // return the previous array to avoid a state change.
+            let changed = false;
+            for (const k of Object.keys(updates || {})) {
+                // compare shallowly for primitive fields (x,y,width,height,...)
+                // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+                // @ts-ignore
+                if ((updates as any)[k] !== (old as any)[k]) { changed = true; break; }
+            }
+            if (!changed) return prev;
+
+            const merged = { ...old, ...updates } as Widget;
+            const next = prev.slice();
+            next[idx] = merged;
+            return next;
+        });
     }, []);
 
     /**

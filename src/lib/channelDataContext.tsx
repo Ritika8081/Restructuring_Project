@@ -1,6 +1,6 @@
 'use client';
 import React, { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react';
-import { Notch, createFilterInstance } from './filters';
+import { createFilterInstance } from './filters';
 
 /**
  * src/lib/channelDataContext.tsx
@@ -109,10 +109,18 @@ export const ChannelDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
   // Each entry is either a number or an array of numbers (for multi-channel outputs).
   const widgetOutputsRef = useRef<Record<string, Array<number | number[]>>>({});
   const widgetOutputSubscribersRef = useRef<Record<string, Set<(vals: Array<number | number[]>) => void>>>({});
+  // Per-channel bandpower workers (one worker per channel index)
+  const channelWorkersRef = useRef<Record<number, Worker | null>>({});
+  // Ref to publishWidgetOutputs so worker message handlers can forward results
+  const publishRef = useRef<((widgetId: string, values: number[] | number) => void) | null>(null);
   // Guard against re-entrant publishes that can create synchronous publish->subscribe
   // cycles (widget A forwards to B and B forwards back to A). We short-circuit
   // re-entrant publishes per-widget id to avoid infinite synchronous loops.
   const publishingGuardRef = useRef<Set<string>>(new Set());
+  // Rate-limit/coalesce publishes per widget to avoid UI thrash
+  const lastPublishedAtRef = useRef<Record<string, number>>({});
+  const pendingPublishTimersRef = useRef<Record<string, number>>({});
+  const pendingPublishValueRef = useRef<Record<string, number | number[]>>({});
   // Connection disconnect handlers registry (for connection components to register their cleanup callback)
   const connectionDisconnectHandlersRef = useRef<Set<() => void>>(new Set());
   // Track observed per-channel raw maximums to help infer the ADC range
@@ -127,7 +135,8 @@ export const ChannelDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
   // Debug flag to gate expensive per-sample logging in hot paths.
   // Set to `true` only when actively troubleshooting; keep `false`
   // in normal runs to avoid console and allocation overhead.
-  const DEBUG = false;
+  const DEBUG = true; // enabled for detailed diagnostics
+  const LOG = true;
   // Maximum queued, unflushed incoming samples. Protects against
   // producers faster than the RAF flush and prevents unbounded growth.
   const MAX_INCOMING_QUEUE = 5000;
@@ -373,6 +382,65 @@ export const ChannelDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
                 try { subscriber(sampleBatch.slice()); } catch (err) { /* ignore per-subscriber errors */ }
               });
             } catch (err) { /* swallow */ }
+
+            // Diagnostics: log RAF flush timing and batch details when debugging
+            try {
+              if (LOG) {
+                try { console.debug('[ChannelData] RAF flush', { batchLen: sampleBatch.length, registered: Array.from(registeredChannelIndices.current || []).length, subsCount: subscribersRef.current.size }); } catch (e) { }
+              }
+            } catch (e) { }
+
+            // Forward the most recent frame to per-channel bandpower workers
+                        // Forward live samples in the batch to per-channel bandpower workers.
+                        // Post each sample so the worker can buffer and run FFT every N samples.
+                        try {
+                          const regs = Array.from(registeredChannelIndices.current || []);
+                          if (regs.length === 0) return;
+                          // Cap posts per flush to avoid surges
+                          const MAX_POSTS_PER_FLUSH = 64;
+                          const postsToSend = Math.min(sampleBatch.length, MAX_POSTS_PER_FLUSH);
+                          for (const idx of regs) {
+                            try {
+                              const key = `ch${idx}`;
+                              // Ensure worker exists
+                              if (!channelWorkersRef.current[idx]) {
+                                try {
+                                  const w = new Worker(new URL('@/workers/bandpower.worker.ts', import.meta.url), { type: 'module' });
+                                  // attach message handler to publish band arrays when ready
+                                  w.addEventListener('message', (ev: MessageEvent<any>) => {
+                                    try {
+                                      const payload = ev?.data || {};
+                                      const rel = payload.relative || payload.relBands || payload.smooth || payload.raw || {};
+                                      const bandOrder = ['delta', 'theta', 'alpha', 'beta', 'gamma'];
+                                      const arr = bandOrder.map(k => Number(rel[k] ?? 0));
+                                      const wid = `channel-band-ch${idx}`;
+                                      if (LOG) try { console.debug('[ChannelData] worker->publish', { ch: idx, wid, arr }); } catch (e) { }
+                                      if (publishRef.current) publishRef.current(wid, arr);
+                                    } catch (e) { }
+                                  });
+                                  if (LOG) try { console.debug('[ChannelData] created worker for ch', idx); } catch (e) { }
+                                  channelWorkersRef.current[idx] = w;
+                                } catch (e) {
+                                  channelWorkersRef.current[idx] = null;
+                                }
+                              }
+                              const ww = channelWorkersRef.current[idx];
+                              if (!ww) continue;
+                              // Post up to postsToSend samples from the batch (older -> newer)
+                              const start = Math.max(0, sampleBatch.length - postsToSend);
+                              for (let si = start; si < sampleBatch.length; si++) {
+                                try {
+                                  const frame = sampleBatch[si] as any;
+                                  const v = frame && frame[key] !== undefined ? Number(frame[key]) : (frame && frame._raw && frame._raw[key] !== undefined ? Number(frame._raw[key]) : 0);
+                                  if (LOG) try { console.debug('[ChannelData] posting sample to worker', { ch: idx, sample: v }); } catch (e) { }
+                                  ww.postMessage({ sample: Number(v) || 0, sampleRate: samplingRate ?? 256, fftSize: 256, samplesPerFFT: 10, smootherWindow: 128, mode: 'simple' });
+                                } catch (e) { /* per-sample guard */ }
+                              }
+                            } catch (err) { /* per-channel guard */ }
+                          }
+                        } catch (err) { /* ignore worker-forward errors */ }
+                // (Removed duplicated per-channel posting block — posting is handled
+                // above where we send up to `MAX_POSTS_PER_FLUSH` samples per channel.)
           } catch (err) {
             // swallow
           } finally {
@@ -439,53 +507,62 @@ export const ChannelDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
         return;
       }
       publishingGuardRef.current.add(widgetId);
+
+      // Ensure per-widget buffer exists and append (store latest)
       if (!widgetOutputsRef.current[widgetId]) widgetOutputsRef.current[widgetId] = [];
-      // If caller provided an array, store the array as a single entry so
-      // subscribers receive an array entry (multi-channel frame). If a single
-      // number is provided, store it as a number entry.
       if (Array.isArray(values)) {
-        // store the original array frame
         widgetOutputsRef.current[widgetId].push(values.slice());
-        // If this looks like a bandpower vector (e.g. [Alpha, Beta, ...])
-        // append a normalized numeric beta-percent entry so consumers that
-        // expect a single numeric value (like Candle) receive a clear
-        // canonical value and don't need to guess the shape.
-        try {
-          const betaRaw = values.length > 1 ? values[1] : undefined;
-          if (typeof betaRaw === 'number') {
-            let betaNum = betaRaw;
-            // If beta is a relative fraction (0..1) convert to percent
-            if (betaNum > 0 && betaNum <= 1) betaNum = betaNum * 100;
-            betaNum = Math.max(0, Math.min(100, Number(betaNum) || 0));
-            widgetOutputsRef.current[widgetId].push(betaNum);
-          }
-        } catch (e) { /* ignore normalization errors */ }
       } else {
         widgetOutputsRef.current[widgetId].push(values as number);
       }
-      // Append and keep only the last 1024 frames/values to bound memory
       if (widgetOutputsRef.current[widgetId].length > 1024) {
         widgetOutputsRef.current[widgetId] = widgetOutputsRef.current[widgetId].slice(-1024);
       }
+
+      // Rate-limit delivery to subscribers to at most once per PUB_INTERVAL_MS
+      const PUB_INTERVAL_MS = 150;
+      const now = Date.now();
+      const last = lastPublishedAtRef.current[widgetId] || 0;
+      const elapsed = now - last;
       const subs = widgetOutputSubscribersRef.current[widgetId];
-      if (subs && subs.size > 0) {
-        // Deliver a shallow copy. Call subscribers asynchronously to break
-        // synchronous cycles and allow React to batch updates.
-        const copy = widgetOutputsRef.current[widgetId].slice();
+
+      const deliver = () => {
         try {
-          // Use microtask to keep ordering but avoid deep sync recursion
-          Promise.resolve().then(() => {
+          const copy = widgetOutputsRef.current[widgetId].slice();
+          if (subs && subs.size > 0) {
             subs.forEach(s => { try { s(copy); } catch (e) { /* ignore */ } });
-          });
-        } catch (e) {
-          // Fallback to synchronous delivery if microtask scheduling fails
-          subs.forEach(s => { try { s(copy); } catch (e) { /* ignore */ } });
+          }
+        } catch (e) { /* ignore */ } finally {
+          lastPublishedAtRef.current[widgetId] = Date.now();
+          // clear any pending timer record
+          try { if (pendingPublishTimersRef.current[widgetId]) { clearTimeout(pendingPublishTimersRef.current[widgetId]); delete pendingPublishTimersRef.current[widgetId]; } } catch (e) { }
+          try { delete pendingPublishValueRef.current[widgetId]; } catch (e) { }
+        }
+      };
+
+      if (elapsed >= PUB_INTERVAL_MS) {
+        // deliver immediately
+        try { deliver(); } catch (e) { }
+      } else {
+        // schedule delivery to coalesce rapid updates
+        pendingPublishValueRef.current[widgetId] = values;
+        if (!pendingPublishTimersRef.current[widgetId]) {
+          const wait = PUB_INTERVAL_MS - elapsed;
+          const tid = window.setTimeout(() => {
+            try { deliver(); } catch (e) { }
+          }, wait);
+          pendingPublishTimersRef.current[widgetId] = tid as unknown as number;
         }
       }
-      // Remove publishing guard (done after scheduling delivery)
       publishingGuardRef.current.delete(widgetId);
     } catch (err) { /* swallow */ }
   }, []);
+
+  // Keep a ref to the publish function for use by worker message handlers
+  useEffect(() => {
+    publishRef.current = publishWidgetOutputs;
+    return () => { publishRef.current = null; };
+  }, [publishWidgetOutputs]);
 
   const subscribeToWidgetOutputs = useCallback((widgetId: string, onValues: (vals: Array<number | number[]>) => void) => {
     try {
@@ -638,6 +715,13 @@ export const ChannelDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
     return () => {
       try {
         if (rafHandleRef.current) cancelAnimationFrame(rafHandleRef.current);
+        // terminate any created channel workers
+        try {
+          const map = channelWorkersRef.current || {};
+          Object.keys(map).forEach(k => {
+            try { const w = map[Number(k)]; if (w) w.terminate(); } catch (e) { }
+          });
+        } catch (e) { }
       } catch (err) { }
     };
   }, []);

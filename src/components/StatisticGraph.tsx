@@ -33,7 +33,7 @@ const StatisticGraph: React.FC<StatisticGraphProps> = ({
   type = 'bar',
   width = 400,
   height = 300,
-  colors = ['#3b82f6', '#ef4444', '#10b981', '#f97316', '#8b5cf6', '#ec4899'],
+  colors = ['#659bf1ff', '#e76666ff', '#3ecf9eff', '#fa944bff', '#9f7bf2ff', '#f279b5ff'],
   showLabels = true,
   showValues = true,
   showGrid = true,
@@ -42,6 +42,7 @@ const StatisticGraph: React.FC<StatisticGraphProps> = ({
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
+    const t0 = performance.now();
     const canvas = canvasRef.current;
     if (!canvas || data.length === 0) return;
 
@@ -105,13 +106,9 @@ const StatisticGraph: React.FC<StatisticGraphProps> = ({
         const x = padding + (index * chartWidth) / data.length + barSpacing / 2;
         const y = padding + chartHeight - barHeight;
 
-        // Draw bar with gradient
-        const gradient = ctx.createLinearGradient(0, y, 0, y + barHeight);
-        const color = colors[index % colors.length];
-        gradient.addColorStop(0, color);
-        gradient.addColorStop(1, color + '80');
-        
-        ctx.fillStyle = gradient;
+  // Draw bar with solid color (no gradient)
+  const color = colors[index % colors.length];
+  ctx.fillStyle = color;
         ctx.fillRect(x, y, barWidth, barHeight);
 
         // Draw border
@@ -263,6 +260,8 @@ const StatisticGraph: React.FC<StatisticGraphProps> = ({
         ctx.fillText(valueText, padding - 8, y);
       }
     }
+
+    try { console.debug('[StatisticGraph] draw', { dataLen: data.length, width, height, drawMs: performance.now() - t0 }); } catch (e) { }
 
   }, [data, type, width, height, colors, showLabels, showValues, showGrid, backgroundColor]);
 

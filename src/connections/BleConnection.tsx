@@ -50,6 +50,10 @@ export default function BleConnection() {
   const flushBufferTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const lastPacketOkRef = useRef<number>(0)
   const lastPacketVerboseRef = useRef<number>(0)
+  // Track the last counter value that was flushed into React state to avoid
+  // redundant state updates which can cause render loops when packets are
+  // re-processed rapidly.
+  const lastFlushedCounterRef = useRef<number | null>(null)
   const sampleIndex = useRef(0)
   const totalSamples = useRef(0)
   // Track sample counters for drop-detection and ordering
@@ -175,18 +179,28 @@ export default function BleConnection() {
           try {
             const buf = rawBufferRef.current.splice(0)
             if (buf.length > 0) {
-              // Update raw data display (trim older entries)
-              setRawData(prev => {
-                const merged = [...prev, ...buf.map(v => ({ ch0: v.ch0, ch1: v.ch1, ch2: v.ch2 }))]
-                return merged.slice(-1000)
-              })
+              // Avoid redundant flushes: if the last flushed packet counter
+              // matches the newest counter here, skip updating React state.
+              const newestCounter = buf[buf.length - 1]?.counter ?? null
+              if (newestCounter !== null && newestCounter === lastFlushedCounterRef.current) {
+                // nothing new to flush
+              } else {
+                // Update raw data display (trim older entries)
+                setRawData(prev => {
+                  const merged = [...prev, ...buf.map(v => ({ ch0: v.ch0, ch1: v.ch1, ch2: v.ch2 }))]
+                  return merged.slice(-1000)
+                })
 
-              // Update received data log with a brief summary
-              const timestamp = new Date().toLocaleTimeString()
-              setReceivedData(prev => {
-                const newEntry = `${timestamp}: Packet parsed (buffered ${buf.length} samples) - Total: ${totalSamples.current}`
-                return [...prev, newEntry].slice(-200)
-              })
+                // Update received data log with a brief summary
+                const timestamp = new Date().toLocaleTimeString()
+                setReceivedData(prev => {
+                  const newEntry = `${timestamp}: Packet parsed (buffered ${buf.length} samples) - Total: ${totalSamples.current}`
+                  return [...prev, newEntry].slice(-200)
+                })
+
+                // Remember the last counter we flushed
+                if (newestCounter !== null) lastFlushedCounterRef.current = newestCounter
+              }
             }
           } finally {
             if (flushBufferTimeoutRef.current) {

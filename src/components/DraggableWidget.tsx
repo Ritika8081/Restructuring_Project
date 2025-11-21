@@ -105,7 +105,7 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
     }, [widget.id, (widget as any).channelIndex]);
 
     // Global channel samples from context (used by multiple widget render paths)
-    const { samples, subscribeToWidgetOutputs, samplingRate, publishWidgetOutputs } = useChannelData();
+    const { samples, subscribeToWidgetOutputs, subscribeToSampleBatches, samplingRate, publishWidgetOutputs } = useChannelData();
 
     // Candle widget: prefer published bandpower (beta) values from upstream
     // bandpower/statistic widgets. If the upstream source is a raw channel
@@ -247,6 +247,70 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
                     setFftInputData(undefined);
                 }
             } catch (err) { /* ignore per-batch subscriber errors */ }
+        });
+
+        return () => { try { unsub(); } catch (e) { } };
+    }, [incomingConnections, widget.type, subscribeToWidgetOutputs]);
+
+    // Subscribe to per-channel bandpower outputs published by the provider
+    // (provider creates per-channel workers and publishes under `channel-band-ch{idx}`).
+    useEffect(() => {
+        if (widget.type !== 'spiderplot') return;
+        if (!incomingConnections || incomingConnections.length === 0) return;
+        if (!subscribeToWidgetOutputs) return;
+
+        const channelSrc = incomingConnections.find((id: any) => String(id).startsWith('channel-'));
+        if (!channelSrc) {
+            setSpiderBandArray(null);
+            return;
+        }
+
+        const m = String(channelSrc).match(/channel-(\d+)/i);
+        const chIdx = m ? Math.max(0, parseInt(m[1], 10)) : 0;
+        const publishedId = `channel-band-ch${chIdx}`;
+
+        const unsub = subscribeToWidgetOutputs(publishedId, (vals) => {
+            try {
+                if (!vals || vals.length === 0) return;
+                // take the latest array-shaped value if present
+                for (let i = vals.length - 1; i >= 0; i--) {
+                    const v = vals[i];
+                    if (Array.isArray(v) && v.length >= Object.keys(BANDS).length && v.every(el => typeof el === 'number')) {
+                        setSpiderBandArray(v as number[]);
+                        return;
+                    }
+                }
+            } catch (e) { /* ignore */ }
+        });
+
+        spiderSampleUnsubRef.current = unsub;
+        return () => { try { if (spiderSampleUnsubRef.current) spiderSampleUnsubRef.current(); } catch (e) { } spiderSampleUnsubRef.current = null; };
+    }, [widget.type, incomingConnections, subscribeToWidgetOutputs]);
+
+    // Subscribe to upstream published band-arrays for SpiderPlot widgets so
+    // SpiderPlot can display exact band percentages like StatisticGraph.
+    useEffect(() => {
+        if (widget.type !== 'spiderplot') return;
+        if (!incomingConnections || incomingConnections.length === 0) return;
+        if (!subscribeToWidgetOutputs) return;
+
+        // Prefer first non-channel upstream source (likely a bandpower widget)
+        const upstreamWidget = incomingConnections.find((id: any) => !String(id).startsWith('channel-'));
+        if (!upstreamWidget) {
+            setSpiderBandArray(null);
+            return;
+        }
+
+        const src = String(upstreamWidget);
+        const unsub = subscribeToWidgetOutputs(src, (vals) => {
+            try {
+                for (const v of vals) {
+                    if (Array.isArray(v) && v.length >= Object.keys(BANDS).length && v.every(el => typeof el === 'number')) {
+                        setSpiderBandArray(v as number[]);
+                        return;
+                    }
+                }
+            } catch (e) { /* ignore */ }
         });
 
         return () => { try { unsub(); } catch (e) { } };
@@ -420,8 +484,17 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
 
     // Refs for imperative APIs
     const basicGraphRef = React.useRef<any>(null);
+    // Worker and subscription refs for spiderplot per-sample FFT offload
+    const spiderWorkerRef = React.useRef<Worker | null>(null);
+    const spiderSampleUnsubRef = React.useRef<(() => void) | null>(null);
     // Bandpower state for statistic widgets
     const [bandStats, setBandStats] = React.useState<Array<{ label: string; value: number }>>([]);
+    // For SpiderPlot: store latest published band-array (if upstream widget publishes arrays)
+    const [spiderBandArray, setSpiderBandArray] = React.useState<number[] | null>(null);
+    // Throttle helpers: avoid expensive recompute on every sample batch
+    const lastBandComputeRef = React.useRef<number>(0);
+    const lastSpiderComputeRef = React.useRef<number>(0);
+    const spiderAxisCacheRef = React.useRef<any[] | null>(null);
 
     // NOTE: BasicGraph now subscribes directly to upstream widget outputs when
     // `incomingConnections` is provided. We previously forwarded upstream widget
@@ -455,12 +528,26 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
                 input[i] = (srcIdx >= start && srcIdx < recent.length) ? ((recent[srcIdx] as any)[key] ?? 0) : 0;
             }
                 try {
-                    const { relative } = computeBandPowers(input, sr, fftSize);
-                    const data = Object.keys(BANDS).map(b => ({ label: b, value: (relative as any)[b] * 100 }));
-                    setBandStats(data);
-                    // Publish beta band (as single numeric value) for other widgets to subscribe
+                    const now = Date.now();
+                    // Keep a reference to the computed relative powers when we calculate them
+                    let computedRelative: any = null;
+                    if (now - lastBandComputeRef.current >= 180) {
+                        lastBandComputeRef.current = now;
+                        const result = computeBandPowers(input, sr, fftSize);
+                        computedRelative = result.relative;
+                        const data = Object.keys(BANDS).map(b => ({ label: b, value: (computedRelative as any)[b] * 100 }));
+                        setBandStats(data);
+                    }
+                    // Publish beta band (as single numeric value) for other widgets to subscribe.
+                    // If we just computed relative, use it; otherwise fall back to cached bandStats.
                     try {
-                        const betaVal = ((relative as any).beta || 0) * 100;
+                        let betaVal = 0;
+                        if (computedRelative) {
+                            betaVal = ((computedRelative as any).beta || 0) * 100;
+                        } else {
+                            const cached = bandStats && bandStats.find(s => s.label === 'beta');
+                            betaVal = cached ? (cached.value || 0) : 0;
+                        }
                         if (publishWidgetOutputs) publishWidgetOutputs(String(widget.id), betaVal);
                     } catch (e) { /* ignore publish errors */ }
                 } catch (err) { /* ignore */ }
@@ -517,12 +604,20 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
                     const signal: number[] = new Array(fftSize);
                     let p = idx;
                     for (let i = 0; i < fftSize; i++) { signal[i] = buffer[p]; p = (p + 1) % fftSize; }
-                    const { relative } = computeBandPowers(signal, sr, fftSize);
-                    const data = bandKeys.map(b => ({ label: b, value: (relative as any)[b] * 100 }));
-                    setBandStats(data);
+                    try {
+                        const now = Date.now();
+                        if (now - lastBandComputeRef.current >= 180) {
+                            lastBandComputeRef.current = now;
+                            const { relative } = computeBandPowers(signal, sr, fftSize);
+                            const data = bandKeys.map(b => ({ label: b, value: (relative as any)[b] * 100 }));
+                            setBandStats(data);
+                        }
+                    } catch (err) { /* ignore compute errors */ }
                     // Publish beta band (as single numeric value) for other widgets to subscribe
                     try {
-                        const betaVal = ((relative as any).beta || 0) * 100;
+                        // best-effort: publish latest cached beta if available
+                        const cached = bandStats && bandStats.find(s => s.label === 'beta');
+                        const betaVal = cached ? (cached.value || 0) : 0;
                         if (publishWidgetOutputs) publishWidgetOutputs(String(widget.id), betaVal);
                     } catch (e) { /* ignore publish errors */ }
                 }
@@ -564,23 +659,26 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
                     {widget.type === 'spiderplot' ? (
                             (() => {
                                 // Compute SpiderPlot axis values from live channel samples when available
-                            const axisData = incomingConnections.length > 0 ? incomingConnections.map((id, idx) => {
-                                // Ignore unknown/non-channel ids and treat them as zero-valued.
-                                if (String(id).startsWith('filter-')) {
-                                    return { label: id, value: 0, maxValue: 100 };
-                                }
-                                const m = String(id).match(/channel-(\d+)/i);
-                                const chIndex = m ? Math.max(0, parseInt(m[1], 10) - 1) : idx;
-                                const key = `ch${chIndex}`;
-                                const N = 128;
-                                const recent = samples.slice(-N);
-                                const values = recent.map(s => (s as any)[key] ?? 0);
-                                const rms = values.length > 0 ? Math.sqrt(values.reduce((acc, v) => acc + (v * v), 0) / values.length) : 0;
-                                // Scale RMS to 0-100 range for visualization (adjustable)
-                                const value = Math.min(100, rms * 100);
-                                return { label: id, value, maxValue: 100 };
-                            }) : undefined;
+                            let axisData = undefined;
+                            if (spiderBandArray && Array.isArray(spiderBandArray) && spiderBandArray.length >= Object.keys(BANDS).length) {
+                                // upstream published band-array present: map into spider axes (use same ordering as StatisticGraph)
+                                const bandKeys = Object.keys(BANDS);
+                                axisData = bandKeys.map((b, i) => ({ label: b, value: (spiderBandArray[i] ?? 0) * 100, maxValue: 100 }));
+                            } else {
+                                // Avoid heavy main-thread FFTs — rely on worker-produced
+                                // `spiderBandArray`. If not available, fall through to
+                                // default zeroed axis to keep UI smooth.
+                                axisData = undefined;
+                            }
 
+                                                    // Ensure we always pass a defined data array to SpiderPlot
+                                                    const bandKeys = Object.keys(BANDS);
+                                                    const defaultAxis = bandKeys.map(b => ({ label: b, value: 0, maxValue: 100 }));
+                                                    const finalAxis = axisData && Array.isArray(axisData) ? axisData : defaultAxis;
+                                                    try {
+                                                        const t1 = performance.now();
+                                                        console.debug(`[DraggableWidget:${widget.id}] SpiderPlot axisData computed`, { axisData: finalAxis, spiderBandArray, computeTimeMs: (performance.now() - t1) });
+                                                    } catch (e) { }
                             return (
                                 <SpiderPlot
                                     width={availableWidth}
@@ -588,9 +686,10 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
                                     showLabels={widget.width >= 3 && widget.height >= 3}
                                     showValues={widget.width >= 4 && widget.height >= 4}
                                     animated={true}
-                                    backgroundColor="rgba(16, 185, 129, 0.02)"
-                                    data={axisData}
+                                    backgroundColor="rgba(2, 12, 9, 0.02)"
+                                    data={finalAxis}
                                     widgetId={widget.id}
+                                    dottedBackground={true}   // <--- enable dotted background
                                 />
                             );
                         })()

@@ -27,6 +27,14 @@ export default function SerialConnection() {
   const [receivedData, setReceivedData] = useState<string[]>([])
   const [currentData, setCurrentData] = useState<Record<string, number> | null>(null)
   const [recentSamples, setRecentSamples] = useState<Record<string, number>[]>([])
+  // Throttled updates: hold latest currentData in a ref and batch recentSamples
+  const currentDataRef = useRef<Record<string, number> | null>(null)
+  const recentSamplesRef = useRef<Record<string, number>[]>([])
+  const flushSamplesTimeoutRef = useRef<any>(null)
+  // Track a simple key (counter or serialized snippet) of the newest sample
+  // buffered so we can skip flushing identical data repeatedly.
+  const currentSampleKeyRef = useRef<string | null>(null)
+  const lastFlushedSampleKeyRef = useRef<string | null>(null)
   // Detected device type for UI badge (e.g. 'UNO-R4' or 'NPG-Lite')
   const [detectedDeviceType, setDetectedDeviceType] = useState<string | null>(null);
   // Allow user to select device mode: auto-detect (default), R4 (6ch) or 3ch legacy
@@ -91,6 +99,40 @@ export default function SerialConnection() {
   const sampleRateRef = useRef<number>(500);
   const packetLenRef = useRef<number>(numChannelsRef.current * 2 + HEADER_LEN + 1);
   const MAX_DISPLAY_SAMPLES = 50 // Only keep last 50 samples for display
+
+  // Flush buffered sample updates into React state (debounced)
+  const scheduleFlushSamples = (delay = 100) => {
+    if (flushSamplesTimeoutRef.current) return
+    flushSamplesTimeoutRef.current = setTimeout(() => {
+      try {
+        // Avoid flushing when the newest buffered sample matches the
+        // last flushed sample to prevent redundant React updates.
+        const newestKey = currentSampleKeyRef.current
+        if (newestKey !== null && newestKey === lastFlushedSampleKeyRef.current) {
+          return
+        }
+        // Update currentData once with the most recent sample
+        try { setCurrentData(currentDataRef.current); } catch (e) {}
+        // Merge recentSamplesRef into state and trim
+        try {
+          setRecentSamples(prev => {
+            const merged = [...prev, ...recentSamplesRef.current]
+            const trimmed = merged.slice(-MAX_DISPLAY_SAMPLES)
+            return trimmed
+          })
+        } catch (e) {}
+        // clear buffered refs
+        recentSamplesRef.current = []
+        // remember last flushed key
+        if (currentSampleKeyRef.current) lastFlushedSampleKeyRef.current = currentSampleKeyRef.current
+      } finally {
+        if (flushSamplesTimeoutRef.current) {
+          clearTimeout(flushSamplesTimeoutRef.current)
+          flushSamplesTimeoutRef.current = null
+        }
+      }
+    }, delay)
+  }
 
   // Optimized auto-scroll - only for recent samples display
   useEffect(() => {
@@ -338,6 +380,13 @@ export default function SerialConnection() {
     };
   }, []);
 
+  // Clean up any outstanding sample flush timers when component unmounts
+  useEffect(() => {
+    return () => {
+      try { if (flushSamplesTimeoutRef.current) { clearTimeout(flushSamplesTimeoutRef.current); flushSamplesTimeoutRef.current = null } } catch (e) {}
+    }
+  }, [])
+
   const handleDataReceived = () => {
     const buffer = bufferRef.current
     
@@ -384,15 +433,22 @@ export default function SerialConnection() {
             console.error('addSample error', err);
           }
 
-          // Update current data (real-time display)
-          try { setCurrentData(sampleObj as any); } catch (e) {}
-          // Update recent samples (keep only last MAX_DISPLAY_SAMPLES)
-          setRecentSamples(prev => {
-            const updated = [...prev, (sampleObj as any)];
-            return updated.length > MAX_DISPLAY_SAMPLES
-              ? updated.slice(-MAX_DISPLAY_SAMPLES)
-              : updated
-          })
+          // Buffer UI updates: write into refs and schedule a debounced flush
+          try {
+            currentDataRef.current = sampleObj as any
+            // compute a small key for this sample - prefer counter if available
+            try {
+              const k = (sampleObj as any).counter !== undefined ? String((sampleObj as any).counter) : JSON.stringify({ ch0: sampleObj.ch0, ch1: sampleObj.ch1, ch2: sampleObj.ch2 })
+              currentSampleKeyRef.current = k
+            } catch (e) { currentSampleKeyRef.current = null }
+            // push into recent samples buffer
+            recentSamplesRef.current.push(sampleObj as any)
+            // cap buffer to MAX_DISPLAY_SAMPLES * 2 to avoid memory growth
+            if (recentSamplesRef.current.length > MAX_DISPLAY_SAMPLES * 2) {
+              recentSamplesRef.current = recentSamplesRef.current.slice(-MAX_DISPLAY_SAMPLES * 2)
+            }
+            scheduleFlushSamples()
+          } catch (e) {}
           sampleIndex.current = (sampleIndex.current + 1) % 1000
           totalSamples.current += 1
 
