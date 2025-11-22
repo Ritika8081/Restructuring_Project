@@ -625,22 +625,40 @@ const Widgets: React.FC = () => {
             }
             const cols = gridSettings.cols || 24;
             const rows = gridSettings.rows || 16;
-            const gridRows = 3;
             let totalInstances = 0;
             for (const opt of selectedWidgets) {
                 const insts = (opt as any).instances || Array.from({ length: (opt.count || 1) }, (_, i) => ({ id: `${opt.id}-${i + 1}` }));
                 totalInstances += insts.length;
             }
             const count = Math.max(1, totalInstances);
-            const gridCols = Math.ceil(count / gridRows);
-            const widgetWidth = Math.floor(cols / gridCols);
-            const widgetHeight = Math.floor(rows / gridRows);
-            let newWidgets: Widget[] = [];
+            // Compute gridCols/gridRows to tile widgets to fill the dashboard
+            // Use availableCols/availableRows aspect ratio to choose a near-square tiling
             const offsetCells = 3;
-            const availableCols = cols - offsetCells;
-            const availableRows = rows - offsetCells;
-            const dynamicWidgetWidth = Math.max(3, Math.floor(availableCols / gridCols));
-            const dynamicWidgetHeight = Math.max(3, Math.floor(availableRows / gridRows));
+            const availableCols = Math.max(1, cols - offsetCells);
+            const availableRows = Math.max(1, rows - offsetCells);
+            const aspect = availableCols / availableRows;
+            // Choose number of columns based on count and aspect ratio (near-square tiling)
+            let gridCols = Math.max(1, Math.round(Math.sqrt(count * aspect)));
+            if (gridCols > count) gridCols = count;
+            const gridRows = Math.max(1, Math.ceil(count / gridCols));
+
+            const baseColWidth = Math.max(1, Math.floor(availableCols / gridCols));
+            const baseRowHeight = Math.max(1, Math.floor(availableRows / gridRows));
+            // Distribute any leftover columns/rows so tiles fully cover the grid
+            const colWidths: number[] = Array.from({ length: gridCols }, () => baseColWidth);
+            let leftoverCols = availableCols - baseColWidth * gridCols;
+            for (let i = 0; i < gridCols && leftoverCols > 0; i++, leftoverCols--) colWidths[i]++;
+            const rowHeights: number[] = Array.from({ length: gridRows }, () => baseRowHeight);
+            let leftoverRows = availableRows - baseRowHeight * gridRows;
+            for (let i = 0; i < gridRows && leftoverRows > 0; i++, leftoverRows--) rowHeights[i]++;
+
+            // Precompute cumulative offsets for columns and rows
+            const colOffsets: number[] = [offsetCells];
+            for (let i = 0; i < gridCols; i++) colOffsets.push(colOffsets[colOffsets.length - 1] + colWidths[i]);
+            const rowOffsets: number[] = [offsetCells];
+            for (let i = 0; i < gridRows; i++) rowOffsets.push(rowOffsets[rowOffsets.length - 1] + rowHeights[i]);
+
+            let newWidgets: Widget[] = [];
             // Exclude non-visual flow nodes (filters, transforms like 'envelope')
             // from being materialized as dashboard widgets. Envelope should only
             // operate on channel data in the flow and not create a dashboard widget.
@@ -684,17 +702,17 @@ const Widgets: React.FC = () => {
                 for (let inst = 0; inst < instancesArr.length; inst++) {
                     const rowIdx = placeIndex % gridRows;
                     const colIdx = Math.floor(placeIndex / gridRows);
-                    const x = offsetCells + colIdx * dynamicWidgetWidth;
-                    const y = offsetCells + rowIdx * dynamicWidgetHeight;
-                    const safeX = Math.min(x, cols - dynamicWidgetWidth);
-                    const safeY = Math.min(y, rows - dynamicWidgetHeight);
+                    const x = colOffsets[colIdx];
+                    const y = rowOffsets[rowIdx];
+                    const safeX = Math.min(x, cols - colWidths[colIdx]);
+                    const safeY = Math.min(y, rows - rowHeights[rowIdx]);
                     const instanceId = instancesArr[inst].id;
                     const widgetObj: Widget = {
                         id: instanceId,
                         x: safeX,
                         y: safeY,
-                        width: opt.type === 'basic' ? Math.max(dynamicWidgetWidth, 6) : dynamicWidgetWidth,
-                        height: opt.type === 'basic' ? Math.max(dynamicWidgetHeight, 5) : dynamicWidgetHeight,
+                        width: colWidths[colIdx],
+                        height: rowHeights[rowIdx],
                         minWidth: opt.type === 'basic' ? 6 : 3,
                         minHeight: opt.type === 'basic' ? 5 : 3,
                         type: typeMap[opt.type] || opt.type,
@@ -718,16 +736,16 @@ const Widgets: React.FC = () => {
                 // Place it at the next available slot
                 const rowIdx = placeIndex % gridRows;
                 const colIdx = Math.floor(placeIndex / gridRows);
-                const x = offsetCells + colIdx * dynamicWidgetWidth;
-                const y = offsetCells + rowIdx * dynamicWidgetHeight;
-                const safeX = Math.min(x, cols - dynamicWidgetWidth);
-                const safeY = Math.min(y, rows - dynamicWidgetHeight);
+                const x = colOffsets[colIdx];
+                const y = rowOffsets[rowIdx];
+                const safeX = Math.min(x, cols - colWidths[colIdx]);
+                const safeY = Math.min(y, rows - rowHeights[rowIdx]);
                 const aggWidget: Widget = {
                     id: 'plots-aggregated',
                     x: safeX,
                     y: safeY,
-                    width: Math.max(dynamicWidgetWidth, 8),
-                    height: Math.max(dynamicWidgetHeight, 6),
+                    width: colWidths[colIdx],
+                    height: rowHeights[rowIdx],
                     minWidth: 6,
                     minHeight: 5,
                     type: 'basic',

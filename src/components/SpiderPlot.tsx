@@ -10,6 +10,7 @@ type Props = {
   gridLevels?: number; // concentric polygon levels
   logValues?: boolean; // whether to print the normalized band values to console
   logIntervalMs?: number; // minimum ms between prints
+  fillZeros?: boolean; // whether to circular-fill zeros/missing values (default true)
 };
 
 const defaultBands = ['Delta', 'Theta', 'Alpha', 'Beta', 'Gamma'];
@@ -38,13 +39,13 @@ function fillCircularZeros(values: number[]): number[] {
   return out;
 }
 
-function normalizeInput(data?: SpiderDatum[] | number[] | any[]) {
+function normalizeInput(data?: SpiderDatum[] | number[] | any[], fillZeros = true) {
   if (!data) return defaultBands.map((s) => ({ subject: s, value: 0 }));
 
   // Numeric array: treat as ordered band values
   if (Array.isArray(data) && data.length > 0 && typeof data[0] === 'number') {
     const nums = data as number[];
-    const filled = fillCircularZeros(nums);
+    const filled = fillZeros ? fillCircularZeros(nums) : nums.slice();
     return defaultBands.map((s, i) => ({ subject: s, value: filled[i] ?? 0 }));
   }
 
@@ -52,7 +53,7 @@ function normalizeInput(data?: SpiderDatum[] | number[] | any[]) {
   if (Array.isArray(data) && data.length > 0 && typeof data[0] === 'object') {
     // If objects include numeric values, fill zeros circularly to avoid collapsed polygons
     const arr = (data as any[]).map((obj) => Number(obj.value ?? 0) || 0);
-    const filledArr = fillCircularZeros(arr);
+    const filledArr = fillZeros ? fillCircularZeros(arr) : arr.slice();
     return (data as any[]).map((obj, i) => {
       const subject = obj.subject ?? obj.label ?? defaultBands[i] ?? `v${i}`;
       let value = filledArr[i] ?? (Number(obj.value ?? 0) || 0);
@@ -68,10 +69,10 @@ function normalizeInput(data?: SpiderDatum[] | number[] | any[]) {
   return defaultBands.map((s) => ({ subject: s, value: 0 }));
 }
 
-export default function SpiderPlot({ data, size = '100%', colors = ['#6C5CE7', '#00B894'], max = 1, gridLevels = 4, logValues = true, logIntervalMs = 250 }: Props) {
+export default function SpiderPlot({ data, size = '100%', colors = ['#6C5CE7', '#00B894'], max = 1, gridLevels = 4, logValues = true, logIntervalMs = 250, fillZeros = true }: Props) {
   const lastLogRef = useRef<number>(0);
   const lastLoggedBandsRef = useRef<number[] | null>(null);
-  const d = normalizeInput(data);
+  const d = normalizeInput(data, fillZeros);
   const N = d.length;
   // Use a base logical drawing area (baseSize). When `size` is a number, we
   // allow the SVG to be that pixel size; when `size` is '100%' we still use

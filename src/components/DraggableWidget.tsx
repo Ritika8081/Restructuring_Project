@@ -692,6 +692,7 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
                                         animated: true,
                                         backgroundColor: "rgba(2, 12, 9, 0.02)",
                                         data: finalAxis as any,
+                                        fillZeros: false,
                                         widgetId: widget.id,
                                         dottedBackground: true,   // <--- enable dotted background
                                     } as any)}
