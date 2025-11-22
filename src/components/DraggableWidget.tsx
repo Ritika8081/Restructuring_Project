@@ -108,7 +108,7 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
     }, [widget.id, (widget as any).channelIndex]);
 
     // Global channel samples from context (used by multiple widget render paths)
-    const { samples, subscribeToWidgetOutputs, subscribeToSampleBatches, samplingRate, publishWidgetOutputs } = useChannelData();
+    const { samples, subscribeToWidgetOutputs, samplingRate, publishWidgetOutputs } = useChannelData();
 
     // Candle widget: prefer published bandpower (beta) values from upstream
     // bandpower/statistic widgets. If the upstream source is a raw channel

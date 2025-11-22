@@ -70,6 +70,7 @@ function normalizeInput(data?: SpiderDatum[] | number[] | any[]) {
 
 export default function SpiderPlot({ data, size = '100%', colors = ['#6C5CE7', '#00B894'], max = 1, gridLevels = 4, logValues = true, logIntervalMs = 250 }: Props) {
   const lastLogRef = useRef<number>(0);
+  const lastLoggedBandsRef = useRef<number[] | null>(null);
   const d = normalizeInput(data);
   const N = d.length;
   // Use a base logical drawing area (baseSize). When `size` is a number, we
@@ -101,15 +102,31 @@ export default function SpiderPlot({ data, size = '100%', colors = ['#6C5CE7', '
     try {
       const now = performance.now();
       if (now - (lastLogRef.current || 0) >= (logIntervalMs || 250)) {
-        // Print labels and normalized band values together for clarity
-        // Example: { labels: [...], values: [...] }
-        // Use console.log deliberately (user requested visible printouts)
-        // Wrap in try/catch to avoid any accidental runtime issues
-        console.log('[SpiderPlot] bands', {
-          labels: d.map((p) => p.subject),
-          values: normalizedBands,
-          raw: d.map((p) => p.value),
-        });
+        // Print labels and normalized band values together for clarity (throttled)
+        // This mirrors what the SpiderPlot is rendering so developers can
+        // inspect the exact band vector shown in the UI.
+          try {
+            // Avoid logging identical vectors repeatedly. Only print when
+            // values changed beyond a tiny epsilon or when there was no
+            // previous log. This reduces console spam when updates are
+            // frequent but values stay the same.
+            const eps = 1e-6;
+            const last = lastLoggedBandsRef.current;
+            let changed = false;
+            if (!last || last.length !== normalizedBands.length) changed = true;
+            else {
+              for (let i = 0; i < normalizedBands.length; i++) {
+                if (Math.abs((last[i] || 0) - normalizedBands[i]) > eps) { changed = true; break; }
+              }
+            }
+            if (changed) {
+              // Compact readable output: labels + comma-separated values
+              const labels = d.map((p) => p.subject).join(', ');
+              const vals = normalizedBands.map((v) => Number(v.toFixed(6))).join(', ');
+              console.log(`[SpiderPlot] bands — ${labels} => [${vals}]`);
+              lastLoggedBandsRef.current = normalizedBands.slice();
+            }
+          } catch (e) { /* swallow logging errors */ }
         lastLogRef.current = now;
       }
     } catch (e) {

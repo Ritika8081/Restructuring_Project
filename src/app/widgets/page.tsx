@@ -596,7 +596,7 @@ const Widgets: React.FC = () => {
                 console.group('[Flow] playFlow - connections');
                         if (FLOW_LOG) try { console.table(connections); } catch (e) { if (FLOW_LOG) console.log('connections:', connections); }
                 // // also log a raw copy to avoid accidental mutation issues when inspecting
-                // try { console.log('connections (raw):', JSON.parse(JSON.stringify(connections))); } catch (e) { /* ignore */ }
+                
                 // console.groupEnd();
             } else {
                 if (FLOW_LOG) console.debug('[Flow] playFlow - no connections to print');
