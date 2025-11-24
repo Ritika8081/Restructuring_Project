@@ -4,6 +4,8 @@ import React, { useState, useRef, useCallback, useEffect, useMemo, useLayoutEffe
 import DraggableWidget from '@/components/DraggableWidget';
 import Toast from '@/components/ui/Toast';
 import ConfirmModal from '@/components/ui/ConfirmModal';
+import OnboardingTour from '@/components/ui/OnboardingTour';
+import useTourStorage from '@/hooks/useTour';
 import { Widget, GridSettings, DragState, ToastState, ConfirmState } from '@/types/widget.types';
 import { checkCollisionAtPosition } from '@/utils/widget.utils';
 import ConnectionDataWidget from '@/components/ConnectionDataWidget';
@@ -132,6 +134,238 @@ const Widgets: React.FC = () => {
     // Local state for the in-flow connection mini-widget (connect/disconnect)
     const [connActive, setConnActive] = useState<boolean>(false);
     const channelData = useChannelData();
+    // Tour storage (persistent flag) and local flag to control tour visibility
+    const tourStorage = useTourStorage();
+    const [showTour, setShowTour] = useState<boolean>(false);
+
+    useEffect(() => {
+        try {
+            if (!tourStorage.hasSeen()) {
+                setTimeout(() => setShowTour(true), 400);
+            }
+        } catch (e) { }
+    }, []);
+
+    const onTourClose = () => {
+        try { tourStorage.markSeen(); } catch (e) { }
+        setShowTour(false);
+    };
+
+    // Onboarding tour steps (selectors must match elements inside the flow modal)
+    const tourSteps: Array<{ selector: string; title: string; description: string; position?: 'auto' | 'right' | 'top' | 'bottom' | 'left'; action?: 'drag-demo' | 'connect-demo' }> = [
+        { selector: '#flow-palette', title: 'Applications Palette', description: 'Drag applications from here into the flow area to build your pipeline.', position: 'right' },
+        { selector: '#flow-palette input', title: 'Search Applications', description: 'Filter the palette to find the app you need quickly.', position: 'right' },
+        { selector: '#flow-palette div[draggable]', title: 'Add an App', description: 'Drag any app from the palette into the flow area to add it to your pipeline.', position: 'right', action: 'drag-demo' },
+        { selector: '#flow-area', title: 'Flow Area', description: 'Arrange nodes here. Connect outputs to inputs to route data through transforms and visualizations.', position: 'left' },
+        { selector: 'button[title="Open connection selector"]', title: 'Connection Selector', description: 'Open the connection selector to choose a hardware source or device to connect.', position: 'right' },
+        { selector: 'button[title="Start / stop connecting"]', title: 'Connect / Disconnect', description: 'Start drawing connections between nodes or disconnect active links.', position: 'right', action: 'connect-demo' },
+        { selector: '[aria-label="Zoom controls"]', title: 'Zoom', description: 'Zoom the flow modal to see more or fewer nodes.', position: 'left' },
+        { selector: 'button[title="Zoom in"]', title: 'Zoom In', description: 'Increase the zoom level to inspect details.', position: 'left' },
+        { selector: 'button[title="Zoom out"]', title: 'Zoom Out', description: 'Decrease the zoom level to see more of the flow.', position: 'left' },
+        { selector: '[data-tour="play-button"]', title: 'Play', description: 'Click Play to arrange widgets onto the dashboard and start streaming data.', position: 'bottom' },
+        { selector: '[data-tour="download-layout"]', title: 'Save Layout', description: 'Export your current flowchart layout as a JSON file for sharing or backup.', position: 'left' },
+        { selector: '[data-tour="load-layout"]', title: 'Load Layout', description: 'Import a previously exported layout JSON file to restore your flow.', position: 'left' },
+        { selector: 'button[title="Increase channels"]', title: 'Add Channel', description: 'Add another input channel to the flow (useful for multi-channel devices).', position: 'right' },
+        { selector: 'button[title="Decrease channels"]', title: 'Remove Channel', description: 'Remove the highest-numbered channel from the flow.', position: 'right' },
+        { selector: '[data-tour="settings-replay"]', title: 'Replay Tour', description: 'Replay this onboarding anytime from the Flow settings.', position: 'left' },
+    ];
+    // Demo elements refs for tour animations
+    const tourDemoRef = useRef<{ nodes: HTMLElement[] }>({ nodes: [] });
+
+    // Perform demo actions requested by the tour (drag-demo, connect-demo)
+    const handleTourAction = (action: 'drag-demo' | 'connect-demo' | undefined, idx: number) => {
+        try {
+            if (action === 'drag-demo') {
+                const src = document.querySelector('#flow-palette div[draggable]') as HTMLElement | null;
+                const destArea = document.getElementById('flow-area');
+                if (!src || !destArea) return;
+                const sRect = src.getBoundingClientRect();
+                const dRect = destArea.getBoundingClientRect();
+                const ghost = document.createElement('div');
+                ghost.className = 'tour-demo-ghost';
+                ghost.style.position = 'fixed';
+                ghost.style.left = `${sRect.left}px`;
+                ghost.style.top = `${sRect.top}px`;
+                ghost.style.width = `${sRect.width}px`;
+                ghost.style.height = `${sRect.height}px`;
+                ghost.style.background = window.getComputedStyle(src).backgroundColor || '#eef2ff';
+                ghost.style.border = '1px solid rgba(0,0,0,0.06)';
+                ghost.style.borderRadius = '8px';
+                ghost.style.boxShadow = '0 12px 30px rgba(2,6,23,0.08)';
+                // place demo visuals below the tooltip so the tooltip/modal remains on top
+                ghost.style.zIndex = '200040';
+                ghost.style.pointerEvents = 'none';
+                ghost.style.transition = 'transform 700ms cubic-bezier(.2,.9,.2,1), left 700ms, top 700ms, opacity 300ms';
+                document.body.appendChild(ghost);
+
+                // compute destination position (center-ish in flow area)
+                const destX = dRect.left + Math.max(60, dRect.width * 0.3);
+                const destY = dRect.top + Math.max(60, dRect.height * 0.3);
+
+                // if a tour tooltip is present, try to nudge the demo target so they don't overlap
+                const tooltipEl = document.querySelector('[data-tour-tooltip]') as HTMLElement | null;
+                let finalDestX = destX;
+                let finalDestY = destY;
+                const NODE_W = 160;
+                const NODE_H = 80;
+                const AVOID_MARGIN = 12;
+                try {
+                    if (tooltipEl) {
+                        const tRect = tooltipEl.getBoundingClientRect();
+                        const nodeRect = { left: finalDestX, top: finalDestY, right: finalDestX + NODE_W, bottom: finalDestY + NODE_H };
+                        const intersects = !(nodeRect.right < tRect.left || nodeRect.left > tRect.right || nodeRect.bottom < tRect.top || nodeRect.top > tRect.bottom);
+                        if (intersects) {
+                            // prefer shifting right out of the way
+                            const shiftX = (tRect.right - nodeRect.left) + AVOID_MARGIN;
+                            let attemptX = finalDestX + shiftX;
+                            if (attemptX + NODE_W <= window.innerWidth - 12) {
+                                finalDestX = attemptX;
+                            } else {
+                                // try above the tooltip
+                                const attemptY = tRect.top - NODE_H - AVOID_MARGIN;
+                                if (attemptY >= 12) finalDestY = attemptY;
+                                else {
+                                    // try left of tooltip
+                                    const attemptX2 = tRect.left - NODE_W - AVOID_MARGIN;
+                                    if (attemptX2 >= 12) finalDestX = attemptX2;
+                                    else {
+                                        // fallback: place below the tooltip
+                                        finalDestY = Math.min(window.innerHeight - NODE_H - 12, tRect.bottom + AVOID_MARGIN);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } catch (e) { }
+
+                requestAnimationFrame(() => {
+                    ghost.style.left = `${finalDestX}px`;
+                    ghost.style.top = `${finalDestY}px`;
+                    ghost.style.transform = 'scale(1.02)';
+                });
+
+                // after animation, create a demo node to represent added widget
+                setTimeout(() => {
+                    try {
+                        const node = document.createElement('div');
+                        node.className = 'tour-demo-node';
+                        node.style.position = 'fixed';
+                        // use finalDest values (nudged if needed) so node doesn't overlap the tooltip
+                        node.style.left = `${finalDestX}px`;
+                        node.style.top = `${finalDestY}px`;
+                        node.style.width = '160px';
+                        node.style.height = '80px';
+                        node.style.borderRadius = '10px';
+                        node.style.background = '#eef2ff';
+                        node.style.border = '1px solid #c7d2fe';
+                        node.style.boxShadow = '0 12px 30px rgba(2,6,23,0.08)';
+                        node.style.zIndex = '200040';
+                        node.style.pointerEvents = 'none';
+                        node.style.display = 'flex';
+                        node.style.alignItems = 'center';
+                        node.style.justifyContent = 'center';
+                        node.style.fontWeight = '700';
+                        node.textContent = 'Demo Node';
+                        document.body.appendChild(node);
+                        tourDemoRef.current.nodes.push(node);
+                    } catch (e) { }
+                    try { ghost.style.opacity = '0'; } catch (e) { }
+                    setTimeout(() => {
+                        try { ghost.remove(); } catch (e) { }
+                    }, 300);
+                }, 820);
+            }
+
+            if (action === 'connect-demo') {
+                // draw a temporary SVG arrow between two demo nodes (or create two)
+                let [a, b] = tourDemoRef.current.nodes;
+                if (!a || !b) {
+                    // create two demo nodes at different positions in flow area
+                    const destArea = document.getElementById('flow-area');
+                    if (!destArea) return;
+                    const dRect = destArea.getBoundingClientRect();
+                    const x1 = dRect.left + dRect.width * 0.35;
+                    const y1 = dRect.top + dRect.height * 0.35;
+                    const x2 = dRect.left + dRect.width * 0.6;
+                    const y2 = dRect.top + dRect.height * 0.55;
+                    const make = (x: number, y: number, label = 'A') => {
+                        const node = document.createElement('div');
+                        node.style.position = 'fixed';
+                        node.style.left = `${x}px`;
+                        node.style.top = `${y}px`;
+                        node.style.width = '140px';
+                        node.style.height = '72px';
+                        node.style.borderRadius = '10px';
+                        node.style.background = '#fff7ed';
+                        node.style.border = '1px solid #fed7aa';
+                        node.style.boxShadow = '0 12px 30px rgba(2,6,23,0.08)';
+                        node.style.zIndex = '200080';
+                        node.style.pointerEvents = 'none';
+                        node.style.display = 'flex';
+                        node.style.alignItems = 'center';
+                        node.style.justifyContent = 'center';
+                        node.style.fontWeight = '700';
+                        node.textContent = label;
+                        document.body.appendChild(node);
+                        return node;
+                    };
+                    a = make(x1, y1, 'A');
+                    b = make(x2, y2, 'B');
+                    tourDemoRef.current.nodes.push(a, b);
+                }
+
+                // create SVG overlay
+                const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+                svg.setAttribute('width', '100%');
+                svg.setAttribute('height', '100%');
+                svg.style.position = 'fixed';
+                svg.style.left = '0';
+                svg.style.top = '0';
+                svg.style.zIndex = '200080';
+                svg.style.pointerEvents = 'none';
+                const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                path.setAttribute('stroke', '#10b981');
+                path.setAttribute('stroke-width', '4');
+                path.setAttribute('fill', 'none');
+                path.setAttribute('stroke-linecap', 'round');
+                path.setAttribute('stroke-linejoin', 'round');
+                svg.appendChild(path);
+                document.body.appendChild(svg);
+
+                const updatePath = () => {
+                    try {
+                        const r1 = a!.getBoundingClientRect();
+                        const r2 = b!.getBoundingClientRect();
+                        const x1 = r1.left + r1.width;
+                        const y1 = r1.top + r1.height / 2;
+                        const x2 = r2.left;
+                        const y2 = r2.top + r2.height / 2;
+                        const mx = (x1 + x2) / 2;
+                        const d = `M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`;
+                        path.setAttribute('d', d);
+                    } catch (e) { }
+                };
+
+                updatePath();
+                // animate stroke dash
+                let length = 300;
+                try { length = (path as any).getTotalLength ? (path as any).getTotalLength() : length; } catch (e) { }
+                path.style.strokeDasharray = `${length}`;
+                path.style.strokeDashoffset = `${length}`;
+                // force layout
+                path.getBoundingClientRect();
+                path.style.transition = 'stroke-dashoffset 800ms ease-out';
+                requestAnimationFrame(() => { path.style.strokeDashoffset = '0'; });
+
+                // cleanup after a while
+                setTimeout(() => {
+                    try { svg.remove(); } catch (e) { }
+                    try { tourDemoRef.current.nodes.forEach(n => n.remove()); } catch (e) { }
+                    tourDemoRef.current.nodes = [];
+                }, 2600);
+            }
+        } catch (e) { /* swallow demo errors */ }
+    };
     // Forwarding subscriptions for runtime push-flow (map 'from->to' -> unsubscribe)
     const forwardingUnsubsRef = useRef<Record<string, () => void>>({});
     // Keep a ref copy of connections so setup/teardown callbacks declared
@@ -409,9 +643,15 @@ const Widgets: React.FC = () => {
                     >
                         &times;
                     </button>
-                    <h3 style={{ fontWeight: 'bold', fontSize: 18, marginBottom: 12 }}>Settings for {opt.label}</h3>
+                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                            <h3 style={{ fontWeight: 'bold', fontSize: 18, margin: 0 }}>Settings for {opt.label}</h3>
+                                            <div>
+                                                <button data-tour="settings-replay" onClick={() => { try { tourStorage.clearSeen(); setShowTour(true); } catch (e) { } }} style={{ padding: '6px 8px', borderRadius: 8, background: '#eef2ff', border: '1px solid #c7d2fe', cursor: 'pointer', fontWeight: 700, marginLeft: 8 }}>Replay Tour</button>
+                                            </div>
+                                        </div>
+                                        <div style={{ height: 12 }} />
 
-                    {/* Informative description and live config summary to help users understand what this node will do */}
+                                        {/* Informative description and live config summary to help users understand what this node will do */}
                     {(() => {
                         const existing = (opt as any).config || {};
                         const draft = settingsDraft || {};
@@ -1887,6 +2127,8 @@ const Widgets: React.FC = () => {
         <div className="min-h-screen w-screen bg-gray-100 flex flex-col overflow-hidden">
             {/* Flow Configuration Modal */}
             {showFlowModal && (
+                <>
+                <OnboardingTour steps={tourSteps} open={showTour} onClose={onTourClose} theme="glass" onAction={handleTourAction} />
                 <div style={{
                     position: 'fixed',
                     top: 0,
@@ -1941,12 +2183,14 @@ const Widgets: React.FC = () => {
                             <div style={{ display: 'flex', gap: 12, marginBottom: 0, alignItems: 'center', flexWrap: 'wrap' }}>
                                  {/* Play button moved into main action row */}
                                 <button
+                                    data-tour="play-button"
                                     style={{ background: ACTION_COLORS.green.bg, color: ACTION_COLORS.green.text, padding: '8px 14px', borderRadius: 10, fontWeight: 700, border: 'none', cursor: 'pointer', fontSize: 14, display: 'inline-flex', alignItems: 'center', gap: 8, boxShadow: ACTION_COLORS.green.shadow, transition: 'transform 120ms ease, box-shadow 120ms ease' }}
                                     onClick={playFlow}
                                 >
                                     Play
                                 </button>
                                 <button
+                                    data-tour="download-layout"
                                     style={{ background: ACTION_COLORS.primary.bg, color: ACTION_COLORS.primary.text, padding: '8px 14px', borderRadius: 10, fontWeight: 700, border: 'none', cursor: 'pointer', fontSize: 14, display: 'inline-flex', alignItems: 'center', gap: 8, boxShadow: ACTION_COLORS.primary.shadow, transition: 'transform 120ms ease, box-shadow 120ms ease' }}
                                     onClick={() => {
                                         // Download full flowchart layout (widgets, grid, connections, positions, options) as JSON file
@@ -1978,6 +2222,21 @@ const Widgets: React.FC = () => {
                                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 3v9" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /><path d="M8 11l4-4 4 4" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /><path d="M21 21H3" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
                                     <span>Save Layout</span>
                                 </button>
+                                <button
+                                    data-tour="settings-replay"
+                                    title="Replay onboarding tour"
+                                    style={{ background: ACTION_COLORS.ghost.bg, color: ACTION_COLORS.ghost.text, padding: '8px 12px', borderRadius: 10, fontWeight: 700, border: `1px solid ${ACTION_COLORS.ghost.text}`, cursor: 'pointer', fontSize: 13, display: 'inline-flex', alignItems: 'center', gap: 8 }}
+                                    onClick={() => {
+                                        try {
+                                            // In-place replay: clear seen flag and open tour
+                                            tourStorage.clearSeen();
+                                            setShowTour(true);
+                                        } catch (err) { }
+                                    }}
+                                >
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M21 12v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h6" stroke="#0f172a" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round"/><path d="M16 3v5h5" stroke="#0f172a" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                                    <span style={{ fontSize: 13 }}>Replay Tour</span>
+                                </button>
                                 {/* Grouped zoom controls — act like a single button-group (accessible) */}
                                 <div
                                     role="group"
@@ -2005,6 +2264,7 @@ const Widgets: React.FC = () => {
                             
                                 {/* Left palette is now shown inside the flow area as a draggable list (see below) */}
                                 <button
+                                    data-tour="load-layout"
                                     style={{ background: ACTION_COLORS.success.bg, color: ACTION_COLORS.success.text, padding: '8px 14px', borderRadius: 10, fontWeight: 700, border: 'none', cursor: 'pointer', fontSize: 14, display: 'inline-flex', alignItems: 'center', gap: 8, boxShadow: ACTION_COLORS.success.shadow, transition: 'transform 120ms ease, box-shadow 120ms ease' }}
                                     onClick={() => {
                                         // Open file selector to load flowchart layout
@@ -2138,8 +2398,8 @@ const Widgets: React.FC = () => {
 
                         {/* Flowchart grid layout */}
                         {/* Row layout: left palette + flow area to avoid overlap */}
-                        <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start', paddingTop: 8 }}>
-                            <div style={{ width: 260, flex: '0 0 260', height: 520, overflowY: 'auto', padding: 12, borderRadius: 12, background: '#ffffff', border: '1px solid #eef2f7', boxShadow: '0 6px 22px rgba(17,24,39,0.06)' }}>
+                            <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start', paddingTop: 8 }}>
+                            <div id="flow-palette" style={{ width: 260, flex: '0 0 260', height: 520, overflowY: 'auto', padding: 12, borderRadius: 12, background: '#ffffff', border: '1px solid #eef2f7', boxShadow: '0 6px 22px rgba(17,24,39,0.06)' }}>
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 8 }}>
                                     <div style={{ fontWeight: 700, padding: '6px 8px', color: '#111827', display: 'flex', alignItems: 'center', gap: 8 }}>
                                         <span>Applications</span>
@@ -2210,7 +2470,7 @@ const Widgets: React.FC = () => {
                                 </div>
                             </div>
 
-                            <div onDragOver={(e) => { e.preventDefault(); }} onDrop={(e) => {
+                            <div id="flow-area" onDragOver={(e) => { e.preventDefault(); }} onDrop={(e) => {
                                 e.preventDefault();
                                 const type = e.dataTransfer.getData('application/widget-type') || e.dataTransfer.getData('text/plain');
                                 if (!type) return;
@@ -3349,6 +3609,7 @@ const Widgets: React.FC = () => {
 
                     </div>
                 </div>
+                </>
             )}
             <div style={{ width: '100%', display: 'flex', justifyContent: 'center', boxSizing: 'border-box', minHeight: `calc(100vh )` }}>
                 {/* Centered grid container sized to whole grid in pixels so cells are never cut */}
