@@ -140,9 +140,8 @@ const Widgets: React.FC = () => {
 
     useEffect(() => {
         try {
-            if (!tourStorage.hasSeen()) {
-                setTimeout(() => setShowTour(true), 400);
-            }
+            // Always open the tour on mount so it appears after a page reload.
+            setTimeout(() => setShowTour(true), 400);
         } catch (e) { }
     }, []);
 
