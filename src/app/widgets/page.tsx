@@ -265,9 +265,43 @@ const Widgets: React.FC = () => {
                         node.style.alignItems = 'center';
                         node.style.justifyContent = 'center';
                         node.style.fontWeight = '700';
+                        node.style.opacity = '1';
+                        node.style.transform = 'scale(1)';
+                        // smooth fade/transform when removing
+                        node.style.transition = 'opacity 320ms ease, transform 320ms ease';
                         node.textContent = 'Demo Node';
                         document.body.appendChild(node);
                         tourDemoRef.current.nodes.push(node);
+
+                        // schedule fade-out soon after it's shown, then remove on transition end
+                        const startFade = () => {
+                            try {
+                                node.style.opacity = '0';
+                                node.style.transform = 'scale(0.98)';
+                            } catch (e) { }
+                        };
+
+                        const removeNode = () => {
+                            try { node.remove(); } catch (e) { }
+                            try { tourDemoRef.current.nodes = tourDemoRef.current.nodes.filter(n => n !== node); } catch (e) { }
+                        };
+
+                        let fallbackRem = window.setTimeout(removeNode, 2200);
+                        const onTransitionEnd = (ev: Event) => {
+                            try {
+                                const pe = ev as TransitionEvent;
+                                // wait for opacity transition to finish
+                                if (!pe.propertyName || pe.propertyName === 'opacity') {
+                                    node.removeEventListener('transitionend', onTransitionEnd);
+                                    window.clearTimeout(fallbackRem);
+                                    removeNode();
+                                }
+                            } catch (e) { }
+                        };
+                        node.addEventListener('transitionend', onTransitionEnd);
+
+                        // show it for a short time then fade
+                        setTimeout(startFade, 700);
                     } catch (e) { }
                     try { ghost.style.opacity = '0'; } catch (e) { }
                     setTimeout(() => {
@@ -357,12 +391,24 @@ const Widgets: React.FC = () => {
                 path.style.transition = 'stroke-dashoffset 800ms ease-out';
                 requestAnimationFrame(() => { path.style.strokeDashoffset = '0'; });
 
-                // cleanup after a while
-                setTimeout(() => {
+                // cleanup after the arrow animation completes (or fallback)
+                const cleanupDemo = () => {
                     try { svg.remove(); } catch (e) { }
                     try { tourDemoRef.current.nodes.forEach(n => n.remove()); } catch (e) { }
                     tourDemoRef.current.nodes = [];
-                }, 2600);
+                };
+                let fallback = window.setTimeout(cleanupDemo, 2600);
+                const onPathEnd = (ev: Event) => {
+                    try {
+                        const te = ev as TransitionEvent;
+                        if (!te.propertyName || te.propertyName === 'stroke-dashoffset') {
+                            try { path.removeEventListener('transitionend', onPathEnd); } catch (e) { }
+                            window.clearTimeout(fallback);
+                            cleanupDemo();
+                        }
+                    } catch (e) { }
+                };
+                try { path.addEventListener('transitionend', onPathEnd); } catch (e) { }
             }
         } catch (e) { /* swallow demo errors */ }
     };
