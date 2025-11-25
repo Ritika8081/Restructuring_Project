@@ -134,6 +134,9 @@ const Widgets: React.FC = () => {
     // Local state for the in-flow connection mini-widget (connect/disconnect)
     const [connActive, setConnActive] = useState<boolean>(false);
     const channelData = useChannelData();
+    // "More" dropdown state for grouping secondary actions (Replay Tour, Zoom)
+    const [moreOpen, setMoreOpen] = useState<boolean>(false);
+    const moreRef = useRef<HTMLDivElement | null>(null);
     // Tour storage (persistent flag) and local flag to control tour visibility
     const tourStorage = useTourStorage();
     const [showTour, setShowTour] = useState<boolean>(false);
@@ -145,34 +148,48 @@ const Widgets: React.FC = () => {
         } catch (e) { }
     }, []);
 
+    // close "More" dropdown when clicking outside
+    useEffect(() => {
+        const onDoc = (ev: MouseEvent) => {
+            try {
+                const target = ev.target as Node | null;
+                if (!moreRef.current) return;
+                if (target && moreRef.current.contains(target as Node)) return;
+                setMoreOpen(false);
+            } catch (e) { }
+        };
+        if (moreOpen) window.addEventListener('mousedown', onDoc);
+        return () => { window.removeEventListener('mousedown', onDoc); };
+    }, [moreOpen]);
+
     const onTourClose = () => {
         try { tourStorage.markSeen(); } catch (e) { }
         setShowTour(false);
     };
 
     // Onboarding tour steps (selectors must match elements inside the flow modal)
-    const tourSteps: Array<{ selector: string; title: string; description: string; position?: 'auto' | 'right' | 'top' | 'bottom' | 'left'; action?: 'drag-demo' | 'connect-demo' }> = [
+    const tourSteps: Array<{ selector: string; title: string; description: string; position?: 'auto' | 'right' | 'top' | 'bottom' | 'left'; action?: 'drag-demo' | 'connect-demo' | 'flow-demo' }> = [
         { selector: '#flow-palette', title: 'Applications Palette', description: 'Drag applications from here into the flow area to build your pipeline.', position: 'right' },
-        { selector: '#flow-palette input', title: 'Search Applications', description: 'Filter the palette to find the app you need quickly.', position: 'right' },
+        // { selector: '#flow-palette input', title: 'Search Applications', description: 'Filter the palette to find the app you need quickly.', position: 'right' },
         { selector: '#flow-palette div[draggable]', title: 'Add an App', description: 'Drag any app from the palette into the flow area to add it to your pipeline.', position: 'right', action: 'drag-demo' },
-        { selector: '#flow-area', title: 'Flow Area', description: 'Arrange nodes here. Connect outputs to inputs to route data through transforms and visualizations.', position: 'left' },
+        { selector: '#flow-area', title: 'Flow Area', description: 'Arrange nodes here. Connect outputs to inputs to route data through transforms and visualizations.', position: 'left', action: 'flow-demo' },
         { selector: 'button[title="Open connection selector"]', title: 'Connection Selector', description: 'Open the connection selector to choose a hardware source or device to connect.', position: 'right' },
         { selector: 'button[title="Start / stop connecting"]', title: 'Connect / Disconnect', description: 'Start drawing connections between nodes or disconnect active links.', position: 'right', action: 'connect-demo' },
-        { selector: '[aria-label="Zoom controls"]', title: 'Zoom', description: 'Zoom the flow modal to see more or fewer nodes.', position: 'left' },
-        { selector: 'button[title="Zoom in"]', title: 'Zoom In', description: 'Increase the zoom level to inspect details.', position: 'left' },
-        { selector: 'button[title="Zoom out"]', title: 'Zoom Out', description: 'Decrease the zoom level to see more of the flow.', position: 'left' },
-        { selector: '[data-tour="play-button"]', title: 'Play', description: 'Click Play to arrange widgets onto the dashboard and start streaming data.', position: 'bottom' },
+        // { selector: '[aria-label="Zoom controls"]', title: 'Zoom', description: 'Zoom the flow modal to see more or fewer nodes.', position: 'left' },
+        // { selector: 'button[title="Zoom in"]', title: 'Zoom In', description: 'Increase the zoom level to inspect details.', position: 'left' },
+        // { selector: 'button[title="Zoom out"]', title: 'Zoom Out', description: 'Decrease the zoom level to see more of the flow.', position: 'left' },
         { selector: '[data-tour="download-layout"]', title: 'Save Layout', description: 'Export your current flowchart layout as a JSON file for sharing or backup.', position: 'left' },
         { selector: '[data-tour="load-layout"]', title: 'Load Layout', description: 'Import a previously exported layout JSON file to restore your flow.', position: 'left' },
         { selector: 'button[title="Increase channels"]', title: 'Add Channel', description: 'Add another input channel to the flow (useful for multi-channel devices).', position: 'right' },
         { selector: 'button[title="Decrease channels"]', title: 'Remove Channel', description: 'Remove the highest-numbered channel from the flow.', position: 'right' },
-        { selector: '[data-tour="settings-replay"]', title: 'Replay Tour', description: 'Replay this onboarding anytime from the Flow settings.', position: 'left' },
+        // { selector: '[data-tour="settings-replay"]', title: 'Replay Tour', description: 'Replay this onboarding anytime from the Flow settings.', position: 'left' },
+        { selector: '[data-tour="play-button"]', title: 'Play', description: 'Click Play to arrange widgets onto the dashboard and start streaming data.', position: 'bottom' },
     ];
     // Demo elements refs for tour animations
     const tourDemoRef = useRef<{ nodes: HTMLElement[] }>({ nodes: [] });
 
     // Perform demo actions requested by the tour (drag-demo, connect-demo)
-    const handleTourAction = (action: 'drag-demo' | 'connect-demo' | undefined, idx: number) => {
+    const handleTourAction = (action: 'drag-demo' | 'connect-demo' | 'flow-demo' | undefined, idx: number) => {
         try {
             if (action === 'drag-demo') {
                 const src = document.querySelector('#flow-palette div[draggable]') as HTMLElement | null;
@@ -307,6 +324,131 @@ const Widgets: React.FC = () => {
                         try { ghost.remove(); } catch (e) { }
                     }, 300);
                 }, 820);
+            }
+
+            if (action === 'flow-demo') {
+                // create three demo nodes inside the flow area and animate connections between them
+                const destArea = document.getElementById('flow-area');
+                if (!destArea) return;
+                const dRect = destArea.getBoundingClientRect();
+
+                const positions = [
+                    { x: dRect.left + dRect.width * 0.28, y: dRect.top + dRect.height * 0.32 },
+                    { x: dRect.left + dRect.width * 0.5, y: dRect.top + dRect.height * 0.22 },
+                    { x: dRect.left + dRect.width * 0.72, y: dRect.top + dRect.height * 0.42 },
+                ];
+
+                const makeNode = (x: number, y: number, label = '') => {
+                    const node = document.createElement('div');
+                    node.style.position = 'fixed';
+                    node.style.left = `${x}px`;
+                    node.style.top = `${y}px`;
+                    node.style.width = '140px';
+                    node.style.height = '72px';
+                    node.style.borderRadius = '10px';
+                    node.style.background = '#eef2ff';
+                    node.style.border = '1px solid #c7d2fe';
+                    node.style.boxShadow = '0 12px 30px rgba(2,6,23,0.08)';
+                    node.style.zIndex = '200080';
+                    node.style.pointerEvents = 'none';
+                    node.style.display = 'flex';
+                    node.style.alignItems = 'center';
+                    node.style.justifyContent = 'center';
+                    node.style.fontWeight = '700';
+                    node.style.color = '#0f172a';
+                    node.textContent = label;
+                    document.body.appendChild(node);
+                    return node;
+                };
+
+                const nodes = positions.map((p, i) => makeNode(p.x, p.y, String(i + 1)));
+                tourDemoRef.current.nodes.push(...nodes);
+
+                // SVG overlay for connections
+                const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+                svg.setAttribute('width', '100%');
+                svg.setAttribute('height', '100%');
+                svg.style.position = 'fixed';
+                svg.style.left = '0';
+                svg.style.top = '0';
+                svg.style.zIndex = '200070';
+                svg.style.pointerEvents = 'none';
+
+                const makePath = (stroke = '#60a5fa') => {
+                    const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                    p.setAttribute('stroke', stroke);
+                    p.setAttribute('stroke-width', '4');
+                    p.setAttribute('fill', 'none');
+                    p.setAttribute('stroke-linecap', 'round');
+                    p.setAttribute('stroke-linejoin', 'round');
+                    svg.appendChild(p);
+                    return p;
+                };
+
+                const pAB = makePath('#60a5fa');
+                const pBC = makePath('#60a5fa');
+                const pAC = makePath('#60a5fa');
+                document.body.appendChild(svg);
+
+                const update = () => {
+                    try {
+                        const r0 = nodes[0].getBoundingClientRect();
+                        const r1 = nodes[1].getBoundingClientRect();
+                        const r2 = nodes[2].getBoundingClientRect();
+                        const mid = (x1: number, x2: number) => (x1 + x2) / 2;
+
+                        const xA = r0.left + r0.width;
+                        const yA = r0.top + r0.height / 2;
+                        const xB = r1.left + r1.width / 2;
+                        const yB = r1.top + r1.height / 2;
+                        const xC = r2.left;
+                        const yC = r2.top + r2.height / 2;
+
+                        const dAB = `M ${xA} ${yA} C ${mid(xA, xB)} ${yA}, ${mid(xA, xB)} ${yB}, ${xB} ${yB}`;
+                        const dBC = `M ${xB} ${yB} C ${mid(xB, xC)} ${yB}, ${mid(xB, xC)} ${yC}, ${xC} ${yC}`;
+
+                        pAB.setAttribute('d', dAB);
+                        pBC.setAttribute('d', dBC);
+                    } catch (e) { }
+                };
+
+                update();
+
+                const startAnim = (path: SVGPathElement, delay: number) => {
+                    let len = 300;
+                    try { len = (path as any).getTotalLength ? (path as any).getTotalLength() : len; } catch (e) { }
+                    path.style.strokeDasharray = `${len}`;
+                    path.style.strokeDashoffset = `${len}`;
+                    // force layout
+                    path.getBoundingClientRect();
+                    path.style.transition = 'stroke-dashoffset 700ms ease-out';
+                    setTimeout(() => { try { path.style.strokeDashoffset = '0'; } catch (e) { } }, delay);
+                };
+
+                // animate AB, then BC, then AC
+                startAnim(pAB as any, 120);
+                startAnim(pBC as any, 420);
+                startAnim(pAC as any, 740);
+
+                // cleanup when last animation ends (or fallback)
+                const cleanup = () => {
+                    try { svg.remove(); } catch (e) { }
+                    try { tourDemoRef.current.nodes.forEach(n => n.remove()); } catch (e) { }
+                    tourDemoRef.current.nodes = [];
+                };
+
+                let fallback = window.setTimeout(cleanup, 3000);
+                const onLastEnd = (ev: Event) => {
+                    try {
+                        const te = ev as TransitionEvent;
+                        if (!te.propertyName || te.propertyName === 'stroke-dashoffset') {
+                            try { pAC.removeEventListener('transitionend', onLastEnd); } catch (e) { }
+                            window.clearTimeout(fallback);
+                            cleanup();
+                        }
+                    } catch (e) { }
+                };
+                try { pAC.addEventListener('transitionend', onLastEnd); } catch (e) { }
             }
 
             if (action === 'connect-demo') {
@@ -2173,7 +2315,7 @@ const Widgets: React.FC = () => {
             {/* Flow Configuration Modal */}
             {showFlowModal && (
                 <>
-                <OnboardingTour steps={tourSteps} open={showTour} onClose={onTourClose} theme="glass" onAction={handleTourAction} />
+                <OnboardingTour steps={tourSteps as any} open={showTour} onClose={onTourClose} theme="glass" onAction={handleTourAction} preventAutoScroll={true} />
                 <div style={{
                     position: 'fixed',
                     top: 0,
@@ -2188,23 +2330,29 @@ const Widgets: React.FC = () => {
                     justifyContent: 'center',
                 }}>
                     <div style={{
+                        // Fullpage modal: occupy entire viewport so the flow area is full-screen
+                        position: 'fixed',
+                        top: 0,
+                        left: 0,
+                        width: '100vw',
+                        height: '100vh',
                         background: '#f8fbff',
-                        border: '1px solid rgba(2,6,23,0.04)',
-                        borderRadius: 12,
-                        boxShadow: '0 8px 30px rgba(2,6,23,0.06)',
-                        padding: 32,
-                        // Make text inside the flow configuration modal non-selectable
+                        border: `1px solid ${'rgba(2,6,23,0.04)'}`,
+                        borderRadius: 0,
+                        boxShadow: 'none',
+                        padding: 24,
+                        boxSizing: 'border-box',
+                        display: 'flex',
+                        flexDirection: 'column',
                         WebkitUserSelect: 'none' as any,
                         MozUserSelect: 'none' as any,
                         msUserSelect: 'none' as any,
                         userSelect: 'none' as any,
-                        minWidth: 1200,
-                        maxWidth: 1400,
-                        width: '90vw',
-                        position: 'relative',
-                        overflow: 'visible',
-                        margin: 'auto',
+                        // Hide overflow on the modal so the page body does not gain scrollbars
+                        overflow: 'hidden',
+                        margin: 0,
                     }}>
+                       
                         {/* Settings modal always rendered at top level of flowchart modal */}
                         {renderSettingsModal()}
                         <button
@@ -2213,19 +2361,18 @@ const Widgets: React.FC = () => {
                         >
                             &times;
                         </button>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginRight: 22 }}>
                             <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
                                 <div>
-                                    <h2 style={{ fontWeight: '700', fontSize: 22, margin: 0 }}>Configure Flow</h2>
-                                    <div style={{ fontSize: 13, color: '#6b7280', marginTop: 6 }}>Arrange channels, transforms and plots. Drag items from the palette into the flow area to build your pipeline.</div>
+                                    <h1 style={{ fontWeight: 800, fontSize: 32, marginBottom: 4,paddingBottom: 14, lineHeight: 1.05, background: 'linear-gradient(90deg,#7c3aed,#06b6d4)', WebkitBackgroundClip: 'text' as any, backgroundClip: 'text' as any, color: 'transparent', letterSpacing: 0.2 }}>
+                                        Chords Playground
+                                    </h1>
+                                   
                                 </div>
                                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                                     <div style={{ fontSize: 12, color: '#9ca3af' }}>Tips: drag → connect → Play</div>
                                 </div>
-                                {/* Zoom controls moved into main control row (see buttons below) */}
-                            </div>
-
-                            <div style={{ display: 'flex', gap: 12, marginBottom: 0, alignItems: 'center', flexWrap: 'wrap' }}>
+                                <div style={{ display: 'flex', gap: 12, marginBottom: 0, alignItems: 'center', flexWrap: 'wrap' }}>
                                  {/* Play button moved into main action row */}
                                 <button
                                     data-tour="play-button"
@@ -2234,163 +2381,201 @@ const Widgets: React.FC = () => {
                                 >
                                     Play
                                 </button>
-                                <button
-                                    data-tour="download-layout"
-                                    style={{ background: ACTION_COLORS.primary.bg, color: ACTION_COLORS.primary.text, padding: '8px 14px', borderRadius: 10, fontWeight: 700, border: 'none', cursor: 'pointer', fontSize: 14, display: 'inline-flex', alignItems: 'center', gap: 8, boxShadow: ACTION_COLORS.primary.shadow, transition: 'transform 120ms ease, box-shadow 120ms ease' }}
-                                    onClick={() => {
-                                        // Download full flowchart layout (widgets, grid, connections, positions, options) as JSON file
-                                        try {
-                                            const layout = {
-                                                widgets,
-                                                gridSettings,
-                                                connections,
-                                                modalPositions,
-                                                flowOptions,
-                                                channelCount,
-                                            };
-                                            const json = JSON.stringify(layout, null, 2);
-                                            const blob = new Blob([json], { type: 'application/json' });
-                                            const url = URL.createObjectURL(blob);
-                                            const a = document.createElement('a');
-                                            a.href = url;
-                                            a.download = 'flowchart-layout.json';
-                                            document.body.appendChild(a);
-                                            a.click();
-                                            document.body.removeChild(a);
-                                            URL.revokeObjectURL(url);
-                                            showToast('Flowchart layout downloaded!', 'success');
-                                        } catch (err) {
-                                            showToast('Failed to download layout', 'error');
-                                        }
-                                    }}
-                                >
-                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 3v9" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /><path d="M8 11l4-4 4 4" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /><path d="M21 21H3" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                                    <span>Save Layout</span>
-                                </button>
-                                <button
-                                    data-tour="settings-replay"
-                                    title="Replay onboarding tour"
-                                    style={{ background: ACTION_COLORS.ghost.bg, color: ACTION_COLORS.ghost.text, padding: '8px 12px', borderRadius: 10, fontWeight: 700, border: `1px solid ${ACTION_COLORS.ghost.text}`, cursor: 'pointer', fontSize: 13, display: 'inline-flex', alignItems: 'center', gap: 8 }}
-                                    onClick={() => {
-                                        try {
-                                            // In-place replay: clear seen flag and open tour
-                                            tourStorage.clearSeen();
-                                            setShowTour(true);
-                                        } catch (err) { }
-                                    }}
-                                >
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M21 12v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h6" stroke="#0f172a" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round"/><path d="M16 3v5h5" stroke="#0f172a" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round"/></svg>
-                                    <span style={{ fontSize: 13 }}>Replay Tour</span>
-                                </button>
-                                {/* Grouped zoom controls — act like a single button-group (accessible) */}
-                                <div
-                                    role="group"
-                                    aria-label="Zoom controls"
-                                    style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 8, padding: 6, borderRadius: 10, background: ACTION_COLORS.primary.bg, border: `1px solid ${ACTION_COLORS.ghost.bg}` }}
-                                >
-                                    <button
-                                        title="Zoom out"
-                                        onClick={() => setFlowScale(s => clampScale(parseFloat((s - 0.1).toFixed(2))))}
-                                        style={{ width: 25, height: 25, borderRadius: 8, border: 'none', background: ACTION_COLORS.ghost.bg, color: ACTION_COLORS.ghost.text, cursor: 'pointer' }}
-                                    >
-                                        −
-                                    </button>
-
-                                    <div style={{ fontSize: 13, color: '#f3f6faff', fontWeight: 600 }}>Zoom</div>
-
-                                    <button
-                                        title="Zoom in"
-                                        onClick={() => setFlowScale(s => clampScale(parseFloat((s + 0.1).toFixed(2))))}
-                                        style={{ width: 25, height: 25, borderRadius: 8, border: 'none', background: ACTION_COLORS.ghost.bg, color: ACTION_COLORS.ghost.text, cursor: 'pointer' }}
-                                    >
-                                        +
-                                    </button>
-                                </div>
-                            
-                                {/* Left palette is now shown inside the flow area as a draggable list (see below) */}
-                                <button
-                                    data-tour="load-layout"
-                                    style={{ background: ACTION_COLORS.success.bg, color: ACTION_COLORS.success.text, padding: '8px 14px', borderRadius: 10, fontWeight: 700, border: 'none', cursor: 'pointer', fontSize: 14, display: 'inline-flex', alignItems: 'center', gap: 8, boxShadow: ACTION_COLORS.success.shadow, transition: 'transform 120ms ease, box-shadow 120ms ease' }}
-                                    onClick={() => {
-                                        // Open file selector to load flowchart layout
-                                        try {
-                                            const input = document.createElement('input');
-                                            input.type = 'file';
-                                            input.accept = '.json,application/json';
-                                            input.onchange = (e) => {
-                                                const target = e.target as HTMLInputElement | null;
-                                                if (!target || !target.files || target.files.length === 0) return;
-                                                const file = target.files[0];
-                                                if (!file) return;
-                                                const reader = new FileReader();
-                                                reader.onload = (ev) => {
-                                                    try {
-                                                        const layout = JSON.parse(ev.target?.result as string);
-                                                        if (layout && typeof layout === 'object') {
-                                                            if (layout.widgets) setWidgets(layout.widgets);
-                                                            if (layout.gridSettings) setGridSettings(layout.gridSettings);
-                                                            if (layout.connections) setConnections(layout.connections);
-                                                            if (layout.modalPositions) {
-                                                                // Adjust imported modal positions to the current flowScale.
-                                                                // Layout files may have been exported at a different zoom
-                                                                // level; convert positions into the unscaled modal
-                                                                // coordinate space by dividing by flowScale.
-                                                                try {
-                                                                    const s = flowScale || 1;
-                                                                    const adjusted: Record<string, { left: number, top: number }> = {};
-                                                                    Object.keys(layout.modalPositions).forEach(k => {
-                                                                        try {
-                                                                            const v = (layout.modalPositions as any)[k];
-                                                                            if (v && typeof v.left === 'number' && typeof v.top === 'number') {
-                                                                                // If incoming values are already normalized (<=1), assume normalized and use directly.
-                                                                                if (v.left <= 1 && v.top <= 1) {
-                                                                                    adjusted[k] = { left: v.left, top: v.top };
-                                                                                } else {
-                                                                                    // Incoming values are pixels. They may be saved at a zoomed scale,
-                                                                                    // so first convert to unscaled pixels, then to normalized coords.
-                                                                                    const unscaledLeft = Math.round(v.left / s);
-                                                                                    const unscaledTop = Math.round(v.top / s);
-                                                                                    adjusted[k] = pixelToNormalized(unscaledLeft, unscaledTop);
-                                                                                }
-                                                                            }
-                                                                        } catch (e) { /* ignore per-key */ }
-                                                                    });
-                                                                    setModalPositions(adjusted);
-                                                                } catch (err) {
-                                                                    // Fallback: if conversion failed, try using incoming positions directly
-                                                                    setModalPositions(layout.modalPositions);
-                                                                }
-                                                            }
-                                                            if (layout.flowOptions) setFlowOptions(layout.flowOptions);
-                                                            // Restore channel count if present; otherwise infer from flowOptions
-                                                            if (typeof layout.channelCount === 'number') {
-                                                                setChannelCount(layout.channelCount);
-                                                            } else if (layout.flowOptions && Array.isArray(layout.flowOptions)) {
-                                                                const cnt = (layout.flowOptions as any[]).filter(o => typeof o.id === 'string' && o.id.startsWith('channel-')).length;
-                                                                setChannelCount(cnt || 1);
-                                                            }
-                                                            showToast('Flowchart layout loaded!', 'success');
-                                                        } else {
-                                                            showToast('Invalid layout file', 'error');
-                                                        }
-                                                    } catch (err) {
-                                                        showToast('Failed to parse layout file', 'error');
-                                                    }
-                                                };
-                                                reader.readAsText(file);
-                                            };
-                                            input.click();
-                                        } catch (err) {
-                                            showToast('Failed to open file selector', 'error');
-                                        }
-                                    }}
-                                >
-                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 3v9" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /><path d="M8 11l4-4 4 4" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /><path d="M21 21H3" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                                    <span>Load Layout</span>
-                                </button>
                                
+                                 {/* "More" dropdown grouping secondary actions: Replay Tour + Zoom */}
+                                <div style={{ position: 'relative', display: 'inline-block', marginLeft: 8 }} ref={moreRef}>
+                                    <button
+                                        title="More"
+                                        aria-haspopup="true"
+                                        aria-expanded={moreOpen}
+                                        onClick={() => setMoreOpen(o => !o)}
+                                        style={{ background: ACTION_COLORS.ghost.bg, color: ACTION_COLORS.ghost.text, padding: '8px 12px', borderRadius: 10, fontWeight: 700, border: `1px solid ${ACTION_COLORS.ghost.text}`, cursor: 'pointer', fontSize: 13, display: 'inline-flex', alignItems: 'center', gap: 8 }}
+                                    >
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 6v.01" stroke="#0f172a" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/><path d="M12 12v.01" stroke="#0f172a" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/><path d="M12 18v.01" stroke="#0f172a" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                                        <span style={{ fontSize: 13 }}>More</span>
+                                    </button>
 
+                                    {moreOpen && (
+                                        <div
+                                            role="menu"
+                                            tabIndex={0}
+                                            onKeyDown={(e) => { if (e.key === 'Escape') setMoreOpen(false); }}
+                                            style={{ position: 'absolute', right: 0, marginTop: 8, background: '#ffffff', borderRadius: 10, boxShadow: '0 12px 36px rgba(2,6,23,0.12)', padding: 8, zIndex: 100050, minWidth: 220 }}
+                                        >
+                                            <button
+                                                role="menuitem"
+                                                tabIndex={0}
+                                                onClick={() => {
+                                                    try { tourStorage.clearSeen(); setShowTour(true); } catch (e) { }
+                                                    setMoreOpen(false);
+                                                }}
+                                                style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%', padding: '10px 12px', borderRadius: 8, border: '1px solid #eef2f7', background: '#f3f3f6ff', cursor: 'pointer', fontWeight: 800, fontSize: 13 }}
+                                            >
+                                                <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 30, height: 30, borderRadius: 8, background: ACTION_COLORS.primary.bg, color: '#fff' }}>
+                                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M21 12v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h6" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round"/><path d="M16 3v5h5" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                                                </span>
+                                                <div style={{ textAlign: 'left', flex: 1 }}>
+                                                    <div style={{ fontSize: 13 }}>Replay Tour</div>
+                                                    <div style={{ fontSize: 11, color: '#6b7280', marginTop: 2 }}>Show onboarding again</div>
+                                                </div>
+                                            </button>
+                                            
+                                            <div style={{ height: 8 }} />
+
+                                            <button
+                                                role="menuitem"
+                                                tabIndex={0}
+                                                data-tour="download-layout"
+                                                onClick={() => {
+                                                    try {
+                                                        const layout = {
+                                                            widgets,
+                                                            gridSettings,
+                                                            connections,
+                                                            modalPositions,
+                                                            flowOptions,
+                                                            channelCount,
+                                                        };
+                                                        const json = JSON.stringify(layout, null, 2);
+                                                        const blob = new Blob([json], { type: 'application/json' });
+                                                        const url = URL.createObjectURL(blob);
+                                                        const a = document.createElement('a');
+                                                        a.href = url;
+                                                        a.download = 'flowchart-layout.json';
+                                                        document.body.appendChild(a);
+                                                        a.click();
+                                                        document.body.removeChild(a);
+                                                        URL.revokeObjectURL(url);
+                                                        try { showToast('Flowchart layout downloaded!', 'success'); } catch (e) { }
+                                                    } catch (err) {
+                                                        try { showToast('Failed to download layout', 'error'); } catch (e) { }
+                                                    }
+                                                    setMoreOpen(false);
+                                                }}
+                                                style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%', padding: '10px 12px', borderRadius: 8, border: '1px solid #eef2f7', background: '#ffffff', cursor: 'pointer', fontWeight: 700, fontSize: 13, marginTop: 6 }}
+                                            >
+                                                <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 30, height: 30, borderRadius: 8, background: ACTION_COLORS.primary.bg, color: '#fff' }}>
+                                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 3v9" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" /><path d="M8 11l4-4 4 4" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" /><path d="M21 21H3" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                                                </span>
+                                                <div style={{ textAlign: 'left', flex: 1 }}>
+                                                    <div style={{ fontSize: 13 }}>Save Layout</div>
+                                                    <div style={{ fontSize: 11, color: '#6b7280', marginTop: 2 }}>Export flowchart JSON</div>
+                                                </div>
+                                            </button>
+
+                                            <button
+                                                role="menuitem"
+                                                tabIndex={0}
+                                                data-tour="load-layout"
+                                                onClick={() => {
+                                                    try {
+                                                        const input = document.createElement('input');
+                                                        input.type = 'file';
+                                                        input.accept = '.json,application/json';
+                                                        input.onchange = (e) => {
+                                                            const target = e.target as HTMLInputElement | null;
+                                                            if (!target || !target.files || target.files.length === 0) return;
+                                                            const file = target.files[0];
+                                                            if (!file) return;
+                                                            const reader = new FileReader();
+                                                            reader.onload = (ev) => {
+                                                                try {
+                                                                    const layout = JSON.parse(ev.target?.result as string);
+                                                                    if (layout && typeof layout === 'object') {
+                                                                        if (layout.widgets) setWidgets(layout.widgets);
+                                                                        if (layout.gridSettings) setGridSettings(layout.gridSettings);
+                                                                        if (layout.connections) setConnections(layout.connections);
+                                                                        if (layout.modalPositions) {
+                                                                            try {
+                                                                                const s = flowScale || 1;
+                                                                                const adjusted: Record<string, { left: number, top: number }> = {};
+                                                                                Object.keys(layout.modalPositions).forEach(k => {
+                                                                                    try {
+                                                                                        const v = (layout.modalPositions as any)[k];
+                                                                                        if (v && typeof v.left === 'number' && typeof v.top === 'number') {
+                                                                                            if (v.left <= 1 && v.top <= 1) adjusted[k] = { left: v.left, top: v.top };
+                                                                                            else {
+                                                                                                const unscaledLeft = Math.round(v.left / s);
+                                                                                                const unscaledTop = Math.round(v.top / s);
+                                                                                                adjusted[k] = pixelToNormalized(unscaledLeft, unscaledTop);
+                                                                                            }
+                                                                                        }
+                                                                                    } catch (e) { }
+                                                                                });
+                                                                                setModalPositions(adjusted);
+                                                                            } catch (err) {
+                                                                                setModalPositions(layout.modalPositions);
+                                                                            }
+                                                                        }
+                                                                        if (layout.flowOptions) setFlowOptions(layout.flowOptions);
+                                                                        if (typeof layout.channelCount === 'number') setChannelCount(layout.channelCount);
+                                                                        else if (layout.flowOptions && Array.isArray(layout.flowOptions)) {
+                                                                            const cnt = (layout.flowOptions as any[]).filter(o => typeof o.id === 'string' && o.id.startsWith('channel-')).length;
+                                                                            setChannelCount(cnt || 1);
+                                                                        }
+                                                                        try { showToast('Flowchart layout loaded!', 'success'); } catch (e) { }
+                                                                    } else {
+                                                                        try { showToast('Invalid layout file', 'error'); } catch (e) { }
+                                                                    }
+                                                                } catch (err) {
+                                                                    try { showToast('Failed to parse layout file', 'error'); } catch (e) { }
+                                                                }
+                                                            };
+                                                            reader.readAsText(file);
+                                                        };
+                                                        input.click();
+                                                    } catch (err) {
+                                                        try { showToast('Failed to open file selector', 'error'); } catch (e) { }
+                                                    }
+                                                    setMoreOpen(false);
+                                                }}
+                                                style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%', padding: '10px 12px', borderRadius: 8, border: '1px solid #eef2f7', background: '#ffffff', cursor: 'pointer', fontWeight: 700, fontSize: 13, marginTop: 6 }}
+                                            >
+                                                <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 30, height: 30, borderRadius: 8, background: ACTION_COLORS.success.bg, color: '#fff' }}>
+                                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 3v9" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" /><path d="M8 11l4-4 4 4" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" /><path d="M21 21H3" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                                                </span>
+                                                <div style={{ textAlign: 'left', flex: 1 }}>
+                                                    <div style={{ fontSize: 13 }}>Load Layout</div>
+                                                    <div style={{ fontSize: 11, color: '#6b7280', marginTop: 2 }}>Import flowchart JSON</div>
+                                                </div>
+                                            </button>
+
+                                            <div style={{ height: 1, background: '#b4b5b9ff', margin: '8px 6px' }} />
+
+                                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '6px 4px' }}>
+                                             
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                                        <button
+                                                            role="menuitem"
+                                                            title="Zoom out"
+                                                            onClick={() => { setFlowScale(s => clampScale(parseFloat((s - 0.1).toFixed(2)))); }}
+                                                            style={{ width: 36, height: 36, borderRadius: 8, border: `1px solid ${ACTION_COLORS.ghost.bg}`, background: '#edf0f0ff', color: ACTION_COLORS.ghost.text, cursor: 'pointer', fontSize: 18, fontWeight: 800 }}
+                                                        >
+                                                            −
+                                                        </button>
+                                                           <div style={{ fontSize: 13, fontWeight: 700 }}>Zoom</div>
+
+                                                        <div style={{ minWidth: 56, textAlign: 'center', fontSize: 13, fontWeight: 700, background: '#f8fafc', borderRadius: 8, padding: '6px 8px', color: '#0f172a' }}>{Math.round((flowScale || 1) * 100)}%</div>
+
+                                                        <button
+                                                            role="menuitem"
+                                                            title="Zoom in"
+                                                            onClick={() => { setFlowScale(s => clampScale(parseFloat((s + 0.1).toFixed(2)))); }}
+                                                            style={{ width: 36, height: 36, borderRadius: 8, border: `1px solid ${ACTION_COLORS.ghost.bg}`, background: '#edf0f0ff', color: ACTION_COLORS.ghost.text, cursor: 'pointer', fontSize: 18, fontWeight: 800 }}
+                                                        >
+                                                            +
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
                             </div>
+                            </div>
+
+                          
                         </div>
                         {/* Connection modal (opened via toolbar Make Connection button) */}
                         {showConnectionModal && (
@@ -2443,8 +2628,8 @@ const Widgets: React.FC = () => {
 
                         {/* Flowchart grid layout */}
                         {/* Row layout: left palette + flow area to avoid overlap */}
-                            <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start', paddingTop: 8 }}>
-                            <div id="flow-palette" style={{ width: 260, flex: '0 0 260', height: 520, overflowY: 'auto', padding: 12, borderRadius: 12, background: '#ffffff', border: '1px solid #eef2f7', boxShadow: '0 6px 22px rgba(17,24,39,0.06)' }}>
+                            <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start', paddingTop: 8, height: '100%' }}>
+                            <div id="flow-palette" style={{ width: 260, flex: '0 0 260', height: 'calc(100vh - 120px)', maxHeight: 'calc(100vh - 120px)', overflowY: 'auto', padding: 12, borderRadius: 12, background: '#ffffff', border: '1px solid #eef2f7', boxShadow: '0 6px 22px rgba(17,24,39,0.06)' }}>
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 8 }}>
                                     <div style={{ fontWeight: 700, padding: '6px 8px', color: '#111827', display: 'flex', alignItems: 'center', gap: 8 }}>
                                         <span>Applications</span>
@@ -2525,76 +2710,81 @@ const Widgets: React.FC = () => {
                                 const y = e.clientY - rect.top;
                                 // Add as a flowchart item (not dashboard widget). Compute pixel left/top inside flow area.
                                 handleAddFlowItemAt(type, x, y);
-                            }} style={{ position: 'relative', flex: 1, minWidth: 900, height: 500, margin: 'auto', borderRadius: 12, border: `1px solid ${THEME_COLORS.default.border}`, boxShadow: '0 8px 40px rgba(2,6,23,0.06)', overflow: 'auto', background: THEME_COLORS.default.bg, backgroundImage: `radial-gradient(${THEME_COLORS.default.border} 1px, transparent 1px)`, backgroundSize: '12px 12px', WebkitUserSelect: 'none' as any, MozUserSelect: 'none' as any, msUserSelect: 'none' as any, userSelect: 'none' as any }}>
+                            }} style={{ position: 'relative', flex: 1, minWidth: 900, minHeight: 'calc(100vh - 120px)', height: 'calc(100vh - 120px)', margin: '12px 0 24px 0', borderRadius: 12, border: `1px solid ${THEME_COLORS.default.border}`, boxShadow: '0 8px 40px rgba(2,6,23,0.06)', overflow: 'hidden', background: THEME_COLORS.default.bg, backgroundImage: `radial-gradient(${THEME_COLORS.default.border} 1px, transparent 1px)`, backgroundSize: '12px 12px', WebkitUserSelect: 'none' as any, MozUserSelect: 'none' as any, msUserSelect: 'none' as any, userSelect: 'none' as any }}>
                                 {/* In-flow mini-widget: connection controls (select type + connect/disconnect) */}
                                 <div style={{ position: 'absolute', top: 12, left: 12, zIndex: 10001, pointerEvents: 'auto' }}>
-                                    <div style={{ width: 220, borderRadius: 12, background: '#ffffff', border: '1px solid #c6d7ebff', boxShadow: '0 10px 30px rgba(2,6,23,0.06)', padding: '6px 8px', display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'space-between', overflow: 'hidden', boxSizing: 'border-box' }}>
-                                        {/* Left: status + selector */}
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flex: '1 1 auto' }}>
-                                            <span
-                                                aria-hidden
-                                                style={{ width: 10, height: 10, borderRadius: 10, background: connActive ? ACTION_COLORS.green.bg : '#e6eef8', boxShadow: connActive ? ACTION_COLORS.green.shadow : 'none', display: 'inline-block' }}
-                                            />
+                                    <div style={{ width: 240, borderRadius: 12, background: themeFor('basic').bg, border: `1px solid ${themeFor('basic').border}`, boxShadow: themeFor('basic').shadow, padding: '8px', display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'space-between', overflow: 'hidden', boxSizing: 'border-box' }}>
+                                        {/* Left: heading + status + selector */}
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0, flex: '1 1 auto' }}>
+                                            <strong style={{ fontSize: 12, color: themeFor('basic').text }}>Make connection</strong>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                                <span
+                                                    aria-hidden
+                                                    style={{ width: 10, height: 10, borderRadius: 10, background: connActive ? ACTION_COLORS.green.bg : themeFor('basic').border, boxShadow: connActive ? ACTION_COLORS.green.shadow : 'none', display: 'inline-block' }}
+                                                />
 
-                                            <button
-                                                title="Open connection selector"
-                                                onClick={() => { try { setShowConnectionModal(true); } catch (err) { } }}
-                                                style={{ padding: '6px 10px', borderRadius: 8, border: `1px solid ${ACTION_COLORS.ghost.text}`, background: ACTION_COLORS.ghost.bg, color: ACTION_COLORS.ghost.text, cursor: 'pointer', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 8, flex: '1 1 auto', minWidth: 0, justifyContent: 'space-between', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                                            >
-                                                <span style={{ fontSize: 13, display: 'inline-block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 110 }}>{connActive ? 'Connected' : 'Select'}</span>
-                                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
-                                                    <path d="M6 9l6 6 6-6" stroke={ACTION_COLORS.ghost.text} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                                                </svg>
-                                            </button>
+                                                <button
+                                                    title="Open connection selector"
+                                                    onClick={() => { try { setShowConnectionModal(true); } catch (err) { } }}
+                                                    style={{ padding: '6px 10px', borderRadius: 8, border: `1px solid ${themeFor('basic').border}`, background: themeFor('basic').bg, color: themeFor('basic').text, cursor: 'pointer', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 8, flex: '1 1 auto', minWidth: 0, justifyContent: 'space-between', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                                                >
+                                                    <span style={{ fontSize: 13, display: 'inline-block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 120 }}>{connActive ? 'Connected' : 'Select'}</span>
+                                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
+                                                        <path d="M6 9l6 6 6-6" stroke={themeFor('basic').text} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                                                    </svg>
+                                                </button>
+                                            </div>
                                         </div>
 
                                         {/* Right: connect / disconnect */}
-                                        <button
-                                            title="Start / stop connecting"
-                                            onClick={() => {
-                                                try {
-                                                    if (!connActive) {
-                                                        // Open modal to let user pick and start a connection
-                                                        setShowConnectionModal(true);
-                                                    } else {
-                                                        // Call any registered disconnect handlers (preferred)
-                                                        try {
-                                                            console.info('[FlowWidget] disconnect clicked');
-                                                            // Prefer the context-level disconnect API if available
+                                        <div style={{ marginLeft: 8 }}>
+                                            <button
+                                                title="Start / stop connecting"
+                                                onClick={() => {
+                                                    try {
+                                                        if (!connActive) {
+                                                            // Open modal to let user pick and start a connection
+                                                            setShowConnectionModal(true);
+                                                        } else {
+                                                            // Call any registered disconnect handlers (preferred)
                                                             try {
-                                                                if (channelData && typeof channelData.disconnectActiveConnections === 'function') {
-                                                                    const ok = channelData.disconnectActiveConnections();
-                                                                    console.info('[FlowWidget] channelData.disconnectActiveConnections result:', ok);
+                                                                console.info('[FlowWidget] disconnect clicked');
+                                                                // Prefer the context-level disconnect API if available
+                                                                try {
+                                                                    if (channelData && typeof channelData.disconnectActiveConnections === 'function') {
+                                                                        const ok = channelData.disconnectActiveConnections();
+                                                                        console.info('[FlowWidget] channelData.disconnectActiveConnections result:', ok);
+                                                                    }
+                                                                } catch (e) { console.warn('[FlowWidget] channelData.disconnectActiveConnections error', e); }
+                                                                const current = (window as any).__app_connection_disconnect_current;
+                                                                console.info('[FlowWidget] current handler type:', typeof current);
+                                                                const handlers = (window as any).__app_connection_disconnect_handlers as Array<() => void> | undefined;
+                                                                console.info('[FlowWidget] handlers count:', Array.isArray(handlers) ? handlers.length : 0);
+                                                                // call the current direct handler if present
+                                                                if (typeof current === 'function') {
+                                                                    try { console.info('[FlowWidget] calling current handler'); current(); console.info('[FlowWidget] current handler returned'); } catch (e) { console.error('current handler error', e); }
                                                                 }
-                                                            } catch (e) { console.warn('[FlowWidget] channelData.disconnectActiveConnections error', e); }
-                                                            const current = (window as any).__app_connection_disconnect_current;
-                                                            console.info('[FlowWidget] current handler type:', typeof current);
-                                                            const handlers = (window as any).__app_connection_disconnect_handlers as Array<() => void> | undefined;
-                                                            console.info('[FlowWidget] handlers count:', Array.isArray(handlers) ? handlers.length : 0);
-                                                            // call the current direct handler if present
-                                                            if (typeof current === 'function') {
-                                                                try { console.info('[FlowWidget] calling current handler'); current(); console.info('[FlowWidget] current handler returned'); } catch (e) { console.error('current handler error', e); }
-                                                            }
-                                                            // fallback: call the handlers array
-                                                            if (Array.isArray(handlers) && handlers.length > 0) {
-                                                                handlers.slice().forEach((h, i) => { try { console.info('[FlowWidget] calling handler', i); h(); console.info('[FlowWidget] handler returned', i); } catch (e) { console.error('handler error', e); } });
-                                                            }
-                                                        } catch (e) { console.error('[FlowWidget] disconnect invoke error', e); }
-                                                        // Also emit a CustomEvent for components that listen to it
-                                                        try { window.dispatchEvent(new CustomEvent('app:disconnect', { detail: { source: 'flow-widget' } })); } catch (e) { }
-                                                        setConnActive(false);
-                                                        try { showToast('Disconnecting...', 'info'); } catch (e) { }
-                                                    }
-                                                } catch (err) { }
-                                            }}
-                                            style={{ padding: '6px 10px', borderRadius: 8, border: 'none', background: connActive ? ACTION_COLORS.neutral.bg : ACTION_COLORS.green.bg, color: connActive ? ACTION_COLORS.neutral.text : ACTION_COLORS.green.text, cursor: 'pointer', fontWeight: 700 }}
-                                        >
-                                            {connActive ? 'Disconnect' : 'Connect'}
-                                        </button>
+                                                                // fallback: call the handlers array
+                                                                if (Array.isArray(handlers) && handlers.length > 0) {
+                                                                    handlers.slice().forEach((h, i) => { try { console.info('[FlowWidget] calling handler', i); h(); console.info('[FlowWidget] handler returned', i); } catch (e) { console.error('handler error', e); } });
+                                                                }
+                                                            } catch (e) { console.error('[FlowWidget] disconnect invoke error', e); }
+                                                            // Also emit a CustomEvent for components that listen to it
+                                                            try { window.dispatchEvent(new CustomEvent('app:disconnect', { detail: { source: 'flow-widget' } })); } catch (e) { }
+                                                            setConnActive(false);
+                                                            try { showToast('Disconnecting...', 'info'); } catch (e) { }
+                                                        }
+                                                    } catch (err) { }
+                                                }}
+                                                style={{ padding: '6px 10px', borderRadius: 8, border: 'none', background: connActive ? ACTION_COLORS.neutral.bg : ACTION_COLORS.green.bg, color: connActive ? ACTION_COLORS.neutral.text : ACTION_COLORS.green.text, cursor: 'pointer', fontWeight: 700 }}
+                                            >
+                                                {connActive ? 'Disconnect' : 'Connect'}
+                                            </button>
+                                        </div>
                                     </div>
                                 </div>
                                 {/* Inner scaled surface: keep outer container size constant and apply visual scaling to this inner wrapper. */}
-                                <div style={{ width: '100%', height: '100%', transform: `scale(${flowScale})`, transformOrigin: '0 0' }}>
+                                <div style={{ width: '100%', display: 'block', transform: `scale(${flowScale})`, transformOrigin: '0 0', willChange: 'transform' }}>
                                     {/* Flowchart nodes as boxes */}
                                     {/* Combined Channels box: visually represent all channels inside one widget but keep individual channel ids for connections */}
                                     {(() => {
@@ -2761,6 +2951,7 @@ const Widgets: React.FC = () => {
                                             >
                                                 {/* Header with widget name, delete and settings buttons (compact) */}
                                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6, background: THEME_COLORS.default.bg, padding: '6px 8px', borderRadius: 8 }}>
+                                                    <strong style={{ fontSize: 12 }}>Data Center</strong>
                                                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                                                         <button
                                                             style={{ background: thCh.border, color: thCh.text, border: 'none', borderRadius: 6, padding: '2px 3px', cursor: 'pointer', fontWeight: 600, fontSize: 11 }}
@@ -2769,7 +2960,10 @@ const Widgets: React.FC = () => {
                                                         >
                                                             −
                                                         </button>
-                                                        <strong style={{ fontSize: 11 }}>Channels ({channelCount})</strong>
+                                                        <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1 }}>
+                                                            
+                                                            <span style={{ fontSize: 11, color: '#474a51ff' }}>{`CH (${channelCount})`}</span>
+                                                        </div>
                                                         <button
                                                             style={{ background: thCh.border, color: thCh.text, border: 'none', borderRadius: 6, padding: '2px 3px', cursor: 'pointer', fontWeight: 600, fontSize: 11 }}
                                                             onClick={e => { e.stopPropagation(); increaseChannels(); }}
@@ -2779,13 +2973,7 @@ const Widgets: React.FC = () => {
                                                         </button>
                                                     </div>
                                                     <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                                                        <button
-                                                            style={{ background: thCh.border, color: thCh.text, border: 'none', borderRadius: 6, padding: '2px', cursor: 'pointer', fontWeight: 600, fontSize: 11, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                                                            onClick={e => { e.stopPropagation(); handleRemoveChannels(); }}
-                                                            title="Delete Channels"
-                                                        >
-                                                            <svg width="14" height="14" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false"><path d="M6 7v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7H6z" fill="currentColor" /><path d="M19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z" fill="currentColor" /></svg>
-                                                        </button>
+                                                        {/* Delete button removed per request */}
                                                         <button
                                                             style={{ background: thCh.border, color: thCh.text, border: 'none', borderRadius: 6, padding: '2px 3px', cursor: 'pointer', fontWeight: 600, fontSize: 11 }}
                                                             onClick={e => { e.stopPropagation(); openSettings('channels-box'); }}

@@ -486,7 +486,7 @@ export default function SerialConnection() {
         disabled={isConnected}
         className="px-6 py-3 bg-green-500 text-white rounded-lg hover:bg-green-600 disabled:bg-gray-400 transition-colors"
       >
-        {isConnected ? 'Connected' : 'Connect to NPG Device'}
+        {isConnected ? 'Connected' : 'Connect to Device'}
       </button>
       
       {/* Device type badge */}

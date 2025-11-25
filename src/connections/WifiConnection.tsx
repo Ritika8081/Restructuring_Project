@@ -248,7 +248,7 @@ export default function WifiConnection() {
           disabled={isConnected}
           className="px-6 py-3 bg-purple-500 text-white rounded-lg hover:bg-purple-600 disabled:bg-gray-400 transition-colors"
         >
-          {isConnected ? 'Connected' : 'Connect to NPG Device'}
+          {isConnected ? 'Connected' : 'Connect to Device'}
         </button>
       </div>
       

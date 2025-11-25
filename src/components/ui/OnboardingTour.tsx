@@ -14,6 +14,9 @@ type Props = {
   onClose?: () => void;
   initial?: number;
   theme?: 'dark' | 'glass' | 'neon' | 'default';
+  // When true, the tour will NOT call `scrollIntoView` on target elements.
+  // This avoids forcing page/modal scrolling when the tour opens.
+  preventAutoScroll?: boolean;
   // Optional callback for demo actions (drag, connect, etc.). If it returns a Promise,
   // the tour will wait for it to resolve and then auto-advance to the next step.
   onAction?: (action: Step['action'] | undefined, index: number) => void | Promise<void>;
@@ -21,7 +24,7 @@ type Props = {
 
 const clamp = (v: number, a = 0, b = 1) => Math.max(a, Math.min(b, v));
 
-const OnboardingTour: React.FC<Props> = ({ steps, open, onClose, initial = 0, theme = 'default', onAction }) => {
+const OnboardingTour: React.FC<Props> = ({ steps, open, onClose, initial = 0, theme = 'default', onAction, preventAutoScroll = false }) => {
   const [index, setIndex] = useState<number>(initial);
   const [targetRect, setTargetRect] = useState<DOMRect | null>(null);
   const [visible, setVisible] = useState(open);
@@ -39,7 +42,12 @@ const OnboardingTour: React.FC<Props> = ({ steps, open, onClose, initial = 0, th
     try {
       const el = document.querySelector(s.selector) as HTMLElement | null;
       if (!el) { setTargetRect(null); return; }
-      el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
+      // Only auto-scroll when not explicitly prevented. Auto-scrolling can
+      // cause fixed/fullscreen modals or pinned UI to jump; callers may
+      // prefer to disable it (see `preventAutoScroll` prop).
+      if (!preventAutoScroll && typeof (el as any).scrollIntoView === 'function') {
+        try { el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' }); } catch (e) { }
+      }
       const r = el.getBoundingClientRect();
       setTargetRect(r);
     } catch (e) { setTargetRect(null); }
