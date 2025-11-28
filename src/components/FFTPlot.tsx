@@ -182,7 +182,7 @@ const FFTPlotRealtime: React.FC<FFTPlotRealtimeProps> = ({
     };
 
     if (inputData && inputData.length > 0) {
-      try { console.debug('[FFTPlotRealtime] received inputData length', inputData.length); } catch (e) {}
+    
       // If upstream provides data, render it at animation frame rate
       pushInputData(inputData);
       interval = window.setInterval(() => pushInputData(inputData), 50);

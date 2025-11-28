@@ -124,7 +124,7 @@ export default function SpiderPlot({ data, size = '100%', colors = ['#6C5CE7', '
               // Compact readable output: labels + comma-separated values
               const labels = d.map((p) => p.subject).join(', ');
               const vals = normalizedBands.map((v) => Number(v.toFixed(6))).join(', ');
-              console.log(`[SpiderPlot] bands — ${labels} => [${vals}]`);
+             
               lastLoggedBandsRef.current = normalizedBands.slice();
             }
           } catch (e) { /* swallow logging errors */ }

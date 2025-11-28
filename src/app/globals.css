@@ -66,3 +66,59 @@ html, body {
     :root { --scrollbar-width: 8px; }
 }
 
+/* Flow layout helpers ----------------------------------------------------- */
+.flow-row {
+    display: flex;
+    gap: 16px;
+    align-items: stretch;
+    padding-top: 0;
+    flex: 1 1 0;
+    min-height: 0;
+    height: 100%;
+}
+
+.flow-palette {
+    flex: 0 0 260px; /* base width */
+    max-width: 320px;
+    min-width: 180px;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+.flow-palette .flow-palette-list {
+    overflow-y: auto;
+    padding: 8px;
+}
+
+.flow-area {
+    flex: 1 1 0;
+    min-width: 0;
+    min-height: 0;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Responsive behavior: stack palette above flow-area on small screens */
+@media (max-width: 768px) {
+    .flow-row {
+        flex-direction: column;
+        padding-top: 6px;
+    }
+    .flow-palette {
+        flex: 0 0 auto;
+        width: 100%;
+        max-width: 100%;
+        min-width: 0;
+        max-height: 36vh;
+    }
+    .flow-area { height: calc(100vh - 220px); }
+}
+
+/* Larger screens: give slightly more space to palette */
+@media (min-width: 1280px) {
+    .flow-palette { flex: 0 0 300px; }
+}
+
+

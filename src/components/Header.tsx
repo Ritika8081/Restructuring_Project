@@ -11,14 +11,18 @@
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import DocModal from './ui/DocModal';
+import { useFlowModal } from '@/context/FlowModalContext';
 
 const Header: React.FC = () => {
     const router = useRouter();
     // Use FlowModalContext for modal control
-    const { setShowFlowModal } = require('@/context/FlowModalContext').useFlowModal();
+    const { showFlowModal, setShowFlowModal } = useFlowModal();
 
     // Local state for showing the project documentation modal
     const [showDocs, setShowDocs] = useState(false);
+
+    // If the flow modal is open, hide the global header so the flow's header is the only visible header.
+    if (showFlowModal) return null;
 
     return (
         <header className="bg-white border-b border-gray-200 sticky top-0 z-50 shadow-sm">

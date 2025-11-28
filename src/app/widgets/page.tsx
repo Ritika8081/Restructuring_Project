@@ -6,9 +6,9 @@ import Toast from '@/components/ui/Toast';
 import ConfirmModal from '@/components/ui/ConfirmModal';
 import OnboardingTour from '@/components/ui/OnboardingTour';
 import useTourStorage from '@/hooks/useTour';
+import FlowModule from '@/components/FlowModule';
 import { Widget, GridSettings, DragState, ToastState, ConfirmState } from '@/types/widget.types';
 import { checkCollisionAtPosition } from '@/utils/widget.utils';
-import ConnectionDataWidget from '@/components/ConnectionDataWidget';
 import Envelope from '@/components/Envelope';
 import { useChannelData } from '@/lib/channelDataContext';
 
@@ -134,9 +134,7 @@ const Widgets: React.FC = () => {
     // Local state for the in-flow connection mini-widget (connect/disconnect)
     const [connActive, setConnActive] = useState<boolean>(false);
     const channelData = useChannelData();
-    // "More" dropdown state for grouping secondary actions (Replay Tour, Zoom)
-    const [moreOpen, setMoreOpen] = useState<boolean>(false);
-    const moreRef = useRef<HTMLDivElement | null>(null);
+    // "More" dropdown state is now handled inside FlowModule header
     // Tour storage (persistent flag) and local flag to control tour visibility
     const tourStorage = useTourStorage();
     const [showTour, setShowTour] = useState<boolean>(false);
@@ -148,19 +146,6 @@ const Widgets: React.FC = () => {
         } catch (e) { }
     }, []);
 
-    // close "More" dropdown when clicking outside
-    useEffect(() => {
-        const onDoc = (ev: MouseEvent) => {
-            try {
-                const target = ev.target as Node | null;
-                if (!moreRef.current) return;
-                if (target && moreRef.current.contains(target as Node)) return;
-                setMoreOpen(false);
-            } catch (e) { }
-        };
-        if (moreOpen) window.addEventListener('mousedown', onDoc);
-        return () => { window.removeEventListener('mousedown', onDoc); };
-    }, [moreOpen]);
 
     const onTourClose = () => {
         try { tourStorage.markSeen(); } catch (e) { }
@@ -173,13 +158,13 @@ const Widgets: React.FC = () => {
         // { selector: '#flow-palette input', title: 'Search Applications', description: 'Filter the palette to find the app you need quickly.', position: 'right' },
         { selector: '#flow-palette div[draggable]', title: 'Add an App', description: 'Drag any app from the palette into the flow area to add it to your pipeline.', position: 'right', action: 'drag-demo' },
         { selector: '#flow-area', title: 'Flow Area', description: 'Arrange nodes here. Connect outputs to inputs to route data through transforms and visualizations.', position: 'left', action: 'flow-demo' },
-        { selector: 'button[title="Open connection selector"]', title: 'Connection Selector', description: 'Open the connection selector to choose a hardware source or device to connect.', position: 'right' },
-        { selector: 'button[title="Start / stop connecting"]', title: 'Connect / Disconnect', description: 'Start drawing connections between nodes or disconnect active links.', position: 'right', action: 'connect-demo' },
+        { selector: 'button[data-tour="connect-button"]', title: 'Connection Selector', description: 'Open the connection selector to choose a hardware source or device to connect.', position: 'right' },
+        { selector: 'button[data-tour="connect-button"]', title: 'Connect / Disconnect', description: 'Start drawing connections between nodes or disconnect active links.', position: 'right', action: 'connect-demo' },
         // { selector: '[aria-label="Zoom controls"]', title: 'Zoom', description: 'Zoom the flow modal to see more or fewer nodes.', position: 'left' },
         // { selector: 'button[title="Zoom in"]', title: 'Zoom In', description: 'Increase the zoom level to inspect details.', position: 'left' },
         // { selector: 'button[title="Zoom out"]', title: 'Zoom Out', description: 'Decrease the zoom level to see more of the flow.', position: 'left' },
-        { selector: '[data-tour="download-layout"]', title: 'Save Layout', description: 'Export your current flowchart layout as a JSON file for sharing or backup.', position: 'left' },
-        { selector: '[data-tour="load-layout"]', title: 'Load Layout', description: 'Import a previously exported layout JSON file to restore your flow.', position: 'left' },
+        // { selector: '[data-tour="download-layout"]', title: 'Save Layout', description: 'Export your current flowchart layout as a JSON file for sharing or backup.', position: 'left' },
+        // { selector: '[data-tour="load-layout"]', title: 'Load Layout', description: 'Import a previously exported layout JSON file to restore your flow.', position: 'left' },
         { selector: 'button[title="Increase channels"]', title: 'Add Channel', description: 'Add another input channel to the flow (useful for multi-channel devices).', position: 'right' },
         { selector: 'button[title="Decrease channels"]', title: 'Remove Channel', description: 'Remove the highest-numbered channel from the flow.', position: 'right' },
         // { selector: '[data-tour="settings-replay"]', title: 'Replay Tour', description: 'Replay this onboarding anytime from the Flow settings.', position: 'left' },
@@ -975,10 +960,12 @@ const Widgets: React.FC = () => {
     // flow area (unscaled). We convert to/from pixel coordinates when reading
     // or writing so the rest of the code can operate on pixels.
     const initialModalPositionsPx: Record<string, { left: number, top: number }> = {};
-    initialModalPositionsPx['channels-box'] = { left: 60, top: 80 };
+    initialModalPositionsPx['channels-box'] = { left: 60, top: 100 };
     initialModalPositionsPx['spiderplot'] = { left: 320, top: 100 };
     initialModalPositionsPx['fft'] = { left: 540, top: 100 };
     initialModalPositionsPx['bandpower'] = { left: 760, top: 100 };
+    // Place the aggregated Plots box horizontally aligned with Channels by default
+    initialModalPositionsPx['plots-box'] = { left: 420, top: 100 };
 
     // Internal storage uses normalized coordinates: { left: number, top: number } where
     // values are 0..1 fractions of the container width/height. Initialize lazily to
@@ -989,14 +976,33 @@ const Widgets: React.FC = () => {
     Object.keys(initialModalPositionsPx).forEach(k => { initialModalPositions[k] = normalizeFallback(initialModalPositionsPx[k]); });
     const [modalPositions, setModalPositions] = useState<Record<string, { left: number, top: number }>>(initialModalPositions);
 
-    // Helper: get the flow container (the inner scaled div) bounding rect. Use defaults
-    // if DOM is not available yet.
+    // Helper: get the flow container (the inner scaled div) bounding rect.
+    // Prefer the actual scaled inner wrapper if present, otherwise fall back
+    // to the outer `#flow-area` element and finally to defaults for SSR.
     const getFlowContainerRect = () => {
         try {
-            const el = document.querySelector('[style*="transform: scale("]') as HTMLElement | null;
-            if (el) return el.getBoundingClientRect();
+            const area = document.getElementById('flow-area') as HTMLElement | null;
+            if (area) {
+                // Use the flow-area container's bounding rect (not the scaled inner wrapper).
+                // The scaled inner wrapper may report a small height while absolute-positioned
+                // children define the visible area; using the container ensures we measure
+                // the full available modal space where widgets can be placed.
+                return area.getBoundingClientRect();
+            }
         } catch (e) { }
         return { width: 1200, height: 500, top: 0, left: 0, right: 1200, bottom: 500 } as DOMRect;
+    };
+
+    // Helper: get the full modal (viewport) rect so we can allow moving
+    // widgets across the entire modal surface (not just the inner flow area).
+    const getModalRect = () => {
+        try {
+            // Prefer the FlowModule container when embedded
+            const moduleEl = document.getElementById('flow-module') as HTMLElement | null;
+            if (moduleEl) return moduleEl.getBoundingClientRect();
+        } catch (e) { }
+        // Fallback to viewport
+        return { top: 0, left: 0, width: (typeof window !== 'undefined' ? window.innerWidth : 1200), height: (typeof window !== 'undefined' ? window.innerHeight : 900), right: (typeof window !== 'undefined' ? window.innerWidth : 1200), bottom: (typeof window !== 'undefined' ? window.innerHeight : 900) } as DOMRect;
     };
 
     const pixelToNormalized = (leftPx: number, topPx: number) => {
@@ -1419,11 +1425,16 @@ const Widgets: React.FC = () => {
 
     // Generate initial flow options with default channelCount
     // flow option objects may optionally include a `count` property for types that support multiple instances (e.g. 'basic')
-    const initialFlowOptions: Array<{ id: string, label: string, type: string, selected: boolean, count?: number }> = [];
+    const initialFlowOptions: Array<{ id: string, label: string, type: string, selected: boolean, count?: number, instances?: Array<{ id: string, label?: string }> }> = [];
     // create channel-0 .. channel-(N-1)
     for (let ch = 0; ch < DEFAULT_CHANNEL_COUNT; ch++) {
         initialFlowOptions.push({ id: `channel-${ch}`, label: `Channel ${ch}`, type: 'channel', selected: true });
     }
+    // Create a default basic Plot option with one instance so the Plots box appears
+    // and we can wire channel-0 -> plot-instance-0 by default.
+    const defaultBasicId = 'basic-0';
+    const defaultBasicInstanceId = `${defaultBasicId}-0`;
+    initialFlowOptions.push({ id: defaultBasicId, label: 'Plot', type: 'basic', selected: true, instances: [{ id: defaultBasicInstanceId, label: 'Plot 0' }] });
     // By default we only include the configured channels in the flowchart.
     // Other applications (spiderplot, FFT, Bandpower, etc.) can be added by the user
 
@@ -1487,7 +1498,8 @@ const Widgets: React.FC = () => {
         setChannelCount(prev => Math.max(1, prev - 1));
     }, []);
     // Connections between widgets (user-created)
-    const [connections, setConnections] = useState<Array<{ from: string, to: string }>>([]);
+    // By default connect channel-0 -> first plot instance so the Plots box shows data
+    const [connections, setConnections] = useState<Array<{ from: string, to: string }>>([{ from: 'channel-0', to: `${defaultBasicId}-0` }]);
 
     // Toast utility functions
     const showToast = useCallback((message: string, type: 'success' | 'error' | 'info' = 'info') => {
@@ -1759,6 +1771,10 @@ const Widgets: React.FC = () => {
         setArrowTick(t => t + 1);
     }, [modalPositions, connections, widgets, gridSettings]);
 
+    // Client-only mount flag to avoid rendering DOM-dependent graphics during SSR
+    const [isClient, setIsClient] = useState(false);
+    useEffect(() => { setIsClient(true); }, []);
+
     // When the flow modal is opened, DOM nodes for modal items may not be ready immediately.
     // Schedule a double rAF to force arrow recalculation after the modal has painted.
     useEffect(() => {
@@ -2019,13 +2035,15 @@ const Widgets: React.FC = () => {
         const adjLeft = Math.round(left / s);
         const adjTop = Math.round(top / s);
 
-        // Clamp left/top to reasonable bounds inside the flow modal container
-        const containerWidth = 1200; // default used elsewhere (unscaled)
-        const containerHeight = 500; // unscaled
+        // Clamp left/top to reasonable bounds inside the flow *container* (not the full modal)
+        // Use the flow container rect so dropped items cannot be placed outside the visible flow area.
+        const crect = getFlowContainerRect();
+        const containerWidth = Math.max(1200, Math.round(crect.width || 1200));
+        const containerHeight = Math.max(500, Math.round(crect.height || 500));
         const widgetWidth = (canonical === 'bandpower') ? 220 : 180;
         const widgetHeight = 70;
-        const clampedLeft = Math.max(8, Math.min(adjLeft, Math.max(8, Math.floor(containerWidth - widgetWidth - 8))));
-        const clampedTop = Math.max(8, Math.min(adjTop, Math.max(8, Math.floor(containerHeight - widgetHeight - 8))));
+        const clampedLeft = Math.max(0, Math.min(adjLeft, Math.floor(containerWidth - widgetWidth)));
+        const clampedTop = Math.max(0, Math.min(adjTop, Math.floor(containerHeight - widgetHeight)));
 
         // Store normalized coordinates so positions remain correct under zoom/resize
         setModalPositions(prev => ({ ...prev, [id]: pixelToNormalized(clampedLeft, clampedTop) }));
@@ -2066,6 +2084,18 @@ const Widgets: React.FC = () => {
     }, [showToast]);
 
     const removeBasicInstance = useCallback((optId: string, instanceId: string) => {
+        // Prevent removing the very last plot instance across all basic options
+        const basicOpts = (Array.isArray(flowOptions) ? flowOptions : []).filter(o => o.type === 'basic');
+        let totalInstances = 0;
+        for (const o of basicOpts) {
+            const insts = (o as any).instances || Array.from({ length: (o.count || 1) }, (_, i) => ({ id: `${o.id}-${i}` }));
+            totalInstances += insts.length;
+        }
+        if (totalInstances <= 1) {
+            try { showToast('At least one plot must remain in the Plots box', 'info'); } catch (e) { }
+            return;
+        }
+
         // Remove instance from flowOptions and any connections/modal positions that reference it
         setFlowOptions(prev => prev.map(o => o.id === optId ? { ...o, instances: ((o as any).instances || []).filter((ins: any) => ins.id !== instanceId) } : o));
         setConnections(prev => prev.filter(c => c.from !== instanceId && c.to !== instanceId));
@@ -2195,13 +2225,110 @@ const Widgets: React.FC = () => {
     /**
      * Load layout (for import functionality)
      */
-    const handleLoadLayout = useCallback((newWidgets: Widget[], newGridSettings?: GridSettings) => {
-        setWidgets(newWidgets);
-        if (newGridSettings) {
-            setGridSettings(newGridSettings);
+    const handleLoadLayout = useCallback((newWidgetsOrPayload: any, newGridSettings?: GridSettings) => {
+        try { console.debug('[Page] handleLoadLayout called', { argIsArray: Array.isArray(newWidgetsOrPayload), sample: (Array.isArray(newWidgetsOrPayload) ? (newWidgetsOrPayload as Widget[]).slice(0,3).map((w:any)=>w.id) : null), grid: newGridSettings }); } catch (e) { }
+
+        // If caller passed an array of widgets (legacy), behave as before
+        if (Array.isArray(newWidgetsOrPayload)) {
+            const arr = newWidgetsOrPayload as Widget[];
+            setWidgets(arr);
+            if (newGridSettings) setGridSettings(newGridSettings);
+            try { showToast(`Layout loaded with ${arr.length} widgets`, 'success'); } catch (e) { }
+            return;
         }
-        showToast(`Layout loaded with ${newWidgets.length} widgets`, 'success');
-    }, [showToast]);
+
+        // Otherwise treat arg as a payload object that may contain multiple fields
+        const payload = newWidgetsOrPayload || {};
+
+        // Prefer explicit widgets array if present
+        let widgetsArr: Widget[] | null = Array.isArray(payload.widgets) ? payload.widgets : null;
+
+        // If widgets array is empty or missing but payload contains flowOptions/modalPositions,
+        // synthesize a reasonable set of widgets so imported files that store flow as
+        // flowOptions+modalPositions are visible in the editor.
+        if ((!widgetsArr || widgetsArr.length === 0) && Array.isArray(payload.flowOptions) && payload.flowOptions.length > 0) {
+            try {
+                const gs = (newGridSettings || payload.gridSettings) || gridSettingsRef.current || gridSettings;
+                const modalPos = payload.modalPositions || {};
+                const fo = payload.flowOptions || [];
+                const synthesized: Widget[] = [];
+                let nextIndex = 0;
+                for (const opt of fo) {
+                    // If an option contains multiple instances, create widgets for each instance
+                    if (Array.isArray(opt.instances) && opt.instances.length > 0) {
+                        for (const inst of opt.instances) {
+                            const wid = inst.id || `${opt.id}-${nextIndex}`;
+                            const posNorm = modalPos[wid] || modalPos[opt.id];
+                            const pixel = posNorm ? normalizedToPixel(posNorm) : { left: (nextIndex % (gs.cols || 24)) * (gs.cellWidth || 50), top: Math.floor(nextIndex / (gs.cols || 24)) * (gs.cellHeight || 50) };
+                            const x = Math.max(0, Math.floor(pixel.left / (gs.cellWidth || 50)));
+                            const y = Math.max(0, Math.floor(pixel.top / (gs.cellHeight || 50)));
+                            const typeMap: Record<string,string> = { channel: 'basic', basic: 'basic', fft: 'FFTGraph', spiderplot: 'spiderplot', bandpower: 'statistic', candle: 'candle' };
+                            const type = typeMap[opt.type] || opt.type || 'basic';
+                            synthesized.push({ id: wid, x, y, width: 4, height: 3, minWidth: 1, minHeight: 1, type, channelIndex: (typeof wid === 'string' && wid.startsWith('channel-')) ? Number((wid.match(/channel-(\d+)/)||[])[1]||0) : undefined });
+                            nextIndex++;
+                        }
+                    } else {
+                        const wid = opt.id || `opt-${nextIndex}`;
+                        const posNorm = modalPos[wid] || modalPos[opt.id];
+                        const pixel = posNorm ? normalizedToPixel(posNorm) : { left: (nextIndex % (gs.cols || 24)) * (gs.cellWidth || 50), top: Math.floor(nextIndex / (gs.cols || 24)) * (gs.cellHeight || 50) };
+                        const x = Math.max(0, Math.floor(pixel.left / (gs.cellWidth || 50)));
+                        const y = Math.max(0, Math.floor(pixel.top / (gs.cellHeight || 50)));
+                        const typeMap: Record<string,string> = { channel: 'basic', basic: 'basic', fft: 'FFTGraph', spiderplot: 'spiderplot', bandpower: 'statistic', candle: 'candle' };
+                        const type = typeMap[opt.type] || opt.type || 'basic';
+                        synthesized.push({ id: wid, x, y, width: 4, height: 3, minWidth: 1, minHeight: 1, type, channelIndex: (typeof wid === 'string' && wid.startsWith('channel-')) ? Number((wid.match(/channel-(\d+)/)||[])[1]||0) : undefined });
+                        nextIndex++;
+                    }
+                }
+                widgetsArr = synthesized;
+            } catch (e) {
+                try { console.error('[Page] synthesize widgets failed', e); } catch (er) { }
+            }
+        }
+
+        // If payload provided an explicit widgets array (possibly empty) use it,
+        // otherwise fallback to the synthesized widgetsArr above.
+        if (Array.isArray(payload.widgets) && payload.widgets.length > 0) widgetsArr = payload.widgets;
+
+        if (widgetsArr) {
+            setWidgets(widgetsArr);
+        }
+
+        // Apply other payload fields if present
+        if (payload.gridSettings) setGridSettings(payload.gridSettings);
+        if (Array.isArray(payload.connections)) setConnections(payload.connections);
+        if (payload.modalPositions && typeof payload.modalPositions === 'object') setModalPositions(payload.modalPositions);
+        if (Array.isArray(payload.flowOptions)) setFlowOptions(payload.flowOptions);
+        if (typeof payload.channelCount === 'number') setChannelCount(payload.channelCount);
+
+        try { showToast(`Layout loaded${widgetsArr ? ` with ${widgetsArr.length} widgets` : ''}`, 'success'); } catch (e) { }
+    }, [showToast, gridSettings, setConnections, setModalPositions, setFlowOptions, setChannelCount]);
+
+    /**
+     * Save layout (export current widgets + grid settings as JSON)
+     */
+    const handleSaveLayout = useCallback(() => {
+        try {
+            const payload = { widgets, gridSettings, connections, modalPositions, flowOptions, channelCount };
+            const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            const now = new Date();
+            const ts = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}_${String(now.getHours()).padStart(2,'0')}${String(now.getMinutes()).padStart(2,'0')}${String(now.getSeconds()).padStart(2,'0')}`;
+            a.download = `flow-layout-${ts}.json`;
+            // append to DOM to ensure click works in all browsers
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+            showToast('Layout saved', 'success');
+        } catch (e) {
+            try { showToast('Failed to save layout', 'error'); } catch (err) { }
+        }
+    }, [widgets, gridSettings, connections, modalPositions, flowOptions, channelCount, showToast]);
+
+    const handleZoomIn = useCallback(() => { setFlowScale(s => clampScale((s || 1) + 0.1)); }, [setFlowScale]);
+    const handleZoomOut = useCallback(() => { setFlowScale(s => clampScale((s || 1) - 0.1)); }, [setFlowScale]);
 
     // Mouse move handler for drag operations
     // Use refs for dragState and gridSettings to avoid re-registering listeners
@@ -2311,338 +2438,56 @@ const Widgets: React.FC = () => {
     }, [gridSettings.showGridlines, gridSettings.cellWidth, gridSettings.cellHeight]);
 
     return (
-        <div className="min-h-screen w-screen bg-gray-100 flex flex-col overflow-hidden">
+        <div className="h-full w-full bg-gray-100 flex flex-col" style={{ minHeight: 0 }}>
             {/* Flow Configuration Modal */}
             {showFlowModal && (
-                <>
-                <OnboardingTour steps={tourSteps as any} open={showTour} onClose={onTourClose} theme="glass" onAction={handleTourAction} preventAutoScroll={true} />
-                <div style={{
-                    position: 'fixed',
-                    top: 0,
-                    left: 0,
-                    width: '100vw',
-                    height: '100vh',
-                    background: 'rgba(0,0,0,0.25)',
-                    zIndex: 9999,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                }}>
-                    <div style={{
-                        // Fullpage modal: occupy entire viewport so the flow area is full-screen
+                <FlowModule
+                    id="flow-module"
+                    style={{
                         position: 'fixed',
                         top: 0,
                         left: 0,
                         width: '100vw',
                         height: '100vh',
-                        background: '#f8fbff',
-                        border: `1px solid ${'rgba(2,6,23,0.04)'}`,
-                        borderRadius: 0,
-                        boxShadow: 'none',
-                        padding: 24,
-                        boxSizing: 'border-box',
+                        zIndex: 200000,
+                        padding: 4,
                         display: 'flex',
                         flexDirection: 'column',
-                        WebkitUserSelect: 'none' as any,
-                        MozUserSelect: 'none' as any,
-                        msUserSelect: 'none' as any,
-                        userSelect: 'none' as any,
-                        // Hide overflow on the modal so the page body does not gain scrollbars
-                        overflow: 'hidden',
-                        margin: 0,
-                    }}>
-                       
+                        boxSizing: 'border-box'
+                    }}
+                    playFlow={playFlow}
+                    showToast={showToast}
+                    connActive={connActive}
+                    setConnActive={setConnActive}
+                    showConnectionModal={showConnectionModal}
+                    setShowConnectionModal={setShowConnectionModal}
+                    onSaveLayout={handleSaveLayout}
+                    onLoadLayout={handleLoadLayout}
+                    onZoomIn={handleZoomIn}
+                    onZoomOut={handleZoomOut}
+                    flowScale={flowScale}
+                >
                         {/* Settings modal always rendered at top level of flowchart modal */}
                         {renderSettingsModal()}
-                        <button
-                            style={{ position: 'absolute', top: 12, right: 16, background: 'none', border: 'none', fontSize: 22, color: ACTION_COLORS.primary.bg, cursor: 'pointer' }}
-                            onClick={() => setShowFlowModal(false)}
-                        >
-                            &times;
-                        </button>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginRight: 22 }}>
-                            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
-                                <div>
-                                    <h1 style={{ fontWeight: 800, fontSize: 32, marginBottom: 4,paddingBottom: 14, lineHeight: 1.05, background: 'linear-gradient(90deg,#7c3aed,#06b6d4)', WebkitBackgroundClip: 'text' as any, backgroundClip: 'text' as any, color: 'transparent', letterSpacing: 0.2 }}>
-                                        Chords Playground
-                                    </h1>
-                                   
-                                </div>
-                                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                                    <div style={{ fontSize: 12, color: '#9ca3af' }}>Tips: drag → connect → Play</div>
-                                </div>
-                                <div style={{ display: 'flex', gap: 12, marginBottom: 0, alignItems: 'center', flexWrap: 'wrap' }}>
-                                 {/* Play button moved into main action row */}
-                                <button
-                                    data-tour="play-button"
-                                    style={{ background: ACTION_COLORS.green.bg, color: ACTION_COLORS.green.text, padding: '8px 14px', borderRadius: 10, fontWeight: 700, border: 'none', cursor: 'pointer', fontSize: 14, display: 'inline-flex', alignItems: 'center', gap: 8, boxShadow: ACTION_COLORS.green.shadow, transition: 'transform 120ms ease, box-shadow 120ms ease' }}
-                                    onClick={playFlow}
-                                >
-                                    Play
-                                </button>
-                               
-                                 {/* "More" dropdown grouping secondary actions: Replay Tour + Zoom */}
-                                <div style={{ position: 'relative', display: 'inline-block', marginLeft: 8 }} ref={moreRef}>
-                                    <button
-                                        title="More"
-                                        aria-haspopup="true"
-                                        aria-expanded={moreOpen}
-                                        onClick={() => setMoreOpen(o => !o)}
-                                        style={{ background: ACTION_COLORS.ghost.bg, color: ACTION_COLORS.ghost.text, padding: '8px 12px', borderRadius: 10, fontWeight: 700, border: `1px solid ${ACTION_COLORS.ghost.text}`, cursor: 'pointer', fontSize: 13, display: 'inline-flex', alignItems: 'center', gap: 8 }}
-                                    >
-                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 6v.01" stroke="#0f172a" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/><path d="M12 12v.01" stroke="#0f172a" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/><path d="M12 18v.01" stroke="#0f172a" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
-                                        <span style={{ fontSize: 13 }}>More</span>
-                                    </button>
-
-                                    {moreOpen && (
-                                        <div
-                                            role="menu"
-                                            tabIndex={0}
-                                            onKeyDown={(e) => { if (e.key === 'Escape') setMoreOpen(false); }}
-                                            style={{ position: 'absolute', right: 0, marginTop: 8, background: '#ffffff', borderRadius: 10, boxShadow: '0 12px 36px rgba(2,6,23,0.12)', padding: 8, zIndex: 100050, minWidth: 220 }}
-                                        >
-                                            <button
-                                                role="menuitem"
-                                                tabIndex={0}
-                                                onClick={() => {
-                                                    try { tourStorage.clearSeen(); setShowTour(true); } catch (e) { }
-                                                    setMoreOpen(false);
-                                                }}
-                                                style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%', padding: '10px 12px', borderRadius: 8, border: '1px solid #eef2f7', background: '#f3f3f6ff', cursor: 'pointer', fontWeight: 800, fontSize: 13 }}
-                                            >
-                                                <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 30, height: 30, borderRadius: 8, background: ACTION_COLORS.primary.bg, color: '#fff' }}>
-                                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M21 12v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h6" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round"/><path d="M16 3v5h5" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round"/></svg>
-                                                </span>
-                                                <div style={{ textAlign: 'left', flex: 1 }}>
-                                                    <div style={{ fontSize: 13 }}>Replay Tour</div>
-                                                    <div style={{ fontSize: 11, color: '#6b7280', marginTop: 2 }}>Show onboarding again</div>
-                                                </div>
-                                            </button>
-                                            
-                                            <div style={{ height: 8 }} />
-
-                                            <button
-                                                role="menuitem"
-                                                tabIndex={0}
-                                                data-tour="download-layout"
-                                                onClick={() => {
-                                                    try {
-                                                        const layout = {
-                                                            widgets,
-                                                            gridSettings,
-                                                            connections,
-                                                            modalPositions,
-                                                            flowOptions,
-                                                            channelCount,
-                                                        };
-                                                        const json = JSON.stringify(layout, null, 2);
-                                                        const blob = new Blob([json], { type: 'application/json' });
-                                                        const url = URL.createObjectURL(blob);
-                                                        const a = document.createElement('a');
-                                                        a.href = url;
-                                                        a.download = 'flowchart-layout.json';
-                                                        document.body.appendChild(a);
-                                                        a.click();
-                                                        document.body.removeChild(a);
-                                                        URL.revokeObjectURL(url);
-                                                        try { showToast('Flowchart layout downloaded!', 'success'); } catch (e) { }
-                                                    } catch (err) {
-                                                        try { showToast('Failed to download layout', 'error'); } catch (e) { }
-                                                    }
-                                                    setMoreOpen(false);
-                                                }}
-                                                style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%', padding: '10px 12px', borderRadius: 8, border: '1px solid #eef2f7', background: '#ffffff', cursor: 'pointer', fontWeight: 700, fontSize: 13, marginTop: 6 }}
-                                            >
-                                                <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 30, height: 30, borderRadius: 8, background: ACTION_COLORS.primary.bg, color: '#fff' }}>
-                                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 3v9" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" /><path d="M8 11l4-4 4 4" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" /><path d="M21 21H3" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                                                </span>
-                                                <div style={{ textAlign: 'left', flex: 1 }}>
-                                                    <div style={{ fontSize: 13 }}>Save Layout</div>
-                                                    <div style={{ fontSize: 11, color: '#6b7280', marginTop: 2 }}>Export flowchart JSON</div>
-                                                </div>
-                                            </button>
-
-                                            <button
-                                                role="menuitem"
-                                                tabIndex={0}
-                                                data-tour="load-layout"
-                                                onClick={() => {
-                                                    try {
-                                                        const input = document.createElement('input');
-                                                        input.type = 'file';
-                                                        input.accept = '.json,application/json';
-                                                        input.onchange = (e) => {
-                                                            const target = e.target as HTMLInputElement | null;
-                                                            if (!target || !target.files || target.files.length === 0) return;
-                                                            const file = target.files[0];
-                                                            if (!file) return;
-                                                            const reader = new FileReader();
-                                                            reader.onload = (ev) => {
-                                                                try {
-                                                                    const layout = JSON.parse(ev.target?.result as string);
-                                                                    if (layout && typeof layout === 'object') {
-                                                                        if (layout.widgets) setWidgets(layout.widgets);
-                                                                        if (layout.gridSettings) setGridSettings(layout.gridSettings);
-                                                                        if (layout.connections) setConnections(layout.connections);
-                                                                        if (layout.modalPositions) {
-                                                                            try {
-                                                                                const s = flowScale || 1;
-                                                                                const adjusted: Record<string, { left: number, top: number }> = {};
-                                                                                Object.keys(layout.modalPositions).forEach(k => {
-                                                                                    try {
-                                                                                        const v = (layout.modalPositions as any)[k];
-                                                                                        if (v && typeof v.left === 'number' && typeof v.top === 'number') {
-                                                                                            if (v.left <= 1 && v.top <= 1) adjusted[k] = { left: v.left, top: v.top };
-                                                                                            else {
-                                                                                                const unscaledLeft = Math.round(v.left / s);
-                                                                                                const unscaledTop = Math.round(v.top / s);
-                                                                                                adjusted[k] = pixelToNormalized(unscaledLeft, unscaledTop);
-                                                                                            }
-                                                                                        }
-                                                                                    } catch (e) { }
-                                                                                });
-                                                                                setModalPositions(adjusted);
-                                                                            } catch (err) {
-                                                                                setModalPositions(layout.modalPositions);
-                                                                            }
-                                                                        }
-                                                                        if (layout.flowOptions) setFlowOptions(layout.flowOptions);
-                                                                        if (typeof layout.channelCount === 'number') setChannelCount(layout.channelCount);
-                                                                        else if (layout.flowOptions && Array.isArray(layout.flowOptions)) {
-                                                                            const cnt = (layout.flowOptions as any[]).filter(o => typeof o.id === 'string' && o.id.startsWith('channel-')).length;
-                                                                            setChannelCount(cnt || 1);
-                                                                        }
-                                                                        try { showToast('Flowchart layout loaded!', 'success'); } catch (e) { }
-                                                                    } else {
-                                                                        try { showToast('Invalid layout file', 'error'); } catch (e) { }
-                                                                    }
-                                                                } catch (err) {
-                                                                    try { showToast('Failed to parse layout file', 'error'); } catch (e) { }
-                                                                }
-                                                            };
-                                                            reader.readAsText(file);
-                                                        };
-                                                        input.click();
-                                                    } catch (err) {
-                                                        try { showToast('Failed to open file selector', 'error'); } catch (e) { }
-                                                    }
-                                                    setMoreOpen(false);
-                                                }}
-                                                style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%', padding: '10px 12px', borderRadius: 8, border: '1px solid #eef2f7', background: '#ffffff', cursor: 'pointer', fontWeight: 700, fontSize: 13, marginTop: 6 }}
-                                            >
-                                                <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 30, height: 30, borderRadius: 8, background: ACTION_COLORS.success.bg, color: '#fff' }}>
-                                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 3v9" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" /><path d="M8 11l4-4 4 4" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" /><path d="M21 21H3" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                                                </span>
-                                                <div style={{ textAlign: 'left', flex: 1 }}>
-                                                    <div style={{ fontSize: 13 }}>Load Layout</div>
-                                                    <div style={{ fontSize: 11, color: '#6b7280', marginTop: 2 }}>Import flowchart JSON</div>
-                                                </div>
-                                            </button>
-
-                                            <div style={{ height: 1, background: '#b4b5b9ff', margin: '8px 6px' }} />
-
-                                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '6px 4px' }}>
-                                             
-                                                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                                        <button
-                                                            role="menuitem"
-                                                            title="Zoom out"
-                                                            onClick={() => { setFlowScale(s => clampScale(parseFloat((s - 0.1).toFixed(2)))); }}
-                                                            style={{ width: 36, height: 36, borderRadius: 8, border: `1px solid ${ACTION_COLORS.ghost.bg}`, background: '#edf0f0ff', color: ACTION_COLORS.ghost.text, cursor: 'pointer', fontSize: 18, fontWeight: 800 }}
-                                                        >
-                                                            −
-                                                        </button>
-                                                           <div style={{ fontSize: 13, fontWeight: 700 }}>Zoom</div>
-
-                                                        <div style={{ minWidth: 56, textAlign: 'center', fontSize: 13, fontWeight: 700, background: '#f8fafc', borderRadius: 8, padding: '6px 8px', color: '#0f172a' }}>{Math.round((flowScale || 1) * 100)}%</div>
-
-                                                        <button
-                                                            role="menuitem"
-                                                            title="Zoom in"
-                                                            onClick={() => { setFlowScale(s => clampScale(parseFloat((s + 0.1).toFixed(2)))); }}
-                                                            style={{ width: 36, height: 36, borderRadius: 8, border: `1px solid ${ACTION_COLORS.ghost.bg}`, background: '#edf0f0ff', color: ACTION_COLORS.ghost.text, cursor: 'pointer', fontSize: 18, fontWeight: 800 }}
-                                                        >
-                                                            +
-                                                        </button>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-                            </div>
-
-                          
-                        </div>
-                        {/* Connection modal (opened via toolbar Make Connection button) */}
-                        {showConnectionModal && (
-                            <div style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', zIndex: 100002, pointerEvents: 'auto' }}>
-                                <div
-                                    style={{
-                                        position: 'fixed',
-                                        top: 0,
-                                        left: 0,
-                                        width: '100vw',
-                                        height: '100vh',
-                                        background: 'rgba(81, 75, 75, 0.39)',
-                                        zIndex: 200002,
-                                        pointerEvents: 'auto',
-                                    }}
-                                    onClick={() => setShowConnectionModal(false)}
-                                />
-                                <div
-                                    style={{
-                                        position: 'fixed',
-                                        top: '50%',
-                                        left: '50%',
-                                        transform: 'translate(-50%, -50%)',
-                                        paddingLeft: 0,
-                                        paddingRight: 0,
-                                        marginLeft: 0,
-                                        marginRight: 0,
-                                        borderRadius: 16,
-                                        boxShadow: '0 12px 48px rgba(0,0,0,0.32)',
-                                        border: '2px solid #2563eb',
-                                        padding: 40,
-                                        minWidth: 420,
-                                        maxWidth: 520,
-                                        background: 'rgba(248, 247, 247, 1)',
-                                        zIndex: 200003,
-                                        pointerEvents: 'auto',
-                                    }}
-                                    onMouseDown={e => e.stopPropagation()}
-                                >
-                                    <button
-                                        style={{ position: 'absolute', top: 12, right: 16, background: 'none', border: 'none', fontSize: 22, color: '#2563eb', cursor: 'pointer' }}
-                                        onClick={e => { e.stopPropagation(); setShowConnectionModal(false); }}
-                                    >
-                                        &times;
-                                    </button>
-                                    <ConnectionDataWidget />
-                                </div>
-                            </div>
-                        )}
+                        {/* Close button intentionally removed to prevent accidental modal close */}
 
                         {/* Flowchart grid layout */}
                         {/* Row layout: left palette + flow area to avoid overlap */}
-                            <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start', paddingTop: 8, height: '100%' }}>
-                            <div id="flow-palette" style={{ width: 260, flex: '0 0 260', height: 'calc(100vh - 120px)', maxHeight: 'calc(100vh - 120px)', overflowY: 'auto', padding: 12, borderRadius: 12, background: '#ffffff', border: '1px solid #eef2f7', boxShadow: '0 6px 22px rgba(17,24,39,0.06)' }}>
+                            <div className="flow-row" style={{ gap: 16 }}>
+                            <div id="flow-palette" className="flow-palette" style={{ padding: 8, borderRadius: 12, background: '#ffffff', border: '1px solid #eef2f7', boxShadow: '0 6px 22px rgba(17,24,39,0.06)' }}>
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 8 }}>
                                     <div style={{ fontWeight: 700, padding: '6px 8px', color: '#111827', display: 'flex', alignItems: 'center', gap: 8 }}>
                                         <span>Applications</span>
-                                        <span style={{ fontSize: 12, color: '#6b7280' }}>{flowOptions.length} items</span>
+                                       
                                     </div>
                                     <div style={{ width: 110 }}>
                                         <input value={appFilter} onChange={e => setAppFilter(e.target.value)} placeholder="Search..." style={{ width: '100%', padding: '6px 8px', borderRadius: 8, border: '1px solid #e6eef8', fontSize: 13 }} />
                                     </div>
                                 </div>
 
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 8 }}>
+                                <div className="flow-palette-list" style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 8 }}>
                                     {/* Applications grouped into logical sections */}
-                                    {(() => {
+                                    {isClient && (() => {
                                         const sections = [
                                             {
                                                 title: 'Addition',
@@ -2700,7 +2545,7 @@ const Widgets: React.FC = () => {
                                 </div>
                             </div>
 
-                            <div id="flow-area" onDragOver={(e) => { e.preventDefault(); }} onDrop={(e) => {
+                            <div id="flow-area" className="flow-area" onDragOver={(e) => { e.preventDefault(); }} onDrop={(e) => {
                                 e.preventDefault();
                                 const type = e.dataTransfer.getData('application/widget-type') || e.dataTransfer.getData('text/plain');
                                 if (!type) return;
@@ -2710,84 +2555,14 @@ const Widgets: React.FC = () => {
                                 const y = e.clientY - rect.top;
                                 // Add as a flowchart item (not dashboard widget). Compute pixel left/top inside flow area.
                                 handleAddFlowItemAt(type, x, y);
-                            }} style={{ position: 'relative', flex: 1, minWidth: 900, minHeight: 'calc(100vh - 120px)', height: 'calc(100vh - 120px)', margin: '12px 0 24px 0', borderRadius: 12, border: `1px solid ${THEME_COLORS.default.border}`, boxShadow: '0 8px 40px rgba(2,6,23,0.06)', overflow: 'hidden', background: THEME_COLORS.default.bg, backgroundImage: `radial-gradient(${THEME_COLORS.default.border} 1px, transparent 1px)`, backgroundSize: '12px 12px', WebkitUserSelect: 'none' as any, MozUserSelect: 'none' as any, msUserSelect: 'none' as any, userSelect: 'none' as any }}>
-                                {/* In-flow mini-widget: connection controls (select type + connect/disconnect) */}
-                                <div style={{ position: 'absolute', top: 12, left: 12, zIndex: 10001, pointerEvents: 'auto' }}>
-                                    <div style={{ width: 240, borderRadius: 12, background: themeFor('basic').bg, border: `1px solid ${themeFor('basic').border}`, boxShadow: themeFor('basic').shadow, padding: '8px', display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'space-between', overflow: 'hidden', boxSizing: 'border-box' }}>
-                                        {/* Left: heading + status + selector */}
-                                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0, flex: '1 1 auto' }}>
-                                            <strong style={{ fontSize: 12, color: themeFor('basic').text }}>Make connection</strong>
-                                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                                <span
-                                                    aria-hidden
-                                                    style={{ width: 10, height: 10, borderRadius: 10, background: connActive ? ACTION_COLORS.green.bg : themeFor('basic').border, boxShadow: connActive ? ACTION_COLORS.green.shadow : 'none', display: 'inline-block' }}
-                                                />
-
-                                                <button
-                                                    title="Open connection selector"
-                                                    onClick={() => { try { setShowConnectionModal(true); } catch (err) { } }}
-                                                    style={{ padding: '6px 10px', borderRadius: 8, border: `1px solid ${themeFor('basic').border}`, background: themeFor('basic').bg, color: themeFor('basic').text, cursor: 'pointer', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 8, flex: '1 1 auto', minWidth: 0, justifyContent: 'space-between', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                                                >
-                                                    <span style={{ fontSize: 13, display: 'inline-block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 120 }}>{connActive ? 'Connected' : 'Select'}</span>
-                                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
-                                                        <path d="M6 9l6 6 6-6" stroke={themeFor('basic').text} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                                                    </svg>
-                                                </button>
-                                            </div>
-                                        </div>
-
-                                        {/* Right: connect / disconnect */}
-                                        <div style={{ marginLeft: 8 }}>
-                                            <button
-                                                title="Start / stop connecting"
-                                                onClick={() => {
-                                                    try {
-                                                        if (!connActive) {
-                                                            // Open modal to let user pick and start a connection
-                                                            setShowConnectionModal(true);
-                                                        } else {
-                                                            // Call any registered disconnect handlers (preferred)
-                                                            try {
-                                                                console.info('[FlowWidget] disconnect clicked');
-                                                                // Prefer the context-level disconnect API if available
-                                                                try {
-                                                                    if (channelData && typeof channelData.disconnectActiveConnections === 'function') {
-                                                                        const ok = channelData.disconnectActiveConnections();
-                                                                        console.info('[FlowWidget] channelData.disconnectActiveConnections result:', ok);
-                                                                    }
-                                                                } catch (e) { console.warn('[FlowWidget] channelData.disconnectActiveConnections error', e); }
-                                                                const current = (window as any).__app_connection_disconnect_current;
-                                                                console.info('[FlowWidget] current handler type:', typeof current);
-                                                                const handlers = (window as any).__app_connection_disconnect_handlers as Array<() => void> | undefined;
-                                                                console.info('[FlowWidget] handlers count:', Array.isArray(handlers) ? handlers.length : 0);
-                                                                // call the current direct handler if present
-                                                                if (typeof current === 'function') {
-                                                                    try { console.info('[FlowWidget] calling current handler'); current(); console.info('[FlowWidget] current handler returned'); } catch (e) { console.error('current handler error', e); }
-                                                                }
-                                                                // fallback: call the handlers array
-                                                                if (Array.isArray(handlers) && handlers.length > 0) {
-                                                                    handlers.slice().forEach((h, i) => { try { console.info('[FlowWidget] calling handler', i); h(); console.info('[FlowWidget] handler returned', i); } catch (e) { console.error('handler error', e); } });
-                                                                }
-                                                            } catch (e) { console.error('[FlowWidget] disconnect invoke error', e); }
-                                                            // Also emit a CustomEvent for components that listen to it
-                                                            try { window.dispatchEvent(new CustomEvent('app:disconnect', { detail: { source: 'flow-widget' } })); } catch (e) { }
-                                                            setConnActive(false);
-                                                            try { showToast('Disconnecting...', 'info'); } catch (e) { }
-                                                        }
-                                                    } catch (err) { }
-                                                }}
-                                                style={{ padding: '6px 10px', borderRadius: 8, border: 'none', background: connActive ? ACTION_COLORS.neutral.bg : ACTION_COLORS.green.bg, color: connActive ? ACTION_COLORS.neutral.text : ACTION_COLORS.green.text, cursor: 'pointer', fontWeight: 700 }}
-                                            >
-                                                {connActive ? 'Disconnect' : 'Connect'}
-                                            </button>
-                                        </div>
-                                    </div>
-                                </div>
+                            }} style={{ position: 'relative', flex: 1, minWidth: 0, minHeight: 0, height: '100%', margin: '8px 0 12px 0', borderRadius: 12, border: `1px solid ${THEME_COLORS.default.border}`, boxShadow: '0 8px 40px rgba(2,6,23,0.06)', overflow: 'visible', background: THEME_COLORS.default.bg, backgroundImage: `radial-gradient(${THEME_COLORS.default.border} 1px, transparent 1px)`, backgroundSize: '12px 12px', WebkitUserSelect: 'none' as any, MozUserSelect: 'none' as any, msUserSelect: 'none' as any, userSelect: 'none' as any, boxSizing: 'border-box' }}>
+                                {/* (moved) Connect/Disconnect button removed from flow surface — rendered in header now */}
                                 {/* Inner scaled surface: keep outer container size constant and apply visual scaling to this inner wrapper. */}
-                                <div style={{ width: '100%', display: 'block', transform: `scale(${flowScale})`, transformOrigin: '0 0', willChange: 'transform' }}>
+                                {isClient ? (
+                                    <div style={{ width: '100%', display: 'block', transform: `scale(${flowScale})`, transformOrigin: '0 0', willChange: 'transform', minHeight: 0 }}>
                                     {/* Flowchart nodes as boxes */}
                                     {/* Combined Channels box: visually represent all channels inside one widget but keep individual channel ids for connections */}
-                                    {(() => {
+                                    {isClient && (() => {
                                         // derive channel list from flowOptions so removing one channel doesn't renumber others
                                         const boxPos = modalPositions['channels-box'] ? normalizedToPixel(modalPositions['channels-box']) : { left: 60, top: 80 };
                                         const channelOptions = flowOptions.filter(o => typeof o.id === 'string' && o.id.startsWith('channel-')).slice().sort((a, b) => {
@@ -2809,13 +2584,11 @@ const Widgets: React.FC = () => {
                                         let containerTop = 0;
                                         let containerLeft = 0;
                                         try {
-                                            const flowSvg = document.getElementById('flowchart-arrow-svg');
-                                            if (flowSvg) {
-                                                const r = flowSvg.getBoundingClientRect();
-                                                containerHeight = r.height || containerHeight;
-                                                containerTop = r.top || 0;
-                                                containerLeft = r.left || 0;
-                                            }
+                                            // Measure the flow container so the Channels box is clamped to it
+                                            const r = getFlowContainerRect();
+                                            containerHeight = r.height || containerHeight;
+                                            containerTop = r.top || 0;
+                                            containerLeft = r.left || 0;
                                         } catch (err) {
                                             // ignore DOM errors during SSR
                                         }
@@ -2844,8 +2617,17 @@ const Widgets: React.FC = () => {
                                                 const s = flowScale || 1;
                                                 const newLeft = Math.round((origLeft + dx / s) / 10) * 10;
                                                 const newTop = Math.round((origTop + dy / s) / 10) * 10;
-                                                // Store normalized position
-                                                setModalPositions(pos => ({ ...pos, ['channels-box']: pixelToNormalized(newLeft, newTop) }));
+                                                // Clamp to flow container so channels box can't be dragged outside
+                                                try {
+                                                    const crect = getFlowContainerRect();
+                                                    const maxLeft = Math.max(0, Math.floor((crect.width || 1200) - boxWidth));
+                                                    const maxTop = Math.max(0, Math.floor((crect.height || 500) - boxHeight));
+                                                    const clampedLeft = Math.max(0, Math.min(newLeft, maxLeft));
+                                                    const clampedTop = Math.max(0, Math.min(newTop, maxTop));
+                                                    setModalPositions(pos => ({ ...pos, ['channels-box']: pixelToNormalized(clampedLeft, clampedTop) }));
+                                                } catch (err) {
+                                                    setModalPositions(pos => ({ ...pos, ['channels-box']: pixelToNormalized(newLeft, newTop) }));
+                                                }
                                             };
                                             const onMouseUp = () => {
                                                 window.removeEventListener('mousemove', onMouseMove);
@@ -2926,23 +2708,23 @@ const Widgets: React.FC = () => {
                                         // Compute container width so we can clamp the box to remain visible inside it.
                                         let containerWidth = 1200;
                                         try {
-                                            const flowSvg = document.getElementById('flowchart-arrow-svg');
-                                            if (flowSvg) {
-                                                const r = flowSvg.getBoundingClientRect();
-                                                containerWidth = r.width || containerWidth;
-                                            }
+                                            // Use flow container width so Channels box can't be dragged outside the flow area
+                                            const r = getFlowContainerRect();
+                                            containerWidth = r.width || containerWidth;
                                         } catch (err) {
                                             // ignore
                                         }
 
-                                        // Clamp left/top to keep the box within the flowchart container bounds
-                                        const clampedLeft = Math.max(8, Math.min(boxPos.left, Math.max(8, Math.floor(containerWidth - boxWidth - 8))));
-                                        const clampedTop = Math.max(8, Math.min(boxPos.top, Math.max(8, Math.floor(containerHeight - finalBoxHeight - 8))));
+                                        // Clamp left/top to keep the box within the modal viewport bounds
+                                        // but allow reasonable negative offsets so users can position
+                                        // widgets near/into modal chrome if desired.
+                                        const clampedLeft = Math.max(0, Math.min(boxPos.left, Math.floor(containerWidth - boxWidth)));
+                                        const clampedTop = Math.max(0, Math.min(boxPos.top, Math.floor(containerHeight - finalBoxHeight)));
 
                                         const thCh = themeFor('channel');
 
                                         const contentMaxHeight = Math.max(40, finalBoxHeight - headerHeight - 18);
-                                        return (
+                                            return (
                                             <div
                                                 key="channels-box"
                                                 // Render as absolute inside the flowchart container so it aligns with other modal widgets
@@ -3031,7 +2813,7 @@ const Widgets: React.FC = () => {
                                                                                         // Fallback: compute viewport coords of the visual center, then convert to SVG-relative coords
                                                                                         try {
                                                                                             const flowSvg = document.getElementById('flowchart-arrow-svg');
-                                                                                            const svgRect = flowSvg ? flowSvg.getBoundingClientRect() : { left: 0, top: 0 } as DOMRect;
+                                                                                            const svgRect = getFlowContainerRect();
                                                                                             const finalLeft = (containerLeft || 0) + boxPos.left; // viewport left of the fixed box
                                                                                             const viewportX = finalLeft + boxWidth; // right edge of box as fallback
                                                                                             const viewportY = effectiveTop + headerHeight + idx * rowHeight + Math.floor(rowHeight / 2);
@@ -3114,7 +2896,7 @@ const Widgets: React.FC = () => {
                                                                                                 // approximate start positions for left/right columns; convert viewport -> svg coords
                                                                                                 try {
                                                                                                     const flowSvg = document.getElementById('flowchart-arrow-svg');
-                                                                                                    const svgRect = flowSvg ? flowSvg.getBoundingClientRect() : { left: 0, top: 0 } as DOMRect;
+                                                                                                    const svgRect = getFlowContainerRect();
                                                                                                     const finalLeft = (containerLeft || 0) + boxPos.left;
                                                                                                     const colOffset = posIdx === 0 ? 0 : boxWidth / 2;
                                                                                                     const viewportX = finalLeft + colOffset + Math.floor(boxWidth / 2);
@@ -3156,10 +2938,10 @@ const Widgets: React.FC = () => {
                                                 })()}
                                             </div>
                                         );
-                                    })()}
+                                    })() }
 
                                     {/* Plots aggregated box: visually mirror the Channels box but list Plot instances */}
-                                    {(() => {
+                                    {isClient ? (() => {
                                         const boxPos = modalPositions['plots-box'] ? normalizedToPixel(modalPositions['plots-box']) : { left: 60, top: 260 };
                                         // derive plot instances from basic flowOptions
                                         const plotOptions = flowOptions.filter(o => o.type === 'basic');
@@ -3179,13 +2961,11 @@ const Widgets: React.FC = () => {
                                         let containerTop = 0;
                                         let containerLeft = 0;
                                         try {
-                                            const flowSvg = document.getElementById('flowchart-arrow-svg');
-                                            if (flowSvg) {
-                                                const r = flowSvg.getBoundingClientRect();
-                                                containerHeight = r.height || containerHeight;
-                                                containerTop = r.top || 0;
-                                                containerLeft = r.left || 0;
-                                            }
+                                            // Measure the flow container so the Plots box is clamped to it
+                                            const r = getFlowContainerRect();
+                                            containerHeight = r.height || containerHeight;
+                                            containerTop = r.top || 0;
+                                            containerLeft = r.left || 0;
                                         } catch (err) { }
                                         const maxAllowedHeight = Math.max(160, Math.min(900, containerHeight - 24));
                                         let rowHeight = desiredRowHeight;
@@ -3208,8 +2988,17 @@ const Widgets: React.FC = () => {
                                                 const s = flowScale || 1;
                                                 const newLeft = Math.round((origLeft + dx / s) / 10) * 10;
                                                 const newTop = Math.round((origTop + dy / s) / 10) * 10;
-                                                // Store normalized position
-                                                setModalPositions(pos => ({ ...pos, ['plots-box']: pixelToNormalized(newLeft, newTop) }));
+                                                // Clamp to flow container so plots box can't be dragged outside
+                                                try {
+                                                    const crect = getFlowContainerRect();
+                                                    const maxLeft = Math.max(0, Math.floor((crect.width || 1200) - boxWidth));
+                                                    const maxTop = Math.max(0, Math.floor((crect.height || 500) - finalBoxHeight));
+                                                    const clampedLeft = Math.max(0, Math.min(newLeft, maxLeft));
+                                                    const clampedTop = Math.max(0, Math.min(newTop, maxTop));
+                                                    setModalPositions(pos => ({ ...pos, ['plots-box']: pixelToNormalized(clampedLeft, clampedTop) }));
+                                                } catch (err) {
+                                                    setModalPositions(pos => ({ ...pos, ['plots-box']: pixelToNormalized(newLeft, newTop) }));
+                                                }
                                             };
                                             const onMouseUp = () => {
                                                 window.removeEventListener('mousemove', onMouseMove);
@@ -3236,15 +3025,12 @@ const Widgets: React.FC = () => {
 
                                         let containerWidth = 1200;
                                         try {
-                                            const flowSvg = document.getElementById('flowchart-arrow-svg');
-                                            if (flowSvg) {
-                                                const r = flowSvg.getBoundingClientRect();
-                                                containerWidth = r.width || containerWidth;
-                                            }
+                                            const r = getFlowContainerRect();
+                                            containerWidth = r.width || containerWidth;
                                         } catch (err) { }
 
-                                        const clampedLeft = Math.max(8, Math.min(boxPos.left, Math.max(8, Math.floor(containerWidth - boxWidth - 8))));
-                                        const clampedTop = Math.max(8, Math.min(boxPos.top, Math.max(8, Math.floor(containerHeight - finalBoxHeight - 8))));
+                                        const clampedLeft = Math.max(0, Math.min(boxPos.left, Math.floor(containerWidth - boxWidth)));
+                                        const clampedTop = Math.max(0, Math.min(boxPos.top, Math.floor(containerHeight - finalBoxHeight)));
 
                                         const plotContentMax = Math.max(40, finalBoxHeight - headerHeight - 18);
                                         const pth = themeFor('basic');
@@ -3324,16 +3110,24 @@ const Widgets: React.FC = () => {
                                                                                 <circle cx={svgSize / 2} cy={svgSize / 2} r={Math.max(3, circleR)} fill="#fff" stroke={pth.text} strokeWidth={1.2} />
                                                                             </svg>
                                                                             <span style={{ flex: 1, textAlign: 'center', fontSize: 10, fontWeight: 600 }}>{ins.label}</span>
-                                                                            <button
-                                                                                onClick={e => { e.stopPropagation(); removeBasicInstance(ins.id.split('-').slice(0, 2).join('-'), ins.id); }}
-                                                                                title={`Remove ${ins.label}`}
-                                                                                style={{ marginRight: 6, background: pth.border, color: pth.text, border: 'none', borderRadius: 4, padding: 0, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: svgSize, height: svgSize }}
-                                                                            >
-                                                                                <svg width="100%" height="100%" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                                                                                    <line x1="4" y1="4" x2="16" y2="16" stroke={pth.text} strokeWidth="1.6" strokeLinecap="round" />
-                                                                                    <line x1="16" y1="4" x2="4" y2="16" stroke={pth.text} strokeWidth="1.6" strokeLinecap="round" />
-                                                                                </svg>
-                                                                            </button>
+                                                                            {
+                                                                                (() => {
+                                                                                    const canRemove = plotsCount > 1;
+                                                                                    return (
+                                                                                        <button
+                                                                                            onClick={e => { e.stopPropagation(); if (!canRemove) return; removeBasicInstance(ins.id.split('-').slice(0, 2).join('-'), ins.id); }}
+                                                                                            title={canRemove ? `Remove ${ins.label}` : 'Cannot remove last plot'}
+                                                                                            disabled={!canRemove}
+                                                                                            style={{ marginRight: 6, background: pth.border, color: pth.text, border: 'none', borderRadius: 4, padding: 0, cursor: canRemove ? 'pointer' : 'not-allowed', opacity: canRemove ? 1 : 0.5, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: svgSize, height: svgSize }}
+                                                                                        >
+                                                                                            <svg width="100%" height="100%" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                                                                                                <line x1="4" y1="4" x2="16" y2="16" stroke={pth.text} strokeWidth="1.6" strokeLinecap="round" />
+                                                                                                <line x1="16" y1="4" x2="4" y2="16" stroke={pth.text} strokeWidth="1.6" strokeLinecap="round" />
+                                                                                            </svg>
+                                                                                        </button>
+                                                                                    );
+                                                                                })()
+                                                                            }
                                                                             <svg
                                                                                 data-widgetid={id}
                                                                                 data-handle="output"
@@ -3349,7 +3143,7 @@ const Widgets: React.FC = () => {
                                                                                     } else {
                                                                                         try {
                                                                                             const flowSvg = document.getElementById('flowchart-arrow-svg');
-                                                                                            const svgRect = flowSvg ? flowSvg.getBoundingClientRect() : { left: 0, top: 0 } as DOMRect;
+                                                                                            const svgRect = getFlowContainerRect();
                                                                                             const finalLeft = (containerLeft || 0) + boxPos.left;
                                                                                             const viewportX = finalLeft + boxWidth;
                                                                                             const viewportY = effectiveTop + headerHeight + idx * rowHeight + Math.floor(rowHeight / 2);
@@ -3409,7 +3203,7 @@ const Widgets: React.FC = () => {
                                                                                             } else {
                                                                                                 try {
                                                                                                     const flowSvg = document.getElementById('flowchart-arrow-svg');
-                                                                                                    const svgRect = flowSvg ? flowSvg.getBoundingClientRect() : { left: 0, top: 0 } as DOMRect;
+                                                                                                    const svgRect = getFlowContainerRect();
                                                                                                     const finalLeft = (containerLeft || 0) + boxPos.left;
                                                                                                     const colOffset = posIdx === 0 ? 0 : boxWidth / 2;
                                                                                                     const viewportX = finalLeft + colOffset + Math.floor(boxWidth / 2);
@@ -3451,8 +3245,13 @@ const Widgets: React.FC = () => {
                                                 })()}
                                             </div>
                                         );
-                                    })()}
-                                </div>
+                                    })() : (
+                                        <div style={{ width: '100%', display: 'block', minHeight: 200 }} />
+                                    )}
+                                    </div>
+                                ) : (
+                                    <div style={{ width: '100%', display: 'block', minHeight: 500 }} />
+                                )}
 
                                 {/* Live arrow while dragging connection */}
                                 {drawingConnection && mousePos && (() => {
@@ -3469,10 +3268,11 @@ const Widgets: React.FC = () => {
                                         </svg>
                                     );
                                 })()}
-                                {/* Render all manual connections as arrows */}
-                                <svg id="flowchart-arrow-svg" style={{ position: 'absolute', left: 0, top: 0, width: '1200px', height: '500px', pointerEvents: 'none', zIndex: 9999 }}>
-                                    <defs />
-                                    {connections.map(({ from, to }, idx) => {
+                                {/* Render all manual connections as arrows (client-only to avoid SSR/CSR mismatch) */}
+                                {isClient && (
+                                        <svg id="flowchart-arrow-svg" style={{ position: 'absolute', left: 0, top: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 9999 }}>
+                                        <defs />
+                                        {connections.map(({ from, to }, idx) => {
                                         // Get exact circle centers when possible
                                         const fromCenter = getCircleCenter(from, 'output');
                                         const toCenter = getCircleCenter(to, 'input');
@@ -3555,7 +3355,8 @@ const Widgets: React.FC = () => {
                                             </g>
                                         );
                                     })}
-                                </svg>
+                                    </svg>
+                                )}
 
                                 {/* Click-to-select arrows and keyboard delete handler */}
                                 {/**
@@ -3570,7 +3371,7 @@ const Widgets: React.FC = () => {
 
                                 {/* Inline Make Connection box removed — use the toolbar 'Make Connection' button instead */}
                                 {/* Render flow options (except channel entries; those are inside the Channels box) */}
-                                {flowOptions.map((opt, idx) => {
+                                {isClient ? flowOptions.map((opt, idx) => {
                                     // Channels are rendered inside the Channels box; basic/Plot instances
                                     // are rendered only inside the aggregated Plots box to avoid
                                     // duplicate UI. Skip rendering individual `basic` option boxes
@@ -3602,8 +3403,17 @@ const Widgets: React.FC = () => {
                                             // Convert screen pixel delta into unscaled modal coords
                                             const newLeft = Math.round((origLeft + dx / s) / 10) * 10;
                                             const newTop = Math.round((origTop + dy / s) / 10) * 10;
-                                            // Store normalized coordinates
-                                            setModalPositions(pos => ({ ...pos, [widgetId]: pixelToNormalized(newLeft, newTop) }));
+                                            // Clamp to flow container so widget can't be dragged outside
+                                            try {
+                                                const crect = getFlowContainerRect();
+                                                const maxLeft = Math.max(0, Math.floor((crect.width || 1200) - widgetWidth));
+                                                const maxTop = Math.max(0, Math.floor((crect.height || 500) - widgetHeight));
+                                                const clampedLeft = Math.max(0, Math.min(newLeft, maxLeft));
+                                                const clampedTop = Math.max(0, Math.min(newTop, maxTop));
+                                                setModalPositions(pos => ({ ...pos, [widgetId]: pixelToNormalized(clampedLeft, clampedTop) }));
+                                            } catch (err) {
+                                                setModalPositions(pos => ({ ...pos, [widgetId]: pixelToNormalized(newLeft, newTop) }));
+                                            }
                                         };
                                         const onMouseUp = () => {
                                             window.removeEventListener('mousemove', onMouseMove);
@@ -3836,14 +3646,13 @@ const Widgets: React.FC = () => {
                                             </div>
                                         </div>
                                     );
-                                })}
+                                }) : null}
                             </div>
                         </div>
 
-                    </div>
-                </div>
-                </>
-            )}
+                </FlowModule>
+                )}
+            {!showFlowModal && (
             <div style={{ width: '100%', display: 'flex', justifyContent: 'center', boxSizing: 'border-box', minHeight: `calc(100vh )` }}>
                 {/* Centered grid container sized to whole grid in pixels so cells are never cut */}
                 <div style={{ position: 'relative', width: (gridSettings.cols || 24) * (gridSettings.cellWidth || 50), height: (gridSettings.rows || 16) * (gridSettings.cellHeight || 50), overflow: 'hidden' }}>
@@ -3981,6 +3790,7 @@ const Widgets: React.FC = () => {
                     {/* Popover rendered outside the widget, anchored near the connection controls */}
                 </div>
             </div>
+            )}
 
             {/* When the flow modal is closed we still need transform nodes (like Envelope)
                 to remain active so they can publish outputs into the provider. Render

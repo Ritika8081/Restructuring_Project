@@ -90,7 +90,7 @@ const BasicGraphRealtime = forwardRef((props: BasicGraphRealtimeProps, ref) => {
     height = 200,
     showGrid = true,
     backgroundColor = 'rgba(0, 0, 0, 0.1)',
-  samplesPerFrame = bufferSize,
+  samplesPerFrame = Math.min(64, bufferSize),
     onChannelsChange,
     onSizeRequest,
   } = props;
@@ -102,6 +102,8 @@ const BasicGraphRealtime = forwardRef((props: BasicGraphRealtimeProps, ref) => {
   const plotRefs = useRef<Map<string, WebglPlot>>(new Map());
   const linesRef = useRef<Map<string, WebglLine>>(new Map());
   const animationRef = useRef<number | null>(null);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const isVisibleRef = useRef<boolean>(true);
   // Per-channel circular buffers stored as Float32Array for efficient updates
   const dataBuffers = useRef<Map<string, Float32Array>>(new Map());
   // Per-channel sweep (write) position for overwrite plotting
@@ -303,6 +305,12 @@ const BasicGraphRealtime = forwardRef((props: BasicGraphRealtimeProps, ref) => {
   // a render storm.
     const lastRenderLogRef = { current: 0 as number } as { current: number };
     const render = () => {
+      // If the component is not visible (offscreen/hidden), skip heavy work
+      if (!isVisibleRef.current) {
+        // keep lightweight scheduling so we can re-check visibility
+        animationRef.current = requestAnimationFrame(render);
+        return;
+      }
       animationRef.current = requestAnimationFrame(render);
 
       // Drain pending samples per channel up to samplesPerFrame and update buffers
@@ -371,6 +379,21 @@ const BasicGraphRealtime = forwardRef((props: BasicGraphRealtimeProps, ref) => {
       }
     };
   }, [channels, visibleChannels, bufferSize, width, height, dynamicChannelHeight]); // Added height dependency
+
+  // Pause rendering when the component is not visible in the viewport to reduce CPU
+  useEffect(() => {
+    try {
+      const el = rootRef.current;
+      if (!el || typeof IntersectionObserver === 'undefined') return;
+      const obs = new IntersectionObserver((entries) => {
+        for (const e of entries) {
+          isVisibleRef.current = e.isIntersecting && e.intersectionRatio > 0;
+        }
+      }, { threshold: [0, 0.01, 0.1] });
+      obs.observe(el);
+      return () => { try { obs.disconnect(); } catch (e) { } };
+    } catch (e) { }
+  }, []);
 
   // Push a single normalized value into the visible buffer and update the
   // WebGL line immediately. This is used by the imperative `updateData`
@@ -774,6 +797,7 @@ const BasicGraphRealtime = forwardRef((props: BasicGraphRealtimeProps, ref) => {
 
   return (
     <div
+      ref={rootRef}
       style={{
         width: width || 400,
         height: height,

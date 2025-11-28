@@ -160,6 +160,24 @@ export const ChannelDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
     });
     registeredChannelIndices.current = s;
     try { console.info('[ChannelData] setRegisteredChannels', { ids, registeredIndices: Array.from(s).sort((a, b) => a - b) }); } catch (e) { }
+
+    // Terminate any per-channel workers that are no longer registered
+    try {
+      const workers = channelWorkersRef.current || {};
+      Object.keys(workers).forEach(k => {
+        try {
+          const idx = Number(k);
+          if (!s.has(idx)) {
+            const w = workers[idx];
+            if (w) {
+              try { w.terminate(); } catch (e) { }
+              delete channelWorkersRef.current[idx];
+              if (LOG) try { console.debug('[ChannelData] terminated worker for unregistered ch', idx); } catch (e) { }
+            }
+          }
+        } catch (e) { /* ignore per-worker errors */ }
+      });
+    } catch (e) { }
   }, []);
 
   const getFilterSummary = useCallback(() => {
