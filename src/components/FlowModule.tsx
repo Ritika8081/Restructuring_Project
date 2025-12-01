@@ -256,29 +256,7 @@ export default function FlowModule(props: Props) {
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <div style={{ fontSize: 12, color: '#9ca3af' }}>Tips: drag → connect → Play</div>
 
-            {/* Flowchart presets selector */}
-            {Array.isArray(props.flowPresets) && props.flowPresets.length > 0 && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 12 }}>
-                <select
-                  aria-label="Select flow preset"
-                  value={props.selectedFlowPresetId || (props.flowPresets[0] && props.flowPresets[0].id) || ''}
-                  onChange={(e) => { try { if (typeof props.onSelectFlowPreset === 'function') props.onSelectFlowPreset(e.target.value); } catch (err) {} }}
-                  style={{ padding: '6px 8px', borderRadius: 8, border: '1px solid #e6eef8', background: '#fff' }}
-                >
-                  {props.flowPresets.map(p => (
-                    <option key={p.id} value={p.id}>{p.name}</option>
-                  ))}
-                </select>
-
-                <button
-                  title="Save current as preset"
-                  onClick={() => { try { if (typeof props.onSaveFlowPreset === 'function') props.onSaveFlowPreset(); } catch (e) {} }}
-                  style={{ padding: '6px 8px', borderRadius: 8, border: '1px solid #eef2f7', background: '#f8fafc', cursor: 'pointer', fontSize: 12 }}
-                >
-                  Save Preset
-                </button>
-              </div>
-            )}
+            {/* Presets moved into the flow-area as a header. */}
 
             {connConnecting ? (
               <button

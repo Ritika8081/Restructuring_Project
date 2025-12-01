@@ -2291,7 +2291,44 @@ const Widgets: React.FC = () => {
                                 // Add as a flowchart item (not dashboard widget). Compute pixel left/top inside flow area.
                                 handleAddFlowItemAt(type, x, y);
                             }} style={{ position: 'relative', flex: 1, minWidth: 0, minHeight: 0, height: '100%', margin: '8px 0 12px 0', borderRadius: 12, border: `1px solid ${THEME_COLORS.default.border}`, boxShadow: '0 8px 40px rgba(2,6,23,0.06)', overflow: 'visible', background: THEME_COLORS.default.bg, backgroundImage: `radial-gradient(${THEME_COLORS.default.border} 1px, transparent 1px)`, backgroundSize: '12px 12px', WebkitUserSelect: 'none' as any, MozUserSelect: 'none' as any, msUserSelect: 'none' as any, userSelect: 'none' as any, boxSizing: 'border-box' }}>
-                                {/* (moved) Connect/Disconnect button removed from flow surface — rendered in header now */}
+                                {/* Header of saved flow presets (rendered inside flow area) */}
+                                {Array.isArray(flowPresets) && flowPresets.length > 0 && (
+                                    <div id="flow-presets-header" style={{ position: 'absolute', top: -1, left: 12, right: 12, display: 'flex', gap: 0, alignItems: 'center', zIndex: 20, pointerEvents: 'auto', overflowX: 'auto', padding: '0 0px' }}>
+                                        {flowPresets.map((p, i) => {
+                                            const isSel = selectedPresetId === p.id;
+                                            return (
+                                                <button
+                                                    key={p.id}
+                                                    onClick={() => { try { handleSelectPreset(p.id); } catch (e) { } }}
+                                                    style={{
+                                                        padding: '8px 12px',
+                                                        borderTop: 'none',
+                                                        borderLeft: i === 0 ? (isSel ? '2px solid #2563eb' : '1px solid #e6eef8') : '1px solid #e6eef8',
+                                                        borderRight: '1px solid #e6eef8',
+                                                        borderBottom: 'none',
+                                                        borderRadius: '0 0 0 0',
+                                                        background: isSel ? '#eef2ff' : '#fff',
+                                                        cursor: 'pointer',
+                                                        fontWeight: 700,
+                                                        fontSize: 13,
+                                                        marginLeft: i === 0 ? 0 : -1,
+                                                        boxShadow: 'none',
+                                                        flex: 1,
+                                                        minWidth: 0,
+                                                        textAlign: 'center',
+                                                    }}
+                                                >
+                                                    {p.name}
+                                                </button>
+                                            );
+                                        })}
+                                        <div style={{ width: 8 }} />
+                                        <button onClick={() => { try { handleSavePreset(); } catch (e) { } }} style={{ marginLeft: '8px', padding: '8px 12px', borderRadius: '0 0 10px 10px', borderTop: 'none', border: '1px solid #eef2f7', background: '#abd0f6ff', cursor: 'pointer', fontSize: 13 }}>
+                                            Save Flow
+                                        </button>
+                                    </div>
+                                )}
+
                                 {/* Inner scaled surface: keep outer container size constant and apply visual scaling to this inner wrapper. */}
                                 {isClient ? (
                                     <div style={{ width: '100%', display: 'block', transform: `scale(${flowScale})`, transformOrigin: '0 0', willChange: 'transform', minHeight: 0 }}>
