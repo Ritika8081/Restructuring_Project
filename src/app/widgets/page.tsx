@@ -33,6 +33,8 @@ const Widgets: React.FC = () => {
         candle: { bg: '#fffbeb', text: '#92400e', border: '#fcd34d', shadow: '0 8px 20px rgba(245,158,11,0.06)' },
         game: { bg: '#f0fdf4', text: '#065f46', border: '#bbf7d0', shadow: '0 8px 20px rgba(16,185,129,0.06)' },
     };
+
+    
     // Small helper to get theme for a given widget type/id
     const themeFor = (type?: string) => THEME_COLORS[type || 'default'] || THEME_COLORS.default;
 
@@ -213,8 +215,6 @@ const Widgets: React.FC = () => {
         // { selector: '[data-tour="settings-replay"]', title: 'Replay Tour', description: 'Replay this onboarding anytime from the Flow settings.', position: 'left' },
         { selector: '[data-tour="play-button"]', title: 'Play', description: 'Click Play to arrange widgets onto the dashboard and start streaming data.', position: 'bottom' },
     ];
-    // Demo elements refs for tour animations
-    const tourDemoRef = useRef<{ nodes: HTMLElement[] }>({ nodes: [] });
 
     // Forwarding subscriptions for runtime push-flow (map 'from->to' -> unsubscribe)
     const forwardingUnsubsRef = useRef<Record<string, () => void>>({});
@@ -696,6 +696,24 @@ const Widgets: React.FC = () => {
         const w = r.width || 1200;
         const h = r.height || 500;
         return { left: Math.round((pos.left || 0) * w), top: Math.round((pos.top || 0) * h) };
+    };
+
+    // Helper: clamp a desired left/top so the element stays within the flow container
+    // and never overlaps the presets header area. Returns clamped { left, top }.
+    const clampToFlowBounds = (desiredLeft: number, desiredTop: number, elWidth: number, elHeight: number) => {
+        try {
+            const crect = getFlowContainerRect();
+            const headerEl = typeof document !== 'undefined' ? document.getElementById('flow-presets-header') as HTMLElement | null : null;
+            const headerH = headerEl ? Math.round(headerEl.getBoundingClientRect().height || 36) : 36;
+            const minTop = headerH + 4; // leave a small gap under the header
+            const maxLeft = Math.max(0, Math.floor((crect.width || 1200) - elWidth));
+            const maxTop = Math.max(minTop, Math.floor((crect.height || 500) - elHeight));
+            const clampedLeft = Math.max(0, Math.min(desiredLeft, maxLeft));
+            const clampedTop = Math.max(minTop, Math.min(desiredTop, maxTop));
+            return { left: clampedLeft, top: clampedTop };
+        } catch (err) {
+            return { left: Math.max(0, desiredLeft), top: Math.max(36, desiredTop) };
+        }
     };
 
     // Action to arrange/expand the flow into dashboard widgets (Play)
@@ -1761,11 +1779,10 @@ const Widgets: React.FC = () => {
         const containerHeight = Math.max(500, Math.round(crect.height || 500));
         const widgetWidth = (canonical === 'bandpower') ? 220 : 180;
         const widgetHeight = 70;
-        const clampedLeft = Math.max(0, Math.min(adjLeft, Math.floor(containerWidth - widgetWidth)));
-        const clampedTop = Math.max(0, Math.min(adjTop, Math.floor(containerHeight - widgetHeight)));
+        const clamped = clampToFlowBounds(adjLeft, adjTop, widgetWidth, widgetHeight);
 
         // Store normalized coordinates so positions remain correct under zoom/resize
-        setModalPositions(prev => ({ ...prev, [id]: pixelToNormalized(clampedLeft, clampedTop) }));
+        setModalPositions(prev => ({ ...prev, [id]: pixelToNormalized(clamped.left, clamped.top) }));
         showToast(`${label} added to flowchart`, 'success');
     }, [flowOptions, setFlowOptions, setModalPositions, showToast, flowScale]);
 
@@ -2303,7 +2320,7 @@ const Widgets: React.FC = () => {
                                                     style={{
                                                         padding: '8px 12px',
                                                         borderTop: 'none',
-                                                        borderLeft: i === 0 ? (isSel ? '2px solid #2563eb' : '1px solid #e6eef8') : '1px solid #e6eef8',
+                                                        borderLeft: i === 0 ? (isSel ? '2px solid #fbfcfdff' : '1px solid #e6eef8') : '1px solid #e6eef8',
                                                         borderRight: '1px solid #e6eef8',
                                                         borderBottom: 'none',
                                                         borderRadius: '0 0 0 0',
@@ -2323,7 +2340,7 @@ const Widgets: React.FC = () => {
                                             );
                                         })}
                                         <div style={{ width: 8 }} />
-                                        <button onClick={() => { try { handleSavePreset(); } catch (e) { } }} style={{ marginLeft: '8px', padding: '8px 12px', borderRadius: '0 0 10px 10px', borderTop: 'none', border: '1px solid #eef2f7', background: '#abd0f6ff', cursor: 'pointer', fontSize: 13 }}>
+                                        <button onClick={() => { try { handleSavePreset(); } catch (e) { } }} style={{ marginLeft: '0px', padding: '8px 12px', borderRadius: '0 0 10px 10px', borderTop: 'none', border: '1px solid #eef2f7', background: '#abd0f6ff', cursor: 'pointer', fontSize: 13 }}>
                                             Save Flow
                                         </button>
                                     </div>
@@ -2391,12 +2408,8 @@ const Widgets: React.FC = () => {
                                                 const newTop = Math.round((origTop + dy / s) / 10) * 10;
                                                 // Clamp to flow container so channels box can't be dragged outside
                                                 try {
-                                                    const crect = getFlowContainerRect();
-                                                    const maxLeft = Math.max(0, Math.floor((crect.width || 1200) - boxWidth));
-                                                    const maxTop = Math.max(0, Math.floor((crect.height || 500) - boxHeight));
-                                                    const clampedLeft = Math.max(0, Math.min(newLeft, maxLeft));
-                                                    const clampedTop = Math.max(0, Math.min(newTop, maxTop));
-                                                    setModalPositions(pos => ({ ...pos, ['channels-box']: pixelToNormalized(clampedLeft, clampedTop) }));
+                                                    const clamped = clampToFlowBounds(newLeft, newTop, boxWidth, boxHeight);
+                                                    setModalPositions(pos => ({ ...pos, ['channels-box']: pixelToNormalized(clamped.left, clamped.top) }));
                                                 } catch (err) {
                                                     setModalPositions(pos => ({ ...pos, ['channels-box']: pixelToNormalized(newLeft, newTop) }));
                                                 }
@@ -2762,12 +2775,8 @@ const Widgets: React.FC = () => {
                                                 const newTop = Math.round((origTop + dy / s) / 10) * 10;
                                                 // Clamp to flow container so plots box can't be dragged outside
                                                 try {
-                                                    const crect = getFlowContainerRect();
-                                                    const maxLeft = Math.max(0, Math.floor((crect.width || 1200) - boxWidth));
-                                                    const maxTop = Math.max(0, Math.floor((crect.height || 500) - finalBoxHeight));
-                                                    const clampedLeft = Math.max(0, Math.min(newLeft, maxLeft));
-                                                    const clampedTop = Math.max(0, Math.min(newTop, maxTop));
-                                                    setModalPositions(pos => ({ ...pos, ['plots-box']: pixelToNormalized(clampedLeft, clampedTop) }));
+                                                    const clamped = clampToFlowBounds(newLeft, newTop, boxWidth, finalBoxHeight);
+                                                    setModalPositions(pos => ({ ...pos, ['plots-box']: pixelToNormalized(clamped.left, clamped.top) }));
                                                 } catch (err) {
                                                     setModalPositions(pos => ({ ...pos, ['plots-box']: pixelToNormalized(newLeft, newTop) }));
                                                 }
@@ -3177,12 +3186,8 @@ const Widgets: React.FC = () => {
                                             const newTop = Math.round((origTop + dy / s) / 10) * 10;
                                             // Clamp to flow container so widget can't be dragged outside
                                             try {
-                                                const crect = getFlowContainerRect();
-                                                const maxLeft = Math.max(0, Math.floor((crect.width || 1200) - widgetWidth));
-                                                const maxTop = Math.max(0, Math.floor((crect.height || 500) - widgetHeight));
-                                                const clampedLeft = Math.max(0, Math.min(newLeft, maxLeft));
-                                                const clampedTop = Math.max(0, Math.min(newTop, maxTop));
-                                                setModalPositions(pos => ({ ...pos, [widgetId]: pixelToNormalized(clampedLeft, clampedTop) }));
+                                                        const clamped = clampToFlowBounds(newLeft, newTop, widgetWidth, widgetHeight);
+                                                        setModalPositions(pos => ({ ...pos, [widgetId]: pixelToNormalized(clamped.left, clamped.top) }));
                                             } catch (err) {
                                                 setModalPositions(pos => ({ ...pos, [widgetId]: pixelToNormalized(newLeft, newTop) }));
                                             }

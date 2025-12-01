@@ -25,28 +25,29 @@ const Header: React.FC = () => {
     if (showFlowModal) return null;
 
     return (
-        <header className="bg-white border-b border-gray-200 sticky top-0 z-50 shadow-sm">
+        <header className="sticky top-0 z-50" style={{ background: 'linear-gradient(180deg, #ffffff 0%, #fbfdff 100%)', borderBottom: '1px solid rgba(15,23,42,0.04)' }}>
             <div className="max-w-full mx-auto">
                 <div className="flex items-center justify-between h-16 px-4 sm:px-6 lg:px-8">
                     {/* Left Section - Logo/Heading */}
                     <div className="flex items-center space-x-4">
-                        <div className="flex items-center justify-center w-10 h-10 rounded-md bg-indigo-500 text-white font-bold shadow">
+                        <div className="flex items-center justify-center w-10 h-10 rounded-md text-white font-bold shadow" style={{ background: 'linear-gradient(135deg,#2563eb,#06b6d4)' }}>
                             <span className="text-lg">CP</span>
                         </div>
                         <div className="hidden sm:block">
-                            <h1 className="text-lg font-semibold text-gray-900">Chords Playground</h1>
-                            <p className="text-xs text-gray-500">Realtime signal dashboard</p>
+                            <h1 className="text-lg font-semibold" style={{ color: '#0f172a' }}>Chords Playground</h1>
+                            <p className="text-xs" style={{ color: '#6b7280' }}>Realtime signal dashboard</p>
                         </div>
                     </div>
 
 
                     {/* Right Section - Navigation Buttons */}
-                    <div className="flex items-center space-x-2">
+                    <div className="flex items-center space-x-3">
                         {/* Configure Flow Button in Navbar - uses context */}
                         <button
                             onClick={() => setShowFlowModal(true)}
-                            className="flex items-center justify-center px-3 py-2 rounded-md border border-transparent bg-indigo-600 text-white hover:bg-indigo-700 transition-shadow duration-150 shadow-sm"
+                            className="flex items-center justify-center px-3 py-2 rounded-md text-white"
                             aria-label="Edit Flow"
+                            style={{ background: '#2563eb', boxShadow: '0 6px 18px rgba(37,99,235,0.12)', border: '1px solid rgba(37,99,235,0.12)' }}
                         >
                             <span className="text-sm font-medium hidden sm:inline">Edit Flow</span>
                             <span className="text-lg sm:ml-2">⚙️</span>
@@ -55,8 +56,9 @@ const Header: React.FC = () => {
                         {/* Docs button - opens the documentation modal for contributors */}
                         <button
                             onClick={() => setShowDocs(true)}
-                            className="px-3 py-2 rounded-md border border-gray-200 bg-white text-gray-800 hover:shadow-sm transition-shadow duration-150 text-sm"
+                            className="px-3 py-2 rounded-md bg-white text-sm"
                             aria-label="Open documentation"
+                            style={{ border: '1px solid rgba(15,23,42,0.06)', color: '#0f172a' }}
                         >
                             <span className="hidden sm:inline">Docs</span>
                             <span className="sm:hidden">📄</span>
