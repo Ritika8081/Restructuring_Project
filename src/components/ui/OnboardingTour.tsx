@@ -27,8 +27,12 @@ const clamp = (v: number, a = 0, b = 1) => Math.max(a, Math.min(b, v));
 const OnboardingTour: React.FC<Props> = ({ steps, open, onClose, initial = 0, theme = 'default', onAction, preventAutoScroll = false }) => {
   const tourDemoRef = useRef<{ nodes: HTMLElement[] }>({ nodes: [] });
 
+  const [index, setIndex] = useState<number>(initial);
+  const [targetRect, setTargetRect] = useState<DOMRect | null>(null);
+  const [visible, setVisible] = useState(open);
+
   // Internal demo runner: if parent doesn't provide `onAction`, use these
-  const performInternalAction = useCallback(async (action: Step['action'] | undefined, index: number) => {
+  const performInternalAction = useCallback(async (action: Step['action'] | undefined, idx: number) => {
     if (!action) return;
     try {
       // helpers
@@ -163,10 +167,30 @@ const OnboardingTour: React.FC<Props> = ({ steps, open, onClose, initial = 0, th
         const overlay = document.createElement('div');
         overlay.style.position = 'fixed'; overlay.style.zIndex = '200050'; overlay.style.minWidth = '160px'; overlay.style.borderRadius = '8px'; overlay.style.background = '#fff'; overlay.style.boxShadow = '0 8px 20px rgba(2,6,23,0.06)'; overlay.style.padding = '8px'; overlay.style.fontSize = '13px'; overlay.style.fontWeight = '600'; overlay.style.pointerEvents = 'none';
         try {
-          const flowEl = document.getElementById('flow-area');
+          // Wait briefly for the flow area to exist (tour might open before modal mounts)
+          const waitForFlowArea = async (timeout = 800) => {
+            const start = Date.now();
+            let el = document.getElementById('flow-area');
+            if (el) return el;
+            while (Date.now() - start < timeout) {
+              await new Promise(r => setTimeout(r, 80));
+              el = document.getElementById('flow-area');
+              if (el) return el;
+            }
+            return null;
+          };
+
+          const flowEl = await waitForFlowArea(800);
           if (flowEl) {
-            const fr = flowEl.getBoundingClientRect(); overlay.style.left = `${fr.left + fr.width / 2}px`; overlay.style.top = `${fr.top + fr.height / 2}px`; overlay.style.transform = 'translate(-50%, -50%)';
-          } else { overlay.style.left = '50%'; overlay.style.top = '50%'; overlay.style.transform = 'translate(-50%, -50%)'; }
+            const fr = flowEl.getBoundingClientRect();
+            // Position overlay at the center of the flow area (viewport coordinates)
+            overlay.style.left = `${fr.left + fr.width / 2}px`;
+            overlay.style.top = `${fr.top + fr.height / 2}px`;
+            overlay.style.transform = 'translate(-50%, -50%)';
+          } else {
+            // Fallback: center of viewport
+            overlay.style.left = '50%'; overlay.style.top = '50%'; overlay.style.transform = 'translate(-50%, -50%)';
+          }
         } catch (e) { overlay.style.left = '50%'; overlay.style.top = '50%'; overlay.style.transform = 'translate(-50%, -50%)'; }
 
         const list = document.createElement('div'); list.style.display = 'flex'; list.style.flexDirection = 'column'; list.style.gap = '6px';
@@ -176,16 +200,16 @@ const OnboardingTour: React.FC<Props> = ({ steps, open, onClose, initial = 0, th
 
         const first = rows[0]; const bar = document.createElement('div'); bar.style.position = 'absolute'; bar.style.left = '0'; bar.style.top = '6px'; bar.style.bottom = '6px'; bar.style.width = '4px'; bar.style.borderTopLeftRadius = '6px'; bar.style.borderBottomLeftRadius = '6px'; bar.style.background = 'rgba(16,185,129,0.9)'; bar.style.opacity = '0'; bar.style.transition = 'opacity 140ms ease'; try { first.appendChild(bar); } catch (e) { }
         const timers: number[] = [];
-        timers.push(window.setTimeout(() => { try { bar.style.opacity = '1'; } catch (e) { } }, 90));
-        timers.push(window.setTimeout(() => { try { bar.style.opacity = '0'; } catch (e) { } }, 300));
-        timers.push(window.setTimeout(() => { try { const info = document.createElement('div'); info.textContent = 'Connecting…'; info.style.fontWeight = '700'; info.style.marginTop = '8px'; info.style.fontSize = '13px'; overlay.appendChild(info); } catch (e) { } }, 320));
+        timers.push(window.setTimeout(() => { try { bar.style.opacity = '1'; } catch (e) { } }, 190));
+        timers.push(window.setTimeout(() => { try { bar.style.opacity = '0'; } catch (e) { } }, 1300));
+        timers.push(window.setTimeout(() => { try { const info = document.createElement('div'); info.textContent = 'Connecting…'; info.style.fontWeight = '700'; info.style.marginTop = '8px'; info.style.fontSize = '13px'; overlay.appendChild(info); } catch (e) { } }, 1320));
 
         await new Promise<void>((resolve) => {
-          timers.push(window.setTimeout(() => { try { overlay.remove(); } catch (e) { } try { (window as any).__DEMO_SUPPRESS_CONN_MODAL = false; } catch (e) { } timers.forEach(t => window.clearTimeout(t)); resolve(); } , 820));
+          timers.push(window.setTimeout(() => { try { overlay.remove(); } catch (e) { } try { (window as any).__DEMO_SUPPRESS_CONN_MODAL = false; } catch (e) { } timers.forEach(t => window.clearTimeout(t)); resolve(); } , 1820));
         });
       }
     } catch (e) { /* swallow */ }
-  }, []);
+  }, [steps.length]);
 
   // cleanup any demo nodes when tour unmounts
   useEffect(() => {
@@ -195,9 +219,7 @@ const OnboardingTour: React.FC<Props> = ({ steps, open, onClose, initial = 0, th
       try { (window as any).__DEMO_SUPPRESS_CONN_MODAL = false; } catch (e) { }
     };
   }, []);
-  const [index, setIndex] = useState<number>(initial);
-  const [targetRect, setTargetRect] = useState<DOMRect | null>(null);
-  const [visible, setVisible] = useState(open);
+  
 
   useEffect(() => { setVisible(open); }, [open]);
 
@@ -243,32 +265,43 @@ const OnboardingTour: React.FC<Props> = ({ steps, open, onClose, initial = 0, th
   useEffect(() => {
     if (!visible) return;
     const s = steps[index];
-    if (s && s.action && typeof onAction === 'function') {
+    if (s && s.action) {
       // give visual highlight a moment to appear
       actionPendingRef.current = index;
       let cancelled = false;
       const run = async () => {
         try {
-          const maybe = onAction(s.action, index);
-          if (maybe && typeof (maybe as any).then === 'function') {
-            await (maybe as Promise<void>);
-            if (cancelled) return;
-            // only auto-advance if the step hasn't changed and tour still visible
-            if (visible && actionPendingRef.current === index) {
-              setTimeout(() => {
-                try {
-                  setIndex(i => Math.min(i + 1, steps.length - 1));
-                } catch (e) { }
-              }, 240);
+          if (typeof onAction === 'function') {
+            const maybe = onAction(s.action, index);
+            if (maybe && typeof (maybe as any).then === 'function') {
+              await (maybe as Promise<void>);
             }
+          } else {
+            // parent didn't provide handler — run internal demo
+            await performInternalAction(s.action, index as number);
+          }
+          if (cancelled) return;
+          // only auto-advance if the step hasn't changed and tour still visible
+          // For certain actions (like 'connect-demo') we want the step to remain
+          // until the user explicitly clicks Next — do not auto-advance in that case.
+          // Also avoid auto-advancing into a connect-demo: if the *next* step is
+          // a connect-demo, require the user to click Next instead of jumping.
+          const nextStep = steps[index + 1];
+          const autoAdvanceAllowed = s.action !== 'connect-demo' && !(nextStep && nextStep.action === 'connect-demo');
+          if (autoAdvanceAllowed && visible && actionPendingRef.current === index) {
+            setTimeout(() => {
+              try {
+                setIndex(i => Math.min(i + 1, steps.length - 1));
+              } catch (e) { }
+            }, 240);
           }
         } catch (e) { /* swallow */ }
       };
-      const t = setTimeout(run, 420);
+      const t = setTimeout(run, 1420);
       return () => { cancelled = true; actionPendingRef.current = null; clearTimeout(t); };
     }
     return () => { actionPendingRef.current = null; };
-  }, [index, visible, steps, onAction]);
+  }, [index, visible, steps, onAction, performInternalAction]);
 
   const next = () => { if (index < steps.length - 1) setIndex(i => i + 1); else { setVisible(false); onClose && onClose(); } };
   const prev = () => setIndex(i => Math.max(0, i - 1));

@@ -216,12 +216,6 @@ const Widgets: React.FC = () => {
     // Demo elements refs for tour animations
     const tourDemoRef = useRef<{ nodes: HTMLElement[] }>({ nodes: [] });
 
-    // Perform demo actions requested by the tour (drag-demo, connect-demo)
-    const handleTourAction = (action: 'drag-demo' | 'connect-demo' | 'flow-demo' | undefined, idx: number) => {
-        try {
-            // No-op here: demos are now implemented inside `OnboardingTour`.
-        } catch (e) { }
-    };
     // Forwarding subscriptions for runtime push-flow (map 'from->to' -> unsubscribe)
     const forwardingUnsubsRef = useRef<Record<string, () => void>>({});
     // Keep a ref copy of connections so setup/teardown callbacks declared
@@ -3556,7 +3550,6 @@ const Widgets: React.FC = () => {
                 steps={tourSteps as any}
                 open={showTour}
                 onClose={onTourClose}
-                onAction={handleTourAction}
                 preventAutoScroll={true}
                 initial={0}
             />
