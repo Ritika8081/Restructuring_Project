@@ -18,8 +18,15 @@ type Props = {
   onZoomIn?: () => void;
   onZoomOut?: () => void;
   flowScale?: number;
+  // Optional flowchart presets selector
+  flowPresets?: Array<{ id: string; name: string; flowOptions?: any; modalPositions?: Record<string, any>; connections?: Array<{from:string,to:string}>; gridSettings?: GridSettings; channelCount?: number }>;
+  selectedFlowPresetId?: string | null;
+  onSelectFlowPreset?: (id: string) => void;
+  onSaveFlowPreset?: () => void;
   connActive?: boolean;
   setConnActive?: (b: boolean) => void;
+  connConnecting?: boolean;
+  setConnConnecting?: (b: boolean) => void;
   showConnectionModal?: boolean;
   setShowConnectionModal?: (b: boolean) => void;
 };
@@ -43,6 +50,8 @@ export default function FlowModule(props: Props) {
     showToast,
     connActive,
     setConnActive,
+    connConnecting,
+    setConnConnecting,
     showConnectionModal,
     setShowConnectionModal,
   } = props;
@@ -190,6 +199,14 @@ export default function FlowModule(props: Props) {
   const handleConnectClick = () => {
     try {
       if (!connActiveVal) {
+        try { if (typeof setConnConnecting === 'function') setConnConnecting(true); } catch (e) { }
+        // If an onboarding demo is running, it may show its own visual overlay.
+        // Honor a global flag so the real connection modal is not opened twice.
+        try {
+          if (typeof window !== 'undefined' && (window as any).__DEMO_SUPPRESS_CONN_MODAL) {
+            return;
+          }
+        } catch (e) { }
         setShowConnectionModalFn(true);
         return;
       }
@@ -207,6 +224,7 @@ export default function FlowModule(props: Props) {
 
       try { window.dispatchEvent(new CustomEvent('app:disconnect', { detail: { source: 'flow-widget' } })); } catch (e) { }
       setConnActiveFn(false);
+      try { if (typeof setConnConnecting === 'function') setConnConnecting(false); } catch (e) { }
       try { toast('Disconnecting...', 'info'); } catch (e) { }
     } catch (err) { }
   };
@@ -238,14 +256,53 @@ export default function FlowModule(props: Props) {
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <div style={{ fontSize: 12, color: '#9ca3af' }}>Tips: drag → connect → Play</div>
 
-            <button
-              data-tour="connect-button"
-              title={connActiveVal ? 'Disconnect' : 'Connect'}
-              onClick={handleConnectClick}
-              style={{ background: connActiveVal ? ACTION_COLORS.neutral.bg : ACTION_COLORS.green.bg, color: connActiveVal ? ACTION_COLORS.neutral.text : ACTION_COLORS.green.text, padding: '8px 12px', borderRadius: 10, fontWeight: 700, border: 'none', cursor: 'pointer', fontSize: 14, display: 'inline-flex', alignItems: 'center', gap: 8, boxShadow: connActiveVal ? 'none' : ACTION_COLORS.green.shadow, marginRight: 6 }}
-            >
-              {connActiveVal ? 'Disconnect' : 'Connect'}
-            </button>
+            {/* Flowchart presets selector */}
+            {Array.isArray(props.flowPresets) && props.flowPresets.length > 0 && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 12 }}>
+                <select
+                  aria-label="Select flow preset"
+                  value={props.selectedFlowPresetId || (props.flowPresets[0] && props.flowPresets[0].id) || ''}
+                  onChange={(e) => { try { if (typeof props.onSelectFlowPreset === 'function') props.onSelectFlowPreset(e.target.value); } catch (err) {} }}
+                  style={{ padding: '6px 8px', borderRadius: 8, border: '1px solid #e6eef8', background: '#fff' }}
+                >
+                  {props.flowPresets.map(p => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+
+                <button
+                  title="Save current as preset"
+                  onClick={() => { try { if (typeof props.onSaveFlowPreset === 'function') props.onSaveFlowPreset(); } catch (e) {} }}
+                  style={{ padding: '6px 8px', borderRadius: 8, border: '1px solid #eef2f7', background: '#f8fafc', cursor: 'pointer', fontSize: 12 }}
+                >
+                  Save Preset
+                </button>
+              </div>
+            )}
+
+            {connConnecting ? (
+              <button
+                data-tour="connect-button"
+                title="Connecting"
+                onClick={handleConnectClick}
+                style={{ background: ACTION_COLORS.green.bg, color: ACTION_COLORS.green.text, padding: '8px 12px', borderRadius: 10, fontWeight: 700, border: 'none', cursor: 'default', fontSize: 14, display: 'inline-flex', alignItems: 'center', gap: 8, boxShadow: 'none', marginRight: 6 }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" style={{ animation: 'flowmodule-spin 900ms linear infinite' }}>
+                  <circle cx="12" cy="12" r="9" stroke="rgba(255,255,255,0.6)" strokeWidth="2" fill="none" strokeLinecap="round" strokeDasharray="40" strokeDashoffset="10" />
+                </svg>
+                <span>Connecting…</span>
+                <style>{`@keyframes flowmodule-spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}`}</style>
+              </button>
+            ) : (
+              <button
+                data-tour="connect-button"
+                title={connActiveVal ? 'Disconnect' : 'Connect'}
+                onClick={handleConnectClick}
+                style={{ background: connActiveVal ? ACTION_COLORS.neutral.bg : ACTION_COLORS.green.bg, color: connActiveVal ? ACTION_COLORS.neutral.text : ACTION_COLORS.green.text, padding: '8px 12px', borderRadius: 10, fontWeight: 700, border: 'none', cursor: 'pointer', fontSize: 14, display: 'inline-flex', alignItems: 'center', gap: 8, boxShadow: connActiveVal ? 'none' : ACTION_COLORS.green.shadow, marginRight: 6 }}
+              >
+                {connActiveVal ? 'Disconnect' : 'Connect'}
+              </button>
+            )}
 
             <button
               data-tour="play-button"

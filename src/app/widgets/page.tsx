@@ -133,18 +133,61 @@ const Widgets: React.FC = () => {
 
     // Local state for the in-flow connection mini-widget (connect/disconnect)
     const [connActive, setConnActive] = useState<boolean>(false);
+    const [connConnecting, setConnConnecting] = useState<boolean>(false);
     const channelData = useChannelData();
     // "More" dropdown state is now handled inside FlowModule header
     // Tour storage (persistent flag) and local flag to control tour visibility
     const tourStorage = useTourStorage();
     const [showTour, setShowTour] = useState<boolean>(false);
 
+    // Flowchart presets: allow saving/loading multiple named flow configurations
+    type FlowPreset = { id: string; name: string; flowOptions: any[]; modalPositions: Record<string, { left: number, top: number }>; connections: Array<{ from: string, to: string }>; gridSettings: GridSettings; channelCount?: number };
+    const createPresetId = (name: string) => String(name || 'preset').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') + '-' + Math.random().toString(36).slice(2, 7);
+
+    const [flowPresets, setFlowPresets] = useState<FlowPreset[]>([]);
+    const [selectedPresetId, setSelectedPresetId] = useState<string | null>(null);
+
     useEffect(() => {
         try {
-            // Always open the tour on mount so it appears after a page reload.
+            // Always open the tour on mount so it appears after every refresh/reload.
             setTimeout(() => setShowTour(true), 400);
         } catch (e) { }
     }, []);
+
+    const handleSelectPreset = (id: string) => {
+        try {
+            const p = flowPresets.find(fp => fp.id === id);
+            if (!p) return;
+            // Apply preset to current flow state
+            try { setFlowOptions(JSON.parse(JSON.stringify(p.flowOptions))); } catch (e) { }
+            try { setModalPositions(JSON.parse(JSON.stringify(p.modalPositions))); } catch (e) { }
+            try { setConnections(JSON.parse(JSON.stringify(p.connections || []))); } catch (e) { }
+            try { setGridSettings(JSON.parse(JSON.stringify(p.gridSettings || gridSettings))); } catch (e) { }
+            try { setChannelCount(typeof p.channelCount === 'number' ? p.channelCount : channelCount); } catch (e) { }
+            setSelectedPresetId(id);
+            try { showToast && showToast(`Loaded preset: ${p.name}`, 'success'); } catch (e) { }
+        } catch (err) { }
+    };
+
+    const handleSavePreset = () => {
+        try {
+            const name = window.prompt('Preset name');
+            if (!name) return;
+            const id = createPresetId(name);
+            const preset = {
+                id,
+                name,
+                flowOptions: JSON.parse(JSON.stringify(flowOptions)),
+                modalPositions: JSON.parse(JSON.stringify(modalPositions)),
+                connections: JSON.parse(JSON.stringify(connections)),
+                gridSettings: JSON.parse(JSON.stringify(gridSettings)),
+                channelCount,
+            };
+            setFlowPresets(prev => [...prev, preset]);
+            setSelectedPresetId(id);
+            try { showToast && showToast('Preset saved', 'success'); } catch (e) { }
+        } catch (err) { }
+    };
 
 
     const onTourClose = () => {
@@ -158,7 +201,7 @@ const Widgets: React.FC = () => {
         // { selector: '#flow-palette input', title: 'Search Applications', description: 'Filter the palette to find the app you need quickly.', position: 'right' },
         { selector: '#flow-palette div[draggable]', title: 'Add an App', description: 'Drag any app from the palette into the flow area to add it to your pipeline.', position: 'right', action: 'drag-demo' },
         { selector: '#flow-area', title: 'Flow Area', description: 'Arrange nodes here. Connect outputs to inputs to route data through transforms and visualizations.', position: 'left', action: 'flow-demo' },
-        { selector: 'button[data-tour="connect-button"]', title: 'Connection Selector', description: 'Open the connection selector to choose a hardware source or device to connect.', position: 'right' },
+        // { selector: 'button[data-tour="connect-button"]', title: 'Connection Selector', description: 'Open the connection selector to choose a hardware source or device to connect.', position: 'right' },
         { selector: 'button[data-tour="connect-button"]', title: 'Connect / Disconnect', description: 'Start drawing connections between nodes or disconnect active links.', position: 'right', action: 'connect-demo' },
         // { selector: '[aria-label="Zoom controls"]', title: 'Zoom', description: 'Zoom the flow modal to see more or fewer nodes.', position: 'left' },
         // { selector: 'button[title="Zoom in"]', title: 'Zoom In', description: 'Increase the zoom level to inspect details.', position: 'left' },
@@ -176,367 +219,8 @@ const Widgets: React.FC = () => {
     // Perform demo actions requested by the tour (drag-demo, connect-demo)
     const handleTourAction = (action: 'drag-demo' | 'connect-demo' | 'flow-demo' | undefined, idx: number) => {
         try {
-            if (action === 'drag-demo') {
-                const src = document.querySelector('#flow-palette div[draggable]') as HTMLElement | null;
-                const destArea = document.getElementById('flow-area');
-                if (!src || !destArea) return;
-                const sRect = src.getBoundingClientRect();
-                const dRect = destArea.getBoundingClientRect();
-                const ghost = document.createElement('div');
-                ghost.className = 'tour-demo-ghost';
-                ghost.style.position = 'fixed';
-                ghost.style.left = `${sRect.left}px`;
-                ghost.style.top = `${sRect.top}px`;
-                ghost.style.width = `${sRect.width}px`;
-                ghost.style.height = `${sRect.height}px`;
-                ghost.style.background = window.getComputedStyle(src).backgroundColor || '#eef2ff';
-                ghost.style.border = '1px solid rgba(0,0,0,0.06)';
-                ghost.style.borderRadius = '8px';
-                ghost.style.boxShadow = '0 12px 30px rgba(2,6,23,0.08)';
-                // place demo visuals below the tooltip so the tooltip/modal remains on top
-                ghost.style.zIndex = '200040';
-                ghost.style.pointerEvents = 'none';
-                ghost.style.transition = 'transform 700ms cubic-bezier(.2,.9,.2,1), left 700ms, top 700ms, opacity 300ms';
-                document.body.appendChild(ghost);
-
-                // compute destination position (center-ish in flow area)
-                const destX = dRect.left + Math.max(60, dRect.width * 0.3);
-                const destY = dRect.top + Math.max(60, dRect.height * 0.3);
-
-                // if a tour tooltip is present, try to nudge the demo target so they don't overlap
-                const tooltipEl = document.querySelector('[data-tour-tooltip]') as HTMLElement | null;
-                let finalDestX = destX;
-                let finalDestY = destY;
-                const NODE_W = 160;
-                const NODE_H = 80;
-                const AVOID_MARGIN = 12;
-                try {
-                    if (tooltipEl) {
-                        const tRect = tooltipEl.getBoundingClientRect();
-                        const nodeRect = { left: finalDestX, top: finalDestY, right: finalDestX + NODE_W, bottom: finalDestY + NODE_H };
-                        const intersects = !(nodeRect.right < tRect.left || nodeRect.left > tRect.right || nodeRect.bottom < tRect.top || nodeRect.top > tRect.bottom);
-                        if (intersects) {
-                            // prefer shifting right out of the way
-                            const shiftX = (tRect.right - nodeRect.left) + AVOID_MARGIN;
-                            let attemptX = finalDestX + shiftX;
-                            if (attemptX + NODE_W <= window.innerWidth - 12) {
-                                finalDestX = attemptX;
-                            } else {
-                                // try above the tooltip
-                                const attemptY = tRect.top - NODE_H - AVOID_MARGIN;
-                                if (attemptY >= 12) finalDestY = attemptY;
-                                else {
-                                    // try left of tooltip
-                                    const attemptX2 = tRect.left - NODE_W - AVOID_MARGIN;
-                                    if (attemptX2 >= 12) finalDestX = attemptX2;
-                                    else {
-                                        // fallback: place below the tooltip
-                                        finalDestY = Math.min(window.innerHeight - NODE_H - 12, tRect.bottom + AVOID_MARGIN);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                } catch (e) { }
-
-                requestAnimationFrame(() => {
-                    ghost.style.left = `${finalDestX}px`;
-                    ghost.style.top = `${finalDestY}px`;
-                    ghost.style.transform = 'scale(1.02)';
-                });
-
-                // after animation, create a demo node to represent added widget
-                setTimeout(() => {
-                    try {
-                        const node = document.createElement('div');
-                        node.className = 'tour-demo-node';
-                        node.style.position = 'fixed';
-                        // use finalDest values (nudged if needed) so node doesn't overlap the tooltip
-                        node.style.left = `${finalDestX}px`;
-                        node.style.top = `${finalDestY}px`;
-                        node.style.width = '160px';
-                        node.style.height = '80px';
-                        node.style.borderRadius = '10px';
-                        node.style.background = '#eef2ff';
-                        node.style.border = '1px solid #c7d2fe';
-                        node.style.boxShadow = '0 12px 30px rgba(2,6,23,0.08)';
-                        node.style.zIndex = '200040';
-                        node.style.pointerEvents = 'none';
-                        node.style.display = 'flex';
-                        node.style.alignItems = 'center';
-                        node.style.justifyContent = 'center';
-                        node.style.fontWeight = '700';
-                        node.style.opacity = '1';
-                        node.style.transform = 'scale(1)';
-                        // smooth fade/transform when removing
-                        node.style.transition = 'opacity 320ms ease, transform 320ms ease';
-                        node.textContent = 'Demo Node';
-                        document.body.appendChild(node);
-                        tourDemoRef.current.nodes.push(node);
-
-                        // schedule fade-out soon after it's shown, then remove on transition end
-                        const startFade = () => {
-                            try {
-                                node.style.opacity = '0';
-                                node.style.transform = 'scale(0.98)';
-                            } catch (e) { }
-                        };
-
-                        const removeNode = () => {
-                            try { node.remove(); } catch (e) { }
-                            try { tourDemoRef.current.nodes = tourDemoRef.current.nodes.filter(n => n !== node); } catch (e) { }
-                        };
-
-                        let fallbackRem = window.setTimeout(removeNode, 2200);
-                        const onTransitionEnd = (ev: Event) => {
-                            try {
-                                const pe = ev as TransitionEvent;
-                                // wait for opacity transition to finish
-                                if (!pe.propertyName || pe.propertyName === 'opacity') {
-                                    node.removeEventListener('transitionend', onTransitionEnd);
-                                    window.clearTimeout(fallbackRem);
-                                    removeNode();
-                                }
-                            } catch (e) { }
-                        };
-                        node.addEventListener('transitionend', onTransitionEnd);
-
-                        // show it for a short time then fade
-                        setTimeout(startFade, 700);
-                    } catch (e) { }
-                    try { ghost.style.opacity = '0'; } catch (e) { }
-                    setTimeout(() => {
-                        try { ghost.remove(); } catch (e) { }
-                    }, 300);
-                }, 820);
-            }
-
-            if (action === 'flow-demo') {
-                // create three demo nodes inside the flow area and animate connections between them
-                const destArea = document.getElementById('flow-area');
-                if (!destArea) return;
-                const dRect = destArea.getBoundingClientRect();
-
-                const positions = [
-                    { x: dRect.left + dRect.width * 0.28, y: dRect.top + dRect.height * 0.32 },
-                    { x: dRect.left + dRect.width * 0.5, y: dRect.top + dRect.height * 0.22 },
-                    { x: dRect.left + dRect.width * 0.72, y: dRect.top + dRect.height * 0.42 },
-                ];
-
-                const makeNode = (x: number, y: number, label = '') => {
-                    const node = document.createElement('div');
-                    node.style.position = 'fixed';
-                    node.style.left = `${x}px`;
-                    node.style.top = `${y}px`;
-                    node.style.width = '140px';
-                    node.style.height = '72px';
-                    node.style.borderRadius = '10px';
-                    node.style.background = '#eef2ff';
-                    node.style.border = '1px solid #c7d2fe';
-                    node.style.boxShadow = '0 12px 30px rgba(2,6,23,0.08)';
-                    node.style.zIndex = '200080';
-                    node.style.pointerEvents = 'none';
-                    node.style.display = 'flex';
-                    node.style.alignItems = 'center';
-                    node.style.justifyContent = 'center';
-                    node.style.fontWeight = '700';
-                    node.style.color = '#0f172a';
-                    node.textContent = label;
-                    document.body.appendChild(node);
-                    return node;
-                };
-
-                const nodes = positions.map((p, i) => makeNode(p.x, p.y, String(i + 1)));
-                tourDemoRef.current.nodes.push(...nodes);
-
-                // SVG overlay for connections
-                const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-                svg.setAttribute('width', '100%');
-                svg.setAttribute('height', '100%');
-                svg.style.position = 'fixed';
-                svg.style.left = '0';
-                svg.style.top = '0';
-                svg.style.zIndex = '200070';
-                svg.style.pointerEvents = 'none';
-
-                const makePath = (stroke = '#60a5fa') => {
-                    const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-                    p.setAttribute('stroke', stroke);
-                    p.setAttribute('stroke-width', '4');
-                    p.setAttribute('fill', 'none');
-                    p.setAttribute('stroke-linecap', 'round');
-                    p.setAttribute('stroke-linejoin', 'round');
-                    svg.appendChild(p);
-                    return p;
-                };
-
-                const pAB = makePath('#60a5fa');
-                const pBC = makePath('#60a5fa');
-                const pAC = makePath('#60a5fa');
-                document.body.appendChild(svg);
-
-                const update = () => {
-                    try {
-                        const r0 = nodes[0].getBoundingClientRect();
-                        const r1 = nodes[1].getBoundingClientRect();
-                        const r2 = nodes[2].getBoundingClientRect();
-                        const mid = (x1: number, x2: number) => (x1 + x2) / 2;
-
-                        const xA = r0.left + r0.width;
-                        const yA = r0.top + r0.height / 2;
-                        const xB = r1.left + r1.width / 2;
-                        const yB = r1.top + r1.height / 2;
-                        const xC = r2.left;
-                        const yC = r2.top + r2.height / 2;
-
-                        const dAB = `M ${xA} ${yA} C ${mid(xA, xB)} ${yA}, ${mid(xA, xB)} ${yB}, ${xB} ${yB}`;
-                        const dBC = `M ${xB} ${yB} C ${mid(xB, xC)} ${yB}, ${mid(xB, xC)} ${yC}, ${xC} ${yC}`;
-
-                        pAB.setAttribute('d', dAB);
-                        pBC.setAttribute('d', dBC);
-                    } catch (e) { }
-                };
-
-                update();
-
-                const startAnim = (path: SVGPathElement, delay: number) => {
-                    let len = 300;
-                    try { len = (path as any).getTotalLength ? (path as any).getTotalLength() : len; } catch (e) { }
-                    path.style.strokeDasharray = `${len}`;
-                    path.style.strokeDashoffset = `${len}`;
-                    // force layout
-                    path.getBoundingClientRect();
-                    path.style.transition = 'stroke-dashoffset 700ms ease-out';
-                    setTimeout(() => { try { path.style.strokeDashoffset = '0'; } catch (e) { } }, delay);
-                };
-
-                // animate AB, then BC, then AC
-                startAnim(pAB as any, 120);
-                startAnim(pBC as any, 420);
-                startAnim(pAC as any, 740);
-
-                // cleanup when last animation ends (or fallback)
-                const cleanup = () => {
-                    try { svg.remove(); } catch (e) { }
-                    try { tourDemoRef.current.nodes.forEach(n => n.remove()); } catch (e) { }
-                    tourDemoRef.current.nodes = [];
-                };
-
-                let fallback = window.setTimeout(cleanup, 3000);
-                const onLastEnd = (ev: Event) => {
-                    try {
-                        const te = ev as TransitionEvent;
-                        if (!te.propertyName || te.propertyName === 'stroke-dashoffset') {
-                            try { pAC.removeEventListener('transitionend', onLastEnd); } catch (e) { }
-                            window.clearTimeout(fallback);
-                            cleanup();
-                        }
-                    } catch (e) { }
-                };
-                try { pAC.addEventListener('transitionend', onLastEnd); } catch (e) { }
-            }
-
-            if (action === 'connect-demo') {
-                // draw a temporary SVG arrow between two demo nodes (or create two)
-                let [a, b] = tourDemoRef.current.nodes;
-                if (!a || !b) {
-                    // create two demo nodes at different positions in flow area
-                    const destArea = document.getElementById('flow-area');
-                    if (!destArea) return;
-                    const dRect = destArea.getBoundingClientRect();
-                    const x1 = dRect.left + dRect.width * 0.35;
-                    const y1 = dRect.top + dRect.height * 0.35;
-                    const x2 = dRect.left + dRect.width * 0.6;
-                    const y2 = dRect.top + dRect.height * 0.55;
-                    const make = (x: number, y: number, label = 'A') => {
-                        const node = document.createElement('div');
-                        node.style.position = 'fixed';
-                        node.style.left = `${x}px`;
-                        node.style.top = `${y}px`;
-                        node.style.width = '140px';
-                        node.style.height = '72px';
-                        node.style.borderRadius = '10px';
-                        node.style.background = '#fff7ed';
-                        node.style.border = '1px solid #fed7aa';
-                        node.style.boxShadow = '0 12px 30px rgba(2,6,23,0.08)';
-                        node.style.zIndex = '200080';
-                        node.style.pointerEvents = 'none';
-                        node.style.display = 'flex';
-                        node.style.alignItems = 'center';
-                        node.style.justifyContent = 'center';
-                        node.style.fontWeight = '700';
-                        node.textContent = label;
-                        document.body.appendChild(node);
-                        return node;
-                    };
-                    a = make(x1, y1, 'A');
-                    b = make(x2, y2, 'B');
-                    tourDemoRef.current.nodes.push(a, b);
-                }
-
-                // create SVG overlay
-                const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-                svg.setAttribute('width', '100%');
-                svg.setAttribute('height', '100%');
-                svg.style.position = 'fixed';
-                svg.style.left = '0';
-                svg.style.top = '0';
-                svg.style.zIndex = '200080';
-                svg.style.pointerEvents = 'none';
-                const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-                path.setAttribute('stroke', '#10b981');
-                path.setAttribute('stroke-width', '4');
-                path.setAttribute('fill', 'none');
-                path.setAttribute('stroke-linecap', 'round');
-                path.setAttribute('stroke-linejoin', 'round');
-                svg.appendChild(path);
-                document.body.appendChild(svg);
-
-                const updatePath = () => {
-                    try {
-                        const r1 = a!.getBoundingClientRect();
-                        const r2 = b!.getBoundingClientRect();
-                        const x1 = r1.left + r1.width;
-                        const y1 = r1.top + r1.height / 2;
-                        const x2 = r2.left;
-                        const y2 = r2.top + r2.height / 2;
-                        const mx = (x1 + x2) / 2;
-                        const d = `M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`;
-                        path.setAttribute('d', d);
-                    } catch (e) { }
-                };
-
-                updatePath();
-                // animate stroke dash
-                let length = 300;
-                try { length = (path as any).getTotalLength ? (path as any).getTotalLength() : length; } catch (e) { }
-                path.style.strokeDasharray = `${length}`;
-                path.style.strokeDashoffset = `${length}`;
-                // force layout
-                path.getBoundingClientRect();
-                path.style.transition = 'stroke-dashoffset 800ms ease-out';
-                requestAnimationFrame(() => { path.style.strokeDashoffset = '0'; });
-
-                // cleanup after the arrow animation completes (or fallback)
-                const cleanupDemo = () => {
-                    try { svg.remove(); } catch (e) { }
-                    try { tourDemoRef.current.nodes.forEach(n => n.remove()); } catch (e) { }
-                    tourDemoRef.current.nodes = [];
-                };
-                let fallback = window.setTimeout(cleanupDemo, 2600);
-                const onPathEnd = (ev: Event) => {
-                    try {
-                        const te = ev as TransitionEvent;
-                        if (!te.propertyName || te.propertyName === 'stroke-dashoffset') {
-                            try { path.removeEventListener('transitionend', onPathEnd); } catch (e) { }
-                            window.clearTimeout(fallback);
-                            cleanupDemo();
-                        }
-                    } catch (e) { }
-                };
-                try { path.addEventListener('transitionend', onPathEnd); } catch (e) { }
-            }
-        } catch (e) { /* swallow demo errors */ }
+            // No-op here: demos are now implemented inside `OnboardingTour`.
+        } catch (e) { }
     };
     // Forwarding subscriptions for runtime push-flow (map 'from->to' -> unsubscribe)
     const forwardingUnsubsRef = useRef<Record<string, () => void>>({});
@@ -670,10 +354,11 @@ const Widgets: React.FC = () => {
             if (channelData && channelData.subscribeToSampleBatches) {
                 unsub = channelData.subscribeToSampleBatches((batch) => {
                     try {
-                        if (batch && batch.length > 0) {
-                            lastSampleAtRef.current = Date.now();
-                            if (!connActive) setConnActive(true);
-                        }
+                                if (batch && batch.length > 0) {
+                                    lastSampleAtRef.current = Date.now();
+                                    try { if (!connActive) setConnActive(true); } catch (e) { }
+                                    try { setConnConnecting(false); } catch (e) { }
+                                }
                     } catch (e) { }
                 });
             }
@@ -1739,6 +1424,46 @@ const Widgets: React.FC = () => {
         cellHeight: 50,
     });
 
+    // Populate initial presets after core defaults are available
+    useEffect(() => {
+        try {
+            if (flowPresets && flowPresets.length > 0) return;
+            const defaultPreset = {
+                id: 'preset-default',
+                name: 'Default',
+                flowOptions: JSON.parse(JSON.stringify(initialFlowOptions)),
+                modalPositions: JSON.parse(JSON.stringify(initialModalPositions)),
+                connections: JSON.parse(JSON.stringify(connections || [])),
+                gridSettings: JSON.parse(JSON.stringify(gridSettings)),
+                channelCount: channelCount,
+            };
+
+            const examplePreset = (() => {
+                try {
+                    const fo = JSON.parse(JSON.stringify(initialFlowOptions));
+                    // add channel-1 if not present
+                    if (!fo.find((x: any) => x.id === 'channel-1')) {
+                        fo.unshift({ id: 'channel-1', label: 'Channel 1', type: 'channel', selected: true });
+                    }
+                    const basic = fo.find((x: any) => x.id === defaultBasicId);
+                    if (basic) {
+                        basic.instances = basic.instances || [];
+                        if (!basic.instances.find((ins: any) => ins.id === `${defaultBasicId}-1`)) {
+                            basic.instances.push({ id: `${defaultBasicId}-1`, label: 'Plot 1' });
+                        }
+                    }
+                    const mp: Record<string, { left: number, top: number }> = JSON.parse(JSON.stringify(initialModalPositions));
+                    mp['channel-1'] = mp['channel-1'] || { left: 60, top: 140 };
+                    const con = [{ from: 'channel-0', to: `${defaultBasicId}-0` }, { from: 'channel-1', to: `${defaultBasicId}-1` }];
+                    return { id: 'preset-example', name: 'Example Flow', flowOptions: fo, modalPositions: mp, connections: con, gridSettings: JSON.parse(JSON.stringify(gridSettings)), channelCount: 2 };
+                } catch (err) { return defaultPreset; }
+            })();
+
+            setFlowPresets([defaultPreset, examplePreset]);
+            setSelectedPresetId(defaultPreset.id);
+        } catch (err) { }
+    }, []);
+
     // Active drag operation state
     const [dragState, setDragState] = useState<DragState>({
         isDragging: false,
@@ -2308,7 +2033,17 @@ const Widgets: React.FC = () => {
      */
     const handleSaveLayout = useCallback(() => {
         try {
-            const payload = { widgets, gridSettings, connections, modalPositions, flowOptions, channelCount };
+            // Compute pixel positions for each modal position so consumers can restore exact layout
+            const pixelPositions: Record<string, { left: number, top: number }> = {};
+            try {
+                Object.keys(modalPositions || {}).forEach(k => {
+                    try {
+                        pixelPositions[k] = normalizedToPixel(modalPositions[k]);
+                    } catch (e) { /* ignore */ }
+                });
+            } catch (e) { }
+
+            const payload = { widgets, gridSettings, connections, modalPositions, pixelPositions, flowOptions, channelCount };
             const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
@@ -2459,6 +2194,8 @@ const Widgets: React.FC = () => {
                     showToast={showToast}
                     connActive={connActive}
                     setConnActive={setConnActive}
+                    connConnecting={connConnecting}
+                    setConnConnecting={setConnConnecting}
                     showConnectionModal={showConnectionModal}
                     setShowConnectionModal={setShowConnectionModal}
                     onSaveLayout={handleSaveLayout}
@@ -2466,6 +2203,10 @@ const Widgets: React.FC = () => {
                     onZoomIn={handleZoomIn}
                     onZoomOut={handleZoomOut}
                     flowScale={flowScale}
+                    flowPresets={flowPresets}
+                    selectedFlowPresetId={selectedPresetId}
+                    onSelectFlowPreset={handleSelectPreset}
+                    onSaveFlowPreset={handleSavePreset}
                 >
                         {/* Settings modal always rendered at top level of flowchart modal */}
                         {renderSettingsModal()}
@@ -3810,6 +3551,15 @@ const Widgets: React.FC = () => {
 
             <Toast toast={toast} onClose={hideToast} />
             <ConfirmModal confirm={confirm} />
+            {/* Onboarding tour for the Flow modal */}
+            <OnboardingTour
+                steps={tourSteps as any}
+                open={showTour}
+                onClose={onTourClose}
+                onAction={handleTourAction}
+                preventAutoScroll={true}
+                initial={0}
+            />
         </div>
     );
 };

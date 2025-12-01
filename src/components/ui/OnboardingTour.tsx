@@ -5,7 +5,7 @@ type Step = {
   title: string;
   description: string;
   position?: 'top' | 'bottom' | 'left' | 'right' | 'auto';
-  action?: 'drag-demo' | 'connect-demo';
+  action?: 'drag-demo' | 'connect-demo' | 'flow-demo';
 };
 
 type Props = {
@@ -25,6 +25,176 @@ type Props = {
 const clamp = (v: number, a = 0, b = 1) => Math.max(a, Math.min(b, v));
 
 const OnboardingTour: React.FC<Props> = ({ steps, open, onClose, initial = 0, theme = 'default', onAction, preventAutoScroll = false }) => {
+  const tourDemoRef = useRef<{ nodes: HTMLElement[] }>({ nodes: [] });
+
+  // Internal demo runner: if parent doesn't provide `onAction`, use these
+  const performInternalAction = useCallback(async (action: Step['action'] | undefined, index: number) => {
+    if (!action) return;
+    try {
+      // helpers
+      const makeFixedDiv = (opts: Partial<CSSStyleDeclaration> = {}) => {
+        const d = document.createElement('div');
+        d.style.position = 'fixed';
+        d.style.pointerEvents = 'none';
+        d.style.zIndex = '200080';
+        Object.assign(d.style, opts);
+        return d;
+      };
+
+      if (action === 'drag-demo') {
+        const src = document.querySelector('#flow-palette div[draggable]') as HTMLElement | null;
+        const destArea = document.getElementById('flow-area');
+        if (!src || !destArea) return;
+        const sRect = src.getBoundingClientRect();
+        const dRect = destArea.getBoundingClientRect();
+        const ghost = makeFixedDiv({ left: `${sRect.left}px`, top: `${sRect.top}px`, width: `${sRect.width}px`, height: `${sRect.height}px` });
+        ghost.className = 'tour-demo-ghost';
+        ghost.style.background = (window.getComputedStyle(src).backgroundColor as string) || '#eef2ff';
+        ghost.style.border = '1px solid rgba(0,0,0,0.06)';
+        ghost.style.borderRadius = '8px';
+        ghost.style.boxShadow = '0 12px 30px rgba(2,6,23,0.08)';
+        ghost.style.transition = 'transform 700ms cubic-bezier(.2,.9,.2,1), left 700ms, top 700ms, opacity 300ms';
+        document.body.appendChild(ghost);
+        tourDemoRef.current.nodes.push(ghost);
+
+        const destX = dRect.left + Math.max(60, dRect.width * 0.3);
+        const destY = dRect.top + Math.max(60, dRect.height * 0.3);
+        const tooltipEl = document.querySelector('[data-tour-tooltip]') as HTMLElement | null;
+        let finalDestX = destX;
+        let finalDestY = destY;
+        const NODE_W = 160; const NODE_H = 80; const AVOID_MARGIN = 12;
+        try {
+          if (tooltipEl) {
+            const tRect = tooltipEl.getBoundingClientRect();
+            const nodeRect = { left: finalDestX, top: finalDestY, right: finalDestX + NODE_W, bottom: finalDestY + NODE_H };
+            const intersects = !(nodeRect.right < tRect.left || nodeRect.left > tRect.right || nodeRect.bottom < tRect.top || nodeRect.top > tRect.bottom);
+            if (intersects) {
+              const shiftX = (tRect.right - nodeRect.left) + AVOID_MARGIN;
+              let attemptX = finalDestX + shiftX;
+              if (attemptX + NODE_W <= window.innerWidth - 12) finalDestX = attemptX;
+              else {
+                const attemptY = tRect.top - NODE_H - AVOID_MARGIN;
+                if (attemptY >= 12) finalDestY = attemptY;
+                else {
+                  const attemptX2 = tRect.left - NODE_W - AVOID_MARGIN;
+                  if (attemptX2 >= 12) finalDestX = attemptX2; else finalDestY = Math.min(window.innerHeight - NODE_H - 12, tRect.bottom + AVOID_MARGIN);
+                }
+              }
+            }
+          }
+        } catch (e) { }
+
+        requestAnimationFrame(() => {
+          try { ghost.style.left = `${finalDestX}px`; ghost.style.top = `${finalDestY}px`; ghost.style.transform = 'scale(1.02)'; } catch (e) { }
+        });
+
+        await new Promise<void>((resolve) => {
+          setTimeout(() => {
+            try {
+              const node = makeFixedDiv({ left: `${finalDestX}px`, top: `${finalDestY}px`, width: '160px', height: '80px' });
+              node.style.borderRadius = '10px';
+              node.style.background = '#eef2ff';
+              node.style.border = '1px solid #c7d2fe';
+              node.style.boxShadow = '0 12px 30px rgba(2,6,23,0.08)';
+              node.style.display = 'flex'; node.style.alignItems = 'center'; node.style.justifyContent = 'center'; node.style.fontWeight = '700';
+              node.textContent = 'Demo Node';
+              document.body.appendChild(node);
+              tourDemoRef.current.nodes.push(node);
+
+              setTimeout(() => { try { node.style.opacity = '0'; node.style.transform = 'scale(0.98)'; } catch (e) { } }, 700);
+              const fallbackRem = window.setTimeout(() => { try { node.remove(); } catch (e) { } resolve(); }, 2200);
+              node.addEventListener('transitionend', () => { try { window.clearTimeout(fallbackRem); node.remove(); } catch (e) { } resolve(); });
+            } catch (e) { resolve(); }
+            try { ghost.style.opacity = '0'; } catch (e) { }
+            setTimeout(() => { try { ghost.remove(); } catch (e) { } }, 300);
+          }, 820);
+        });
+      }
+
+      if (action === 'flow-demo') {
+        const destArea = document.getElementById('flow-area');
+        if (!destArea) return;
+        const dRect = destArea.getBoundingClientRect();
+        const positions = [
+          { x: dRect.left + dRect.width * 0.28, y: dRect.top + dRect.height * 0.32 },
+          { x: dRect.left + dRect.width * 0.5, y: dRect.top + dRect.height * 0.22 },
+          { x: dRect.left + dRect.width * 0.72, y: dRect.top + dRect.height * 0.42 },
+        ];
+        const nodes: HTMLElement[] = positions.map(p => {
+          const n = makeFixedDiv({ left: `${p.x}px`, top: `${p.y}px`, width: '140px', height: '72px' });
+          n.style.borderRadius = '10px'; n.style.background = '#eef2ff'; n.style.border = '1px solid #c7d2fe'; n.style.boxShadow = '0 12px 30px rgba(2,6,23,0.08)';
+          n.style.display = 'flex'; n.style.alignItems = 'center'; n.style.justifyContent = 'center'; n.style.fontWeight = '700'; n.style.color = '#0f172a';
+          document.body.appendChild(n); tourDemoRef.current.nodes.push(n); return n;
+        });
+
+        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svg.setAttribute('width', '100%'); svg.setAttribute('height', '100%'); svg.style.position = 'fixed'; svg.style.left = '0'; svg.style.top = '0'; svg.style.zIndex = '200070'; svg.style.pointerEvents = 'none';
+        const makePath = (stroke = '#60a5fa') => { const p = document.createElementNS('http://www.w3.org/2000/svg', 'path'); p.setAttribute('stroke', stroke); p.setAttribute('stroke-width', '4'); p.setAttribute('fill', 'none'); p.setAttribute('stroke-linecap', 'round'); p.setAttribute('stroke-linejoin', 'round'); svg.appendChild(p); return p; };
+        const pAB = makePath('#60a5fa'); const pBC = makePath('#60a5fa'); const pAC = makePath('#60a5fa');
+        document.body.appendChild(svg);
+
+        const update = () => {
+          try {
+            const r0 = nodes[0].getBoundingClientRect(); const r1 = nodes[1].getBoundingClientRect(); const r2 = nodes[2].getBoundingClientRect();
+            const mid = (x1: number, x2: number) => (x1 + x2) / 2;
+            const xA = r0.left + r0.width; const yA = r0.top + r0.height / 2; const xB = r1.left + r1.width / 2; const yB = r1.top + r1.height / 2; const xC = r2.left; const yC = r2.top + r2.height / 2;
+            const dAB = `M ${xA} ${yA} C ${mid(xA, xB)} ${yA}, ${mid(xA, xB)} ${yB}, ${xB} ${yB}`;
+            const dBC = `M ${xB} ${yB} C ${mid(xB, xC)} ${yB}, ${mid(xB, xC)} ${yC}, ${xC} ${yC}`;
+            pAB.setAttribute('d', dAB); pBC.setAttribute('d', dBC);
+          } catch (e) { }
+        };
+        update();
+        const startAnim = (path: SVGPathElement, delay: number) => {
+          let len = 300; try { len = (path as any).getTotalLength ? (path as any).getTotalLength() : len; } catch (e) { }
+          path.style.strokeDasharray = `${len}`; path.style.strokeDashoffset = `${len}`; path.getBoundingClientRect(); path.style.transition = 'stroke-dashoffset 700ms ease-out'; setTimeout(() => { try { path.style.strokeDashoffset = '0'; } catch (e) { } }, delay);
+        };
+        startAnim(pAB as any, 120); startAnim(pBC as any, 420); startAnim(pAC as any, 740);
+
+        await new Promise<void>((resolve) => {
+          const cleanup = () => { try { svg.remove(); } catch (e) { } try { tourDemoRef.current.nodes.forEach(n => n.remove()); } catch (e) { } tourDemoRef.current.nodes = []; resolve(); };
+          const fallback = window.setTimeout(cleanup, 3000);
+          try { pAC.addEventListener('transitionend', () => { window.clearTimeout(fallback); cleanup(); }); } catch (e) { }
+        });
+      }
+
+      if (action === 'connect-demo') {
+        // show centered overlay listing device types, then small highlight + connect label
+        try { (window as any).__DEMO_SUPPRESS_CONN_MODAL = true; } catch (e) { }
+        const overlay = document.createElement('div');
+        overlay.style.position = 'fixed'; overlay.style.zIndex = '200050'; overlay.style.minWidth = '160px'; overlay.style.borderRadius = '8px'; overlay.style.background = '#fff'; overlay.style.boxShadow = '0 8px 20px rgba(2,6,23,0.06)'; overlay.style.padding = '8px'; overlay.style.fontSize = '13px'; overlay.style.fontWeight = '600'; overlay.style.pointerEvents = 'none';
+        try {
+          const flowEl = document.getElementById('flow-area');
+          if (flowEl) {
+            const fr = flowEl.getBoundingClientRect(); overlay.style.left = `${fr.left + fr.width / 2}px`; overlay.style.top = `${fr.top + fr.height / 2}px`; overlay.style.transform = 'translate(-50%, -50%)';
+          } else { overlay.style.left = '50%'; overlay.style.top = '50%'; overlay.style.transform = 'translate(-50%, -50%)'; }
+        } catch (e) { overlay.style.left = '50%'; overlay.style.top = '50%'; overlay.style.transform = 'translate(-50%, -50%)'; }
+
+        const list = document.createElement('div'); list.style.display = 'flex'; list.style.flexDirection = 'column'; list.style.gap = '6px';
+        const names = ['Ble', 'Serial', 'Wifi']; const rows: HTMLDivElement[] = [];
+        for (const n of names) { const r = document.createElement('div'); r.textContent = n; r.style.padding = '6px 8px'; r.style.borderRadius = '6px'; r.style.border = '1px solid transparent'; r.style.background = '#fff'; r.style.position = 'relative'; list.appendChild(r); rows.push(r); }
+        overlay.appendChild(list); document.body.appendChild(overlay); tourDemoRef.current.nodes.push(overlay);
+
+        const first = rows[0]; const bar = document.createElement('div'); bar.style.position = 'absolute'; bar.style.left = '0'; bar.style.top = '6px'; bar.style.bottom = '6px'; bar.style.width = '4px'; bar.style.borderTopLeftRadius = '6px'; bar.style.borderBottomLeftRadius = '6px'; bar.style.background = 'rgba(16,185,129,0.9)'; bar.style.opacity = '0'; bar.style.transition = 'opacity 140ms ease'; try { first.appendChild(bar); } catch (e) { }
+        const timers: number[] = [];
+        timers.push(window.setTimeout(() => { try { bar.style.opacity = '1'; } catch (e) { } }, 90));
+        timers.push(window.setTimeout(() => { try { bar.style.opacity = '0'; } catch (e) { } }, 300));
+        timers.push(window.setTimeout(() => { try { const info = document.createElement('div'); info.textContent = 'Connecting…'; info.style.fontWeight = '700'; info.style.marginTop = '8px'; info.style.fontSize = '13px'; overlay.appendChild(info); } catch (e) { } }, 320));
+
+        await new Promise<void>((resolve) => {
+          timers.push(window.setTimeout(() => { try { overlay.remove(); } catch (e) { } try { (window as any).__DEMO_SUPPRESS_CONN_MODAL = false; } catch (e) { } timers.forEach(t => window.clearTimeout(t)); resolve(); } , 820));
+        });
+      }
+    } catch (e) { /* swallow */ }
+  }, []);
+
+  // cleanup any demo nodes when tour unmounts
+  useEffect(() => {
+    return () => {
+      try { tourDemoRef.current.nodes.forEach(n => n.remove()); } catch (e) { }
+      tourDemoRef.current.nodes = [];
+      try { (window as any).__DEMO_SUPPRESS_CONN_MODAL = false; } catch (e) { }
+    };
+  }, []);
   const [index, setIndex] = useState<number>(initial);
   const [targetRect, setTargetRect] = useState<DOMRect | null>(null);
   const [visible, setVisible] = useState(open);
