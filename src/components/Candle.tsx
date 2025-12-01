@@ -27,7 +27,7 @@ const CandleChart: React.FC<CandleChartProps> = ({
   betaPower = 0,
   isFullPage = false,
   // Lower default threshold so small beta values produce visible flame
-  threshold = 0,
+  threshold = 50,
   // Slightly larger minimum so very small signals still show a hint of flame
   minVisible = 0.06,
   backgroundColor = 'transparent',

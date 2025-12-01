@@ -3038,7 +3038,7 @@ const Widgets: React.FC = () => {
                                 {drawingConnection && mousePos && (() => {
                                     const fromCol = colorForId(drawingConnection.from as string);
                                     return (
-                                        <svg style={{ position: 'absolute', left: 0, top: 0, width: '1200px', height: '500px', pointerEvents: 'none', zIndex: 10000 }}>
+                                        <svg style={{ position: 'absolute', left: 0, top: 0, width: '100%', height: '100%', pointerEvents: 'none', zIndex: 10000 }}>
                                             <path
                                                 d={`M ${drawingConnection.startX} ${drawingConnection.startY} L ${mousePos.x} ${mousePos.y}`}
                                                 stroke={colorForIdLight(drawingConnection.from as string)}

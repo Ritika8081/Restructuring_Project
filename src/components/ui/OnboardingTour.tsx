@@ -165,7 +165,17 @@ const OnboardingTour: React.FC<Props> = ({ steps, open, onClose, initial = 0, th
         // show centered overlay listing device types, then small highlight + connect label
         try { (window as any).__DEMO_SUPPRESS_CONN_MODAL = true; } catch (e) { }
         const overlay = document.createElement('div');
-        overlay.style.position = 'fixed'; overlay.style.zIndex = '200050'; overlay.style.minWidth = '160px'; overlay.style.borderRadius = '8px'; overlay.style.background = '#fff'; overlay.style.boxShadow = '0 8px 20px rgba(2,6,23,0.06)'; overlay.style.padding = '8px'; overlay.style.fontSize = '13px'; overlay.style.fontWeight = '600'; overlay.style.pointerEvents = 'none';
+        overlay.style.position = 'fixed';
+        overlay.style.zIndex = '200050';
+        overlay.style.minWidth = '360px';
+        overlay.style.maxWidth = '90vw';
+        overlay.style.borderRadius = '10px';
+        overlay.style.background = '#ffffff';
+        overlay.style.boxShadow = '0 14px 40px rgba(2,6,23,0.12)';
+        overlay.style.padding = '12px';
+        overlay.style.fontSize = '14px';
+        overlay.style.fontWeight = '700';
+        overlay.style.pointerEvents = 'none';
         try {
           // Wait briefly for the flow area to exist (tour might open before modal mounts)
           const waitForFlowArea = async (timeout = 800) => {
@@ -193,16 +203,54 @@ const OnboardingTour: React.FC<Props> = ({ steps, open, onClose, initial = 0, th
           }
         } catch (e) { overlay.style.left = '50%'; overlay.style.top = '50%'; overlay.style.transform = 'translate(-50%, -50%)'; }
 
-        const list = document.createElement('div'); list.style.display = 'flex'; list.style.flexDirection = 'column'; list.style.gap = '6px';
+        const list = document.createElement('div');
+        list.style.display = 'flex';
+        list.style.flexDirection = 'column';
+        list.style.gap = '8px';
         const names = ['Ble', 'Serial', 'Wifi']; const rows: HTMLDivElement[] = [];
-        for (const n of names) { const r = document.createElement('div'); r.textContent = n; r.style.padding = '6px 8px'; r.style.borderRadius = '6px'; r.style.border = '1px solid transparent'; r.style.background = '#fff'; r.style.position = 'relative'; list.appendChild(r); rows.push(r); }
+        for (const n of names) {
+          const r = document.createElement('div');
+          r.textContent = n;
+          r.style.padding = '10px 12px';
+          r.style.borderRadius = '8px';
+          r.style.border = '1px solid rgba(15,23,42,0.06)';
+          r.style.background = '#fbfdff';
+          r.style.position = 'relative';
+          r.style.minWidth = '200px';
+          r.style.boxSizing = 'border-box';
+          r.style.fontSize = '14px';
+          list.appendChild(r);
+          rows.push(r);
+        }
         overlay.appendChild(list); document.body.appendChild(overlay); tourDemoRef.current.nodes.push(overlay);
 
-        const first = rows[0]; const bar = document.createElement('div'); bar.style.position = 'absolute'; bar.style.left = '0'; bar.style.top = '6px'; bar.style.bottom = '6px'; bar.style.width = '4px'; bar.style.borderTopLeftRadius = '6px'; bar.style.borderBottomLeftRadius = '6px'; bar.style.background = 'rgba(16,185,129,0.9)'; bar.style.opacity = '0'; bar.style.transition = 'opacity 140ms ease'; try { first.appendChild(bar); } catch (e) { }
+        const first = rows[0];
+        const bar = document.createElement('div');
+        bar.style.position = 'absolute';
+        bar.style.left = '0';
+        bar.style.top = '8px';
+        bar.style.bottom = '8px';
+        bar.style.width = '6px';
+        bar.style.borderTopLeftRadius = '8px';
+        bar.style.borderBottomLeftRadius = '8px';
+        bar.style.background = 'rgba(16,185,129,0.95)';
+        bar.style.opacity = '0';
+        bar.style.transition = 'opacity 160ms ease';
+        try { first.appendChild(bar); } catch (e) { }
         const timers: number[] = [];
         timers.push(window.setTimeout(() => { try { bar.style.opacity = '1'; } catch (e) { } }, 190));
         timers.push(window.setTimeout(() => { try { bar.style.opacity = '0'; } catch (e) { } }, 1300));
-        timers.push(window.setTimeout(() => { try { const info = document.createElement('div'); info.textContent = 'Connecting…'; info.style.fontWeight = '700'; info.style.marginTop = '8px'; info.style.fontSize = '13px'; overlay.appendChild(info); } catch (e) { } }, 1320));
+        timers.push(window.setTimeout(() => {
+          try {
+            const info = document.createElement('div');
+            info.textContent = 'Connecting…';
+            info.style.fontWeight = '800';
+            info.style.marginTop = '10px';
+            info.style.fontSize = '15px';
+            info.style.color = '#36aa2cff';
+            overlay.appendChild(info);
+          } catch (e) { }
+        }, 1320));
 
         await new Promise<void>((resolve) => {
           timers.push(window.setTimeout(() => { try { overlay.remove(); } catch (e) { } try { (window as any).__DEMO_SUPPRESS_CONN_MODAL = false; } catch (e) { } timers.forEach(t => window.clearTimeout(t)); resolve(); } , 1820));
@@ -297,7 +345,7 @@ const OnboardingTour: React.FC<Props> = ({ steps, open, onClose, initial = 0, th
           }
         } catch (e) { /* swallow */ }
       };
-      const t = setTimeout(run, 1420);
+      const t = setTimeout(run, 120);
       return () => { cancelled = true; actionPendingRef.current = null; clearTimeout(t); };
     }
     return () => { actionPendingRef.current = null; };
