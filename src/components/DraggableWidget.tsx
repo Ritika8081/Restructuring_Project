@@ -20,6 +20,7 @@ import ErrorBoundary from '@/components/ErrorBoundary';
 import { useChannelData } from '@/lib/channelDataContext';
 import { FFT } from '@/lib/fft';
 import { computeBandPowers, BANDS } from '@/lib/bandpower';
+import { getBandpowerWorker } from '@/lib/bandpowerPool';
 import { Widget, GridSettings, DragState } from '@/types/widget.types';
 import { checkCollisionAtPosition } from '@/utils/widget.utils';
 
@@ -505,6 +506,8 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
     const spiderSampleUnsubRef = React.useRef<(() => void) | null>(null);
     // Persistent bandpower worker ref (reuse one worker per widget)
     const bandWorkerRef = React.useRef<Worker | null>(null);
+    // Per-widget message handler ref so we can remove it from the shared worker
+    const bandOnMsgRef = React.useRef<((ev: MessageEvent<any>) => void) | null>(null);
     // Buffered smoothing for band values (keep buffer in the component, not the graph)
     const BAND_KEYS = Object.keys(BANDS);
     // No per-band buffering: use instant worker values (no smoothing)
@@ -560,14 +563,16 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
                             // Lazy-create persistent worker if needed
                             if (!w) {
                                 try {
-                                    w = new Worker(new URL('@/workers/bandpower.worker.ts', import.meta.url), { type: 'module' });
+                                    // Use shared worker
+                                    w = getBandpowerWorker();
                                     bandWorkerRef.current = w;
-                                    // install a single stable message handler for this widget
+                                    // install per-widget message handler that filters by channel index
                                     const onMsg = (ev: MessageEvent<any>) => {
                                         try {
                                             const payload = ev?.data || {};
+                                            // this compute is for a channel source; expect numeric channel index
+                                            if ((payload.channelIndex ?? payload.channel) !== chIdx) return;
                                             const rel = payload.relative || payload.relBands || payload.smooth || payload.rel || {};
-                                            // Convert to 0..100 values and publish instantly (no smoothing)
                                             const rawValues = BAND_KEYS.map(k => (rel[k] ?? 0) * 100);
                                             const data = BAND_KEYS.map((k, i) => ({ label: BAND_KEYS[i], value: rawValues[i] }));
                                             try { setBandStats(data); } catch (e) { }
@@ -578,7 +583,10 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
                                             } catch (e) { }
                                         } catch (e) { }
                                     };
-                                    w.addEventListener('message', onMsg);
+                                    if (!bandOnMsgRef.current) {
+                                        bandOnMsgRef.current = onMsg;
+                                        w.addEventListener('message', onMsg);
+                                    }
                                 } catch (err) {
                                     bandWorkerRef.current = null;
                                     throw err;
@@ -586,7 +594,7 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
                             }
 
                             if (w) {
-                                try { w.postMessage({ upstream: Array.from(input), sampleRate: sr, fftSize, smootherWindow: 128, postRateMs: 200, mode: 'simple' }); } catch (e) { throw e; }
+                                try { w.postMessage({ channel: chIdx, upstream: Array.from(input), sampleRate: sr, fftSize, smootherWindow: 128, postRateMs: 200, mode: 'simple' }); } catch (e) { throw e; }
                             } else {
                                 try { console.warn(`[DraggableWidget:${widget.id}] bandpower worker unavailable; skipping compute`); } catch (err) { }
                             }
@@ -672,13 +680,15 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
                                 let w = bandWorkerRef.current;
                                 if (!w) {
                                     try {
-                                        w = new Worker(new URL('@/workers/bandpower.worker.ts', import.meta.url), { type: 'module' });
+                                        // Use shared worker
+                                        w = getBandpowerWorker();
                                         bandWorkerRef.current = w;
                                         const onMsg = (ev: MessageEvent<any>) => {
                                             try {
                                                 const payload = ev?.data || {};
+                                                // For widget-sourced computations we post with `channel: widget.id`
+                                                if (String(payload.channelIndex ?? payload.channel ?? '') !== String(widget.id)) return;
                                                 const rel = payload.relative || payload.relBands || payload.smooth || payload.rel || {};
-                                                // Convert to 0..100 values and publish instantly (no smoothing)
                                                 const rawValues = bandKeys.map(b => (rel[b] ?? 0) * 100);
                                                 const data = bandKeys.map((b, i) => ({ label: b, value: rawValues[i] }));
                                                 try { setBandStats(data); } catch (e) { }
@@ -689,7 +699,10 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
                                                 } catch (e) { }
                                             } catch (e) { }
                                         };
-                                        w.addEventListener('message', onMsg);
+                                        if (!bandOnMsgRef.current) {
+                                            bandOnMsgRef.current = onMsg;
+                                            w.addEventListener('message', onMsg);
+                                        }
                                     } catch (err) {
                                         bandWorkerRef.current = null;
                                         throw err;
@@ -697,7 +710,7 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
                                 }
 
                                 if (w) {
-                                    try { w.postMessage({ upstream: Array.from(signal), sampleRate: sr, fftSize, smootherWindow: 128, postRateMs: 200, mode: 'simple' }); } catch (e) { throw e; }
+                                    try { w.postMessage({ channel: widget.id, upstream: Array.from(signal), sampleRate: sr, fftSize, smootherWindow: 128, postRateMs: 200, mode: 'simple' }); } catch (e) { throw e; }
                                 } else {
                                     try { console.warn('[DraggableWidget] bandpower worker unavailable; skipping compute'); } catch (err) { }
                                 }
@@ -720,6 +733,21 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
         });
         return () => { try { unsub(); } catch (e) { } };
     }, [widget.type, incomingConnections, samples, subscribeToWidgetOutputs]);
+
+    // Cleanup any per-widget listener attached to the shared bandpower worker
+    useEffect(() => {
+        return () => {
+            try {
+                const w = bandWorkerRef.current;
+                const h = bandOnMsgRef.current;
+                if (w && h) {
+                    try { w.removeEventListener('message', h); } catch (e) { }
+                }
+            } catch (e) { }
+            bandOnMsgRef.current = null;
+            bandWorkerRef.current = null;
+        };
+    }, []);
 
     return (
         <div
