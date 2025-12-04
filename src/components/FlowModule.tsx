@@ -72,6 +72,21 @@ export default function FlowModule(props: Props) {
 
   const { onSaveLayout, onLoadLayout, onZoomIn, onZoomOut, flowScale: flowScaleProp } = props;
 
+  // Helper: call a provided callback `cb` if available, otherwise dispatch
+  // a CustomEvent with the given `eventName` on `window` for legacy listeners.
+  //
+  // Parameters:
+  // - eventName: string key for the fallback CustomEvent (e.g. 'flow:zoom-in')
+  // - cb: optional function to execute directly. If supplied the function
+  //       is invoked and no event is dispatched. If omitted, a
+  //       `new CustomEvent(eventName)` is dispatched on `window` so
+  //       callers that listen for DOM events still work.
+  //
+  // Usage notes:
+  // - This keeps API compatibility: callers may pass a direct handler
+  //   (`onZoomIn`) or rely on the global event bus. The `cb` parameter is
+  //   intentionally permissive (no args) because callers commonly pass a
+  //   simple zero-arg action.
   const callOrDispatch = (eventName: string, cb?: () => void) => {
     try {
       if (typeof cb === 'function') { try { cb(); } catch (e) { } }
@@ -154,9 +169,19 @@ export default function FlowModule(props: Props) {
 
             if (typeof onLoadLayout === 'function') {
               try {
-                try { console.debug('[FlowModule] calling onLoadLayout', { count: normalized.length, sample: normalized.slice(0,3) }); } catch (e) { }
-                onLoadLayout(normalized, gridToPass);
-                try { toast(`Layout loaded with ${normalized.length} widgets`, 'success'); } catch (e) { }
+                // If the parsed payload ALSO contains flow-specific metadata (connections,
+                // flowOptions or modalPositions), prefer passing the full payload so the
+                // parent can apply connections and other flow state instead of only the
+                // widget array which would drop wiring information.
+                const preferFullPayload = !!(parsed && (Array.isArray(parsed.flowOptions) || Array.isArray(parsed.connections) || parsed.modalPositions));
+                try { console.debug('[FlowModule] calling onLoadLayout', { count: normalized.length, sample: normalized.slice(0,3), preferFullPayload }); } catch (e) { }
+                if (preferFullPayload) {
+                  onLoadLayout(parsed, gridToPass);
+                  try { toast('Layout loaded (full payload)', 'success'); } catch (e) { }
+                } else {
+                  onLoadLayout(normalized, gridToPass);
+                  try { toast(`Layout loaded with ${normalized.length} widgets`, 'success'); } catch (e) { }
+                }
                 try { setMoreOpen(false); } catch (e) { }
               } catch (e) {
                 try { console.error('[FlowModule] onLoadLayout threw', e); } catch (er) { }

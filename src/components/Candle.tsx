@@ -27,7 +27,7 @@ const CandleChart: React.FC<CandleChartProps> = ({
   betaPower = 0,
   isFullPage = false,
   // Lower default threshold so small beta values produce visible flame
-  threshold = 50,
+  threshold = 10,
   // Slightly larger minimum so very small signals still show a hint of flame
   minVisible = 0.06,
   backgroundColor = 'transparent',
@@ -35,9 +35,14 @@ const CandleChart: React.FC<CandleChartProps> = ({
   const clampedThreshold = Math.max(0, Math.min(100, threshold));
   const clampedMinVisible = Math.max(0, Math.min(1, minVisible));
 
-  // Map betaPower to a 0..1 brightness value relative to threshold
-  const raw = typeof betaPower === 'number' ? betaPower : 0;
-  const linear = raw <= clampedThreshold ? 0 : (raw - clampedThreshold) / Math.max(1, (100 - clampedThreshold));
+  // Normalize incoming betaPower into 0..100 percent.
+  // Accept either a 0..100 value or a 0..1 fractional value (common for relative band outputs).
+  const numericRaw = typeof betaPower === 'number' ? betaPower : 0;
+  const normalizedBeta = numericRaw > 0 && numericRaw <= 1 ? numericRaw * 100 : numericRaw;
+  const betaPercent = Math.max(0, Math.min(100, Number.isFinite(normalizedBeta) ? normalizedBeta : 0));
+
+  // Map betaPercent to a 0..1 brightness value relative to threshold
+  const linear = betaPercent <= clampedThreshold ? 0 : (betaPercent - clampedThreshold) / Math.max(1, (100 - clampedThreshold));
   // Apply a mild nonlinear curve to amplify low values (sqrt-like)
   const curved = linear > 0 ? Math.pow(linear, 0.7) : 0;
   // final brightness in [0,1], clamped and including minVisible when >0
@@ -56,7 +61,14 @@ const CandleChart: React.FC<CandleChartProps> = ({
       });
     }, 16);
     return () => clearInterval(timer);
-  }, [betaPower]);
+  }, [betaPercent]);
+
+  // Debug: log incoming betaPower values for tracing
+  useEffect(() => {
+    try {
+      console.debug(`[Candle] received betaPower:`, betaPower, 'normalized %:', betaPercent);
+    } catch (e) { /* swallow */ }
+  }, [betaPower, betaPercent]);
 
   // Deterministic flame path generator (no randomness) — simpler and cheaper
   const generateFlamePath = (w = 200, h = 300) => {
@@ -138,7 +150,7 @@ const CandleChart: React.FC<CandleChartProps> = ({
                 transform: isFullPage ? 'scale(1.15)' : 'scale(1)',
               }}
             >
-              {Number.isFinite(betaPower) ? String(Math.round(betaPower)).padStart(2, '0') : '00'}
+              {Number.isFinite(betaPercent) ? String(Math.round(betaPercent)).padStart(2, '0') : '00'}
             </div>
           </div>
           <div className="absolute inset-0 bg-white/5 rounded-b-lg" />

@@ -192,6 +192,9 @@ const DocModal: React.FC<{ show: boolean; onClose: () => void }> = ({ show, onCl
                                 <li>When troubleshooting, enable per-file LOG flags rather than
                                     leaving verbose logs enabled in production.</li>
                             </ul>
+                            <div className="my-4 p-3 rounded border-l-4 border-blue-300 bg-blue-50 text-sm">
+                                <strong>Note:</strong>&nbsp;That’s why your approach “looks like” Muse / OpenBCI GUI / OpenVIBE / BrainFlow / EEGLAB — same clean separation of DSP (worker) and presentation (UI).
+                            </div>
                             
                             <h4 className="text-lg font-semibold mt-4">✔ Best scalable pattern (Used in Node-RED, LabVIEW, MaxMSP, BioSignal tools)</h4>
                             <p className="text-sm text-gray-700">Signal routing is per-channel, not per-node.</p>

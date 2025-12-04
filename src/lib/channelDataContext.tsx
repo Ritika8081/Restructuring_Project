@@ -278,7 +278,7 @@ export const ChannelDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
                   }
                 }
                 if (inst && typeof inst.process === 'function') {
-                  try { console.debug(`[ChannelData] applying filter ch${i}: ${k} @ ${cfg.samplingRate || 'unknown'}Hz`); } catch (e) { }
+                 
                   // process on centered counts
                   value = inst.process(value);
                 }

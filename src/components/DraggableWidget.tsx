@@ -130,12 +130,25 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
                     const last = vals[vals.length - 1];
                     let v: number | undefined = undefined;
                     // Strict behavior: accept either a numeric publish or an
-                    // array-shaped band vector where index 1 is Beta. Do NOT
-                    // fallback to index 0 or coerce other shapes — require
-                    // upstream to publish explicit Beta values for Candle.
-                    if (typeof last === 'number') v = last as number;
-                    else if (Array.isArray(last) && last.length > 1 && typeof last[1] === 'number') {
-                        v = last[1] as number;
+                    // array-shaped band vector. Use the canonical band ordering
+                    // from `BANDS` to locate the `beta` index instead of assuming
+                    // a hard-coded index.
+                    if (typeof last === 'number') {
+                        v = last as number;
+                    } else if (Array.isArray(last)) {
+                        try {
+                            const bandKeys = Object.keys(BANDS);
+                            const betaIdx = Math.max(0, bandKeys.indexOf('beta'));
+                            if (betaIdx >= 0 && last.length > betaIdx && typeof last[betaIdx] === 'number') {
+                                v = last[betaIdx] as number;
+                            } else {
+                                // Received array but doesn't contain beta at expected index
+                                if (LOG) try { console.warn(`[DraggableWidget:${widget.id}] candle: array received but beta index missing`, { last, betaIdx }); } catch (e) { }
+                                return;
+                            }
+                        } catch (e) {
+                            return;
+                        }
                     } else {
                         // unknown shape — ignore
                         return;
@@ -490,6 +503,11 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
     // Worker and subscription refs for spiderplot per-sample FFT offload
     const spiderWorkerRef = React.useRef<Worker | null>(null);
     const spiderSampleUnsubRef = React.useRef<(() => void) | null>(null);
+    // Persistent bandpower worker ref (reuse one worker per widget)
+    const bandWorkerRef = React.useRef<Worker | null>(null);
+    // Buffered smoothing for band values (keep buffer in the component, not the graph)
+    const BAND_KEYS = Object.keys(BANDS);
+    // No per-band buffering: use instant worker values (no smoothing)
     // Bandpower state for statistic widgets
     const [bandStats, setBandStats] = React.useState<Array<{ label: string; value: number }>>([]);
     // For SpiderPlot: store latest published band-array (if upstream widget publishes arrays)
@@ -536,22 +554,60 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
                     let computedRelative: any = null;
                     if (now - lastBandComputeRef.current >= 180) {
                         lastBandComputeRef.current = now;
-                        const result = computeBandPowers(input, sr, fftSize);
-                        computedRelative = result.relative;
-                        const data = Object.keys(BANDS).map(b => ({ label: b, value: (computedRelative as any)[b] * 100 }));
-                        setBandStats(data);
+                        // Offload expensive bandpower computation to a persistent worker (one per widget)
+                        try {
+                            let w = bandWorkerRef.current;
+                            // Lazy-create persistent worker if needed
+                            if (!w) {
+                                try {
+                                    w = new Worker(new URL('@/workers/bandpower.worker.ts', import.meta.url), { type: 'module' });
+                                    bandWorkerRef.current = w;
+                                    // install a single stable message handler for this widget
+                                    const onMsg = (ev: MessageEvent<any>) => {
+                                        try {
+                                            const payload = ev?.data || {};
+                                            const rel = payload.relative || payload.relBands || payload.smooth || payload.rel || {};
+                                            // Convert to 0..100 values and publish instantly (no smoothing)
+                                            const rawValues = BAND_KEYS.map(k => (rel[k] ?? 0) * 100);
+                                            const data = BAND_KEYS.map((k, i) => ({ label: BAND_KEYS[i], value: rawValues[i] }));
+                                            try { setBandStats(data); } catch (e) { }
+                                            try {
+                                                const betaIdx = BAND_KEYS.indexOf('beta');
+                                                const betaVal = betaIdx >= 0 ? (data[betaIdx]?.value ?? 0) : 0;
+                                                if (publishWidgetOutputs) publishWidgetOutputs(String(widget.id), betaVal);
+                                            } catch (e) { }
+                                        } catch (e) { }
+                                    };
+                                    w.addEventListener('message', onMsg);
+                                } catch (err) {
+                                    bandWorkerRef.current = null;
+                                    throw err;
+                                }
+                            }
+
+                            if (w) {
+                                try { w.postMessage({ upstream: Array.from(input), sampleRate: sr, fftSize, smootherWindow: 128, postRateMs: 200, mode: 'simple' }); } catch (e) { throw e; }
+                            } else {
+                                try { console.warn(`[DraggableWidget:${widget.id}] bandpower worker unavailable; skipping compute`); } catch (err) { }
+                            }
+                        } catch (e) {
+                            try { console.warn(`[DraggableWidget:${widget.id}] bandpower worker unavailable; skipping compute`); } catch (err) { }
+                        }
                     }
                     // Publish beta band (as single numeric value) for other widgets to subscribe.
                     // If we just computed relative, use it; otherwise fall back to cached bandStats.
                     try {
-                        let betaVal = 0;
+                        // best-effort: publish latest computed or cached beta only when finite
+                        let betaVal = undefined as number | undefined;
                         if (computedRelative) {
                             betaVal = ((computedRelative as any).beta || 0) * 100;
                         } else {
                             const cached = bandStats && bandStats.find(s => s.label === 'beta');
-                            betaVal = cached ? (cached.value || 0) : 0;
+                            betaVal = cached ? cached.value : undefined;
                         }
-                        if (publishWidgetOutputs) publishWidgetOutputs(String(widget.id), betaVal);
+                        if (typeof betaVal === 'number' && Number.isFinite(betaVal)) {
+                            if (publishWidgetOutputs) publishWidgetOutputs(String(widget.id), betaVal);
+                        }
                     } catch (e) { /* ignore publish errors */ }
                 } catch (err) { /* ignore */ }
             return;
@@ -609,19 +665,55 @@ const DraggableWidget = React.memo<DraggableWidgetProps>(({ widget, widgets, onR
                     for (let i = 0; i < fftSize; i++) { signal[i] = buffer[p]; p = (p + 1) % fftSize; }
                     try {
                         const now = Date.now();
-                        if (now - lastBandComputeRef.current >= 180) {
+                            if (now - lastBandComputeRef.current >= 180) {
                             lastBandComputeRef.current = now;
-                            const { relative } = computeBandPowers(signal, sr, fftSize);
-                            const data = bandKeys.map(b => ({ label: b, value: (relative as any)[b] * 100 }));
-                            setBandStats(data);
+                            // Offload rolling-signal computation to a persistent worker (one per widget)
+                            try {
+                                let w = bandWorkerRef.current;
+                                if (!w) {
+                                    try {
+                                        w = new Worker(new URL('@/workers/bandpower.worker.ts', import.meta.url), { type: 'module' });
+                                        bandWorkerRef.current = w;
+                                        const onMsg = (ev: MessageEvent<any>) => {
+                                            try {
+                                                const payload = ev?.data || {};
+                                                const rel = payload.relative || payload.relBands || payload.smooth || payload.rel || {};
+                                                // Convert to 0..100 values and publish instantly (no smoothing)
+                                                const rawValues = bandKeys.map(b => (rel[b] ?? 0) * 100);
+                                                const data = bandKeys.map((b, i) => ({ label: b, value: rawValues[i] }));
+                                                try { setBandStats(data); } catch (e) { }
+                                                try {
+                                                    const betaIdx = bandKeys.indexOf('beta');
+                                                    const betaVal = betaIdx >= 0 ? (data[betaIdx]?.value ?? 0) : 0;
+                                                    if (publishWidgetOutputs) publishWidgetOutputs(String(widget.id), betaVal);
+                                                } catch (e) { }
+                                            } catch (e) { }
+                                        };
+                                        w.addEventListener('message', onMsg);
+                                    } catch (err) {
+                                        bandWorkerRef.current = null;
+                                        throw err;
+                                    }
+                                }
+
+                                if (w) {
+                                    try { w.postMessage({ upstream: Array.from(signal), sampleRate: sr, fftSize, smootherWindow: 128, postRateMs: 200, mode: 'simple' }); } catch (e) { throw e; }
+                                } else {
+                                    try { console.warn('[DraggableWidget] bandpower worker unavailable; skipping compute'); } catch (err) { }
+                                }
+                            } catch (e) {
+                                try { console.warn('[DraggableWidget] bandpower worker unavailable; skipping compute'); } catch (err) { }
+                            }
                         }
                     } catch (err) { /* ignore compute errors */ }
                     // Publish beta band (as single numeric value) for other widgets to subscribe
                     try {
-                        // best-effort: publish latest cached beta if available
+                        // best-effort: publish latest cached beta if available and finite
                         const cached = bandStats && bandStats.find(s => s.label === 'beta');
-                        const betaVal = cached ? (cached.value || 0) : 0;
-                        if (publishWidgetOutputs) publishWidgetOutputs(String(widget.id), betaVal);
+                        const betaVal = cached ? cached.value : undefined;
+                        if (typeof betaVal === 'number' && Number.isFinite(betaVal)) {
+                            if (publishWidgetOutputs) publishWidgetOutputs(String(widget.id), betaVal);
+                        }
                     } catch (e) { /* ignore publish errors */ }
                 }
             } catch (err) { /* ignore per-callback errors */ }

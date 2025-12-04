@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React, { useRef, useEffect } from 'react';
 
 export type SpiderDatum = { subject: string; value: number };
 
@@ -11,6 +11,8 @@ type Props = {
   logValues?: boolean; // whether to print the normalized band values to console
   logIntervalMs?: number; // minimum ms between prints
   fillZeros?: boolean; // whether to circular-fill zeros/missing values (default true)
+  // optional widget id (passed from wrapper) used for clearer logging
+  widgetId?: string;
 };
 
 const defaultBands = ['Delta', 'Theta', 'Alpha', 'Beta', 'Gamma'];
@@ -69,7 +71,7 @@ function normalizeInput(data?: SpiderDatum[] | number[] | any[], fillZeros = tru
   return defaultBands.map((s) => ({ subject: s, value: 0 }));
 }
 
-export default function SpiderPlot({ data, size = '100%', colors = ['#6C5CE7', '#00B894'], max = 1, gridLevels = 4, logValues = true, logIntervalMs = 250, fillZeros = true }: Props) {
+export default function SpiderPlot({ data, size = '100%', colors = ['#6C5CE7', '#00B894'], max = 1, gridLevels = 4, logValues = true, logIntervalMs = 250, fillZeros = true, widgetId }: Props) {
   const lastLogRef = useRef<number>(0);
   const lastLoggedBandsRef = useRef<number[] | null>(null);
   const d = normalizeInput(data, fillZeros);
@@ -98,42 +100,7 @@ export default function SpiderPlot({ data, size = '100%', colors = ['#6C5CE7', '
   // Prepare normalized band values (0..1) for logging/inspection
   const normalizedBands = d.map((p) => Math.max(0, Math.min(1, p.value / maxVal)));
 
-  // Throttled console output to avoid flooding the console on high-frequency updates
-  if (logValues) {
-    try {
-      const now = performance.now();
-      if (now - (lastLogRef.current || 0) >= (logIntervalMs || 250)) {
-        // Print labels and normalized band values together for clarity (throttled)
-        // This mirrors what the SpiderPlot is rendering so developers can
-        // inspect the exact band vector shown in the UI.
-          try {
-            // Avoid logging identical vectors repeatedly. Only print when
-            // values changed beyond a tiny epsilon or when there was no
-            // previous log. This reduces console spam when updates are
-            // frequent but values stay the same.
-            const eps = 1e-6;
-            const last = lastLoggedBandsRef.current;
-            let changed = false;
-            if (!last || last.length !== normalizedBands.length) changed = true;
-            else {
-              for (let i = 0; i < normalizedBands.length; i++) {
-                if (Math.abs((last[i] || 0) - normalizedBands[i]) > eps) { changed = true; break; }
-              }
-            }
-            if (changed) {
-              // Compact readable output: labels + comma-separated values
-              const labels = d.map((p) => p.subject).join(', ');
-              const vals = normalizedBands.map((v) => Number(v.toFixed(6))).join(', ');
-             
-              lastLoggedBandsRef.current = normalizedBands.slice();
-            }
-          } catch (e) { /* swallow logging errors */ }
-        lastLogRef.current = now;
-      }
-    } catch (e) {
-      // swallow logging errors
-    }
-  }
+  
 
   const pointsForLevel = (level: number) => {
     const r = (radius * level) / gridLevels;

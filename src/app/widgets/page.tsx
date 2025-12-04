@@ -1198,6 +1198,48 @@ const Widgets: React.FC = () => {
     // By default connect channel-0 -> first plot instance so the Plots box shows data
     const [connections, setConnections] = useState<Array<{ from: string, to: string }>>([{ from: 'channel-0', to: `${defaultBasicId}-0` }]);
 
+    // Log human-readable connections to the console whenever connections or flowOptions change
+    useEffect(() => {
+        try {
+            console.group('[Flow] Current connections');
+            if (!connections || connections.length === 0) {
+                console.log('  (no connections)');
+                console.groupEnd();
+                return;
+            }
+
+            for (const c of connections) {
+                const formatLabel = (id: string) => {
+                    try {
+                        // Direct match on flowOptions entry
+                        const direct = flowOptions.find((o: any) => String(o.id) === String(id));
+                        if (direct) return `${direct.label || direct.id} (${direct.type || 'unknown'})`;
+
+                        // Otherwise, try to locate as an instance inside a flow option (e.g. basic-... -> instance id)
+                        for (const o of flowOptions) {
+                            const instances = (o as any).instances || [];
+                            const ins = instances.find((ii: any) => String(ii.id) === String(id));
+                            if (ins) return `${ins.label || ins.id} (${o.type || 'unknown'})`;
+                        }
+
+                        // Fallback to raw id
+                        return String(id);
+                    } catch (err) {
+                        return String(id);
+                    }
+                };
+
+                const fromLabel = formatLabel(String(c.from));
+                const toLabel = formatLabel(String(c.to));
+                console.log(`  ${fromLabel} -> ${toLabel}`);
+            }
+
+            console.groupEnd();
+        } catch (err) {
+            // ignore logging errors
+        }
+    }, [connections, flowOptions]);
+
     // Toast utility functions
     const showToast = useCallback((message: string, type: 'success' | 'error' | 'info' = 'info') => {
         setToast({ show: true, message, type });

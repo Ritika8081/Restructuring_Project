@@ -65,9 +65,11 @@ const StatisticGraph: React.FC<StatisticGraphProps> = ({
     const padding = 60;
     const chartWidth = width - padding * 2;
     const chartHeight = height - padding * 2;
-    const maxValue = Math.max(...data.map(d => d.value));
-    const minValue = Math.min(...data.map(d => d.value));
-    const valueRange = maxValue - minValue || 1;
+    // Fixed scale: display values on a 0..100 percentage axis to avoid
+    // bars jumping when data min/max change between renders.
+    const maxValue = 100;
+    const minValue = 0;
+    const valueRange = maxValue - minValue;
 
     // Draw grid if enabled
     if (showGrid) {
