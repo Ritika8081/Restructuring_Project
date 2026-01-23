@@ -1,5 +1,6 @@
 'use client';
 import React, { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react';
+import { getBandpowerWorker } from '@/lib/bandpowerPool';
 import { createFilterInstance } from './filters';
 
 /**
@@ -111,6 +112,9 @@ export const ChannelDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
   const widgetOutputSubscribersRef = useRef<Record<string, Set<(vals: Array<number | number[]>) => void>>>({});
   // Per-channel bandpower workers (one worker per channel index)
   const channelWorkersRef = useRef<Record<number, Worker | null>>({});
+  // Shared worker ref and guard to attach a single global listener once
+  const sharedBandWorkerRef = useRef<Worker | null>(null);
+  const sharedListenerAttachedRef = useRef<boolean>(false);
   // Ref to publishWidgetOutputs so worker message handlers can forward results
   const publishRef = useRef<((widgetId: string, values: number[] | number) => void) | null>(null);
   // Guard against re-entrant publishes that can create synchronous publish->subscribe
@@ -169,10 +173,15 @@ export const ChannelDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
           const idx = Number(k);
           if (!s.has(idx)) {
             const w = workers[idx];
-            if (w) {
+            // If we have a shared worker do not terminate it here; only
+            // terminate dedicated workers that differ from the shared instance.
+            if (w && w !== sharedBandWorkerRef.current) {
               try { w.terminate(); } catch (e) { }
               delete channelWorkersRef.current[idx];
               if (LOG) try { console.debug('[ChannelData] terminated worker for unregistered ch', idx); } catch (e) { }
+            } else if (w && w === sharedBandWorkerRef.current) {
+              // Just remove mapping for unregistered channel; shared worker stays alive
+              delete channelWorkersRef.current[idx];
             }
           }
         } catch (e) { /* ignore per-worker errors */ }
@@ -420,24 +429,33 @@ export const ChannelDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
                           for (const idx of regs) {
                             try {
                               const key = `ch${idx}`;
-                              // Ensure worker exists
+                              // Ensure a shared worker exists and a single listener is attached
                               if (!channelWorkersRef.current[idx]) {
                                 try {
-                                  const w = new Worker(new URL('@/workers/bandpower.worker.ts', import.meta.url), { type: 'module' });
-                                  // attach message handler to publish band arrays when ready
-                                  w.addEventListener('message', (ev: MessageEvent<any>) => {
-                                    try {
-                                      const payload = ev?.data || {};
-                                      const rel = payload.relative || payload.relBands || payload.smooth || payload.raw || {};
-                                      const bandOrder = ['delta', 'theta', 'alpha', 'beta', 'gamma'];
-                                      const arr = bandOrder.map(k => Number(rel[k] ?? 0));
-                                      const wid = `channel-band-ch${idx}`;
-                                      if (LOG) try { console.debug('[ChannelData] worker->publish', { ch: idx, wid, arr }); } catch (e) { }
-                                      if (publishRef.current) publishRef.current(wid, arr);
-                                    } catch (e) { }
-                                  });
-                                  if (LOG) try { console.debug('[ChannelData] created worker for ch', idx); } catch (e) { }
-                                  channelWorkersRef.current[idx] = w;
+                                  let shared = sharedBandWorkerRef.current;
+                                  if (!shared) {
+                                    shared = getBandpowerWorker();
+                                    sharedBandWorkerRef.current = shared;
+                                  }
+                                  // Attach a single message listener on the shared worker to
+                                  // route per-channel publishes into the provider's publish API.
+                                  if (!sharedListenerAttachedRef.current) {
+                                    shared.addEventListener('message', (ev: MessageEvent<any>) => {
+                                      try {
+                                        const payload = ev?.data || {};
+                                        const ch = payload.channelIndex ?? payload.channel ?? null;
+                                        if (ch === null || ch === undefined) return;
+                                        const rel = payload.relative || payload.relBands || payload.smooth || payload.raw || {};
+                                        const bandOrder = ['delta', 'theta', 'alpha', 'beta', 'gamma'];
+                                        const arr = bandOrder.map(k => Number(rel[k] ?? 0));
+                                        const wid = `channel-band-ch${ch}`;
+                                        if (LOG) try { console.debug('[ChannelData] shared-worker->publish', { ch, wid, arr }); } catch (e) { }
+                                        if (publishRef.current) publishRef.current(wid, arr);
+                                      } catch (e) { }
+                                    });
+                                    sharedListenerAttachedRef.current = true;
+                                  }
+                                  channelWorkersRef.current[idx] = shared;
                                 } catch (e) {
                                   channelWorkersRef.current[idx] = null;
                                 }
@@ -450,8 +468,8 @@ export const ChannelDataProvider: React.FC<{ children: React.ReactNode }> = ({ c
                                 try {
                                   const frame = sampleBatch[si] as any;
                                   const v = frame && frame[key] !== undefined ? Number(frame[key]) : (frame && frame._raw && frame._raw[key] !== undefined ? Number(frame._raw[key]) : 0);
-                                  if (LOG) try { console.debug('[ChannelData] posting sample to worker', { ch: idx, sample: v }); } catch (e) { }
-                                  ww.postMessage({ sample: Number(v) || 0, sampleRate: samplingRate ?? 256, fftSize: 256, samplesPerFFT: 10, smootherWindow: 128, mode: 'simple' });
+                                  if (LOG) try { console.debug('[ChannelData] posting sample to shared worker', { ch: idx, sample: v }); } catch (e) { }
+                                  ww.postMessage({ channel: idx, sample: Number(v) || 0, sampleRate: samplingRate ?? 256, fftSize: 256, samplesPerFFT: 10, smootherWindow: 128, mode: 'simple' });
                                 } catch (e) { /* per-sample guard */ }
                               }
                             } catch (err) { /* per-channel guard */ }
