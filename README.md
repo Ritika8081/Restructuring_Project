@@ -1,5 +1,7 @@
 # 📊 Widget Dashboard - Modular System
 
+![Chords Playground](Public/images/Node_PlayGround.png)
+
 A modular, drag-and-drop widget dashboard built with **Next.js**, **TypeScript**, and **Tailwind CSS**. Originally a 1000+ line monolithic component, now restructured into 8 clean, maintainable modules.
 
 ## ✔ Best scalable pattern (Used in Node-RED, LabVIEW, MaxMSP, BioSignal tools)
@@ -69,7 +71,7 @@ src/
 ## ✨ Key Features
 
 - **🖱️ Drag & Drop**: Intuitive widget positioning with collision detection
-- **📈 Real-time Charts**: WebGL-powered Signal, FFT, Radar, and Bar charts  
+- **📈 Real-time Charts**: WebGL-powered Signal, FFT, Radar, and Bar charts
 - **🔧 Modular Design**: Clean architecture with single-responsibility components
 - **💾 Import/Export**: Save and load dashboard layouts as JSON files
 - **🎯 Channel Management**: Up to 6 channels per signal widget
@@ -78,6 +80,7 @@ src/
 ## 📚 Quick Reference
 
 Key files and their purposes:
+
 - `src/app/widgets/page.tsx` - Main dashboard component (~300 lines)
 - `src/components/DraggableWidget.tsx` - Individual widget logic (~330 lines)
 - `src/components/WidgetPalette.tsx` - System controls (~260 lines)
